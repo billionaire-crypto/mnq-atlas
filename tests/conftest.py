@@ -122,6 +122,52 @@ def source_builder() -> SourceBuilder:
     return SourceBuilder()
 
 
+# --- synthetic 5-min session arrays for the Phase 2 time-model tests ----------------
+
+def ct_ns(stamp: str) -> int:
+    """Exchange-local wall clock -> int64 UTC nanoseconds."""
+    return int(ct(stamp).value)
+
+
+def five_minute_times(start: str, end_exclusive: str) -> list[str]:
+    """'HH:MM' labels every 5 minutes in [start, end_exclusive)."""
+    to_minutes = lambda v: int(v[:2]) * 60 + int(v[3:])  # noqa: E731
+    return [
+        f"{m // 60:02d}:{m % 60:02d}"
+        for m in range(to_minutes(start), to_minutes(end_exclusive), 5)
+    ]
+
+
+def synthetic_session_bars(
+    trade_date: str,
+    *,
+    missing: tuple[str, ...] = (),
+    partial: dict[str, int] | None = None,
+    first_label: str = "08:25",
+    last_label_exclusive: str = "15:00",
+):
+    """5-min-bar arrays for one session, shaped like the bars_5m store columns.
+
+    Returns ``(session_id, ts_event_ns, observed_1m, expected_1m)`` covering CT
+    labels ``[first_label, last_label_exclusive)`` — by default 08:25 (the bar
+    whose close is the first eligible τ = 08:30 under handoff §6.5 Ruling 1)
+    through 14:55. ``missing`` drops labels entirely; ``partial`` maps a label to
+    an ``observed_1m_components`` count below five.
+    """
+    import numpy as np
+
+    partial = partial or {}
+    times = [t for t in five_minute_times(first_label, last_label_exclusive)
+             if t not in set(missing)]
+    ts = np.asarray([ct_ns(f"{trade_date} {t}") for t in times], dtype=np.int64)
+    session = np.full(len(times), int(trade_date.replace("-", "")), dtype=np.int32)
+    expected = np.full(len(times), 5, dtype=np.int8)
+    observed = np.asarray(
+        [partial.get(t, 5) for t in times], dtype=np.int8
+    )
+    return session, ts, observed, expected
+
+
 # --- the real build, when present --------------------------------------------------
 
 REAL_STORE_ROOT = REPO_ROOT / "data"

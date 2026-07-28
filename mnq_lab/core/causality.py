@@ -1,0 +1,132 @@
+"""Event-time causality windows (spec §4.1) — market-free.
+
+`core/` knows nothing about markets (spec §16.3): no session, contract, RTH, or
+phase concept appears in this module. Everything is integer UTC nanoseconds; the
+interval length and the horizon arrive as parameters. The spine and outcomes
+layers translate market wall-clock rules into these primitives.
+
+The rule this module implements (spec §4.1, verbatim):
+
+    At observation time τ, a conditioner may use every return whose ending
+    timestamp ≤ τ and none ending after τ. An outcome may use only the path
+    strictly after τ.
+
+Two consequences that are *different rules and must not be conflated* (§4.1):
+
+- an interval ending exactly at τ is **inside** the conditioner window — in market
+  terms, the anchor bar's own return enters the state;
+- an interval starting at or after τ is the outcome path; the interval ending at τ
+  (which *starts* before τ) is **excluded** from it — the anchor bar's own
+  high/low never enters its own future excursion. The path of the interval that
+  starts exactly at τ lies strictly after τ, so it is included.
+
+`shift()` is one possible implementation of the rule; **it is never the
+specification** (§14 struck `shift(1)`-as-spec). These functions implement the
+rule directly on interval-end and interval-start timestamps, so they remain
+correct on irregular grids, across gaps, and across daylight-saving transitions
+(a UTC nanosecond does not observe DST).
+"""
+
+from __future__ import annotations
+
+import numpy as np
+
+from mnq_lab import SpineError
+
+__all__ = [
+    "interval_end_ns",
+    "conditioner_input_mask",
+    "outcome_interval_mask",
+    "required_interval_starts",
+    "interval_presence",
+]
+
+
+def _as_int64(values: np.ndarray, name: str) -> np.ndarray:
+    array = np.asarray(values)
+    if array.dtype != np.int64:
+        raise SpineError(
+            f"{name} must be int64 UTC nanoseconds, got dtype {array.dtype}. "
+            "pandas 3.0 silently produces datetime64[us]; convert with "
+            '.to_numpy(dtype="datetime64[ns]").view("int64") upstream.'
+        )
+    return array
+
+
+def _validate_window(horizon_ns: int, interval_ns: int) -> None:
+    if interval_ns <= 0:
+        raise SpineError(f"interval_ns must be positive, got {interval_ns}")
+    if horizon_ns <= 0:
+        raise SpineError(f"horizon_ns must be positive, got {horizon_ns}")
+    if horizon_ns % interval_ns != 0:
+        raise SpineError(
+            f"horizon_ns={horizon_ns} is not a whole number of intervals of "
+            f"interval_ns={interval_ns}; a partial trailing interval would make "
+            "the window boundary ambiguous"
+        )
+
+
+def interval_end_ns(interval_start_ns: np.ndarray, interval_ns: int) -> np.ndarray:
+    """End timestamp of each interval: label + length.
+
+    The label is the interval OPEN (spec §4, finding E); the interval is
+    ``[t, t + interval_ns)``. The end timestamp is the observation time of
+    everything realized inside the interval.
+    """
+    starts = _as_int64(interval_start_ns, "interval_start_ns")
+    if interval_ns <= 0:
+        raise SpineError(f"interval_ns must be positive, got {interval_ns}")
+    return starts + np.int64(interval_ns)
+
+
+def conditioner_input_mask(end_ns: np.ndarray, tau_ns: int) -> np.ndarray:
+    """True where a quantity whose realization ends at ``end_ns`` is usable at τ.
+
+    Inclusive at the boundary: an interval ending exactly at τ is realized *by* τ
+    and is the freshest information available (spec §4.1). Everything ending
+    after τ — even by one nanosecond — is excluded.
+    """
+    ends = _as_int64(end_ns, "end_ns")
+    return ends <= np.int64(tau_ns)
+
+
+def outcome_interval_mask(
+    interval_start_ns: np.ndarray, tau_ns: int, horizon_ns: int, interval_ns: int
+) -> np.ndarray:
+    """True for intervals belonging to the outcome window ``[τ, τ + horizon)``.
+
+    An interval starting exactly at τ covers path strictly after τ, so it is
+    included. The interval *ending* at τ starts before τ and is excluded — its
+    extremes are realized history, not outcome (spec §4.1).
+    """
+    starts = _as_int64(interval_start_ns, "interval_start_ns")
+    _validate_window(horizon_ns, interval_ns)
+    tau = np.int64(tau_ns)
+    return (starts >= tau) & (starts < tau + np.int64(horizon_ns))
+
+
+def required_interval_starts(tau_ns: int, horizon_ns: int, interval_ns: int) -> np.ndarray:
+    """The complete label grid of the outcome window ``[τ, τ + horizon)``.
+
+    For the §4.1 worked example (τ = 08:35 CT, Δ = 15 min, 5-min intervals) this
+    is exactly the labels 08:35, 08:40, 08:45 — ``horizon/interval`` labels, the
+    last one starting at ``τ + horizon − interval``.
+    """
+    _validate_window(horizon_ns, interval_ns)
+    return np.arange(
+        np.int64(tau_ns), np.int64(tau_ns) + np.int64(horizon_ns), np.int64(interval_ns)
+    )
+
+
+def interval_presence(
+    present_start_ns: np.ndarray, required_start_ns: np.ndarray
+) -> np.ndarray:
+    """Boolean mask over ``required_start_ns``: which required labels exist.
+
+    Presence accounting only — no fill, no bridge, no tolerance. A required label
+    is either present exactly or absent (spec §7.1: "exact fixed timestamp or
+    dropping the anchor"; §14 struck tolerance windows).
+    """
+    present = _as_int64(present_start_ns, "present_start_ns")
+    required = _as_int64(required_start_ns, "required_start_ns")
+    return np.isin(required, present)

@@ -202,11 +202,19 @@ def gate_five_minute_equality(
 
 # --- gate 3 -------------------------------------------------------------------------
 
-def gate_symbol_classification(manifest: dict[str, Any]) -> dict[str, Any]:
+def gate_symbol_classification(
+    manifest: dict[str, Any], source_csv: Path | None = None
+) -> dict[str, Any]:
     """Gate 3: the recorded classification is an exhaustive, exact partition.
 
     Spec §14 struck "assert ~1.6% spread rows". This checks membership and exact
     counts, never a proportion.
+
+    With `source_csv` supplied (the CLI runner always supplies it), the source's symbol
+    column is re-scanned and the recorded per-symbol counts are compared **value for
+    value** — closing the audit-M1 residual where per-symbol counts altered while
+    preserving their total passed the list-consistency checks. Without the source only
+    list consistency is verifiable, which is what the manifest-only unit tests cover.
     """
     block = manifest.get("symbol_classification")
     if not block:
@@ -276,9 +284,46 @@ def gate_symbol_classification(manifest: dict[str, Any]) -> dict[str, Any]:
             "rows are unaccounted for."
         )
 
+    per_symbol_verified = False
+    if source_csv is not None:
+        source_csv = Path(source_csv)
+        if not source_csv.is_file():
+            raise SpineError(
+                f"GATE 3 FAILED: source CSV not found at {source_csv}; per-symbol "
+                "counts cannot be verified and the gate does not pass unverified "
+                "(spec §16.4.3)."
+            )
+        observed: dict[str, int] = {}
+        for chunk in pd.read_csv(
+            source_csv, usecols=["symbol"], dtype={"symbol": "string"}, chunksize=1_000_000
+        ):
+            for symbol, count in chunk["symbol"].value_counts().items():
+                observed[str(symbol)] = observed.get(str(symbol), 0) + int(count)
+        recorded = {**{s: int(c) for s, c in retained.items()},
+                    **{s: int(c) for s, c in rejected.items()}}
+        if observed != recorded:
+            differing = sorted(
+                symbol
+                for symbol in set(observed) | set(recorded)
+                if observed.get(symbol) != recorded.get(symbol)
+            )
+            examples = {
+                symbol: {
+                    "recorded": recorded.get(symbol),
+                    "source": observed.get(symbol),
+                }
+                for symbol in differing[:5]
+            }
+            raise SpineError(
+                f"GATE 3 FAILED: {len(differing)} per-symbol counts disagree with the "
+                f"source. First examples: {examples}"
+            )
+        per_symbol_verified = True
+
     return {
         "gate": "symbol_classification",
         "status": "pass",
+        "per_symbol_counts_verified_against_source": per_symbol_verified,
         "retained_symbol_count": block["retained_symbol_count"],
         "rejected_spread_symbol_count": block["rejected_spread_symbol_count"],
         "distinct_symbol_count": block["distinct_symbol_count"],
@@ -461,7 +506,9 @@ def run_all_gates(
     results = [
         gate_roll_list_equality(manifest["rolls"], fixture_path),
         gate_five_minute_equality(locked_5m, reference_csv),
-        gate_symbol_classification(manifest),
+        # The CLI runner always verifies per-symbol counts against the source itself;
+        # a missing source fails the gate rather than degrading it (audit M1).
+        gate_symbol_classification(manifest, Path(manifest["source"]["path"])),
         gate_roll_causality(exploration_5m, manifest),
     ]
     return {"status": "pass", "gates": results}

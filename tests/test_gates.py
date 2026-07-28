@@ -160,6 +160,44 @@ def test_negative_case_gate_3_catches_row_totals_disagreeing_with_the_lists(
         gate_symbol_classification(manifest)
 
 
+def test_gate_3_report_confirms_source_verification_ran(gate_report):
+    """The CLI runner must verify per-symbol counts against the source, not lists only."""
+    assert gate_report["gates"][2]["per_symbol_counts_verified_against_source"] is True
+
+
+def test_negative_case_gate_3_catches_per_symbol_counts_altered_with_same_total(
+    exploration_5m,
+):
+    """Audit M1's residual attack: shift counts between symbols, preserving every
+    aggregate. List-consistency passes by construction; only the source rescan can
+    catch it — so it must."""
+    from pathlib import Path
+
+    from mnq_lab.spine.gates import gate_symbol_classification
+
+    manifest = json_roundtrip(exploration_5m.manifest)
+    block = manifest["symbol_classification"]
+    symbols = list(block["retained_symbols"])
+    block["retained_symbols"][symbols[0]] += 7
+    block["retained_symbols"][symbols[1]] -= 7
+
+    # Sanity: the manifest-only checks cannot see this (documented limitation)...
+    assert gate_symbol_classification(manifest)["status"] == "pass"
+    # ...and the source rescan does.
+    source = Path(manifest["source"]["path"])
+    with pytest.raises(SpineError, match="per-symbol counts disagree with the source"):
+        gate_symbol_classification(manifest, source)
+
+
+def test_negative_case_gate_3_fails_when_the_source_is_absent(exploration_5m, tmp_path):
+    """An unverifiable gate does not pass (spec §16.4.3)."""
+    from mnq_lab.spine.gates import gate_symbol_classification
+
+    manifest = json_roundtrip(exploration_5m.manifest)
+    with pytest.raises(SpineError, match="cannot be verified"):
+        gate_symbol_classification(manifest, tmp_path / "gone.csv")
+
+
 def json_roundtrip(manifest):
     """Deep copy via JSON so mutations cannot leak into the mmap'd manifest."""
     import json

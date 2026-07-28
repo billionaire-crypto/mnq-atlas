@@ -76,15 +76,16 @@ skips if the originals are unreachable (D5).
 | C | 28 rolls, 2019-06-18 → 2026-03-18 | identical | **confirmed** |
 | C | `trigger = effective − 1` | false as days, true as *sessions* | **D9** |
 | D | 87 symbols, outrights 98.4% | 87 = 32 + 55, 98.4198% | **confirmed** |
-| E | `ts_event` is bar OPEN | last label 15:59, none in [16:00,17:00), first 17:00 | **confirmed** |
+| E | `ts_event` is bar OPEN | last label 15:59, first after break 17:00; the *raw source* contains exactly one label inside [16:00,17:00) — the D4 row, excluded from the chain | **confirmed, with the D4 exception** |
 | F | RTH = 71.2% of volume | 71.70–73.79% by era; no population gives 71.2% | **D10** |
 | F | 08:30 CT jump, day's highest minute | ~5.8× jump, highest minute on every population | **confirmed** |
 
 Determinism: two builds from the same source produced 44/44 byte-identical column files.
-The manifests differed in exactly one field — `environment.commit`, because a commit
-landed between the builds. Spec §13 test 17 requires byte-identity only when the
-environment fingerprint matches, so this is the specified behaviour *and* it demonstrates
-the fingerprint is live rather than decorative.
+Manifest drift was confined to the **environment fingerprint fields** — `commit` and
+`dirty` (a commit landed between the builds, and the working tree state differed with
+it); an external audit confirmed no field outside `environment` differed. Spec §13 test
+17 requires byte-identity only when the environment fingerprint matches, so this is the
+specified behaviour *and* it demonstrates the fingerprint is live rather than decorative.
 
 ## Not verified
 
@@ -97,6 +98,25 @@ the fingerprint is live rather than decorative.
   way, and the exclusion is now evidence-backed rather than assumed benign.
 - Spec §11 says the exploration tier is "~985 sessions"; it is **1,009**. The tilde makes
   this approximate rather than a contradiction, but nothing should quote 985.
+
+## External audit (2026-07-28) and resolutions
+
+An independent adversarial audit returned **FAIL** on the original gate claims while
+confirming the data artifacts reproduce byte-identically (44/44 `.npy` files). Its
+findings were correct; the fixes below each make a gate stricter, never looser. All are
+in commit `67aebdc` and its follow-up.
+
+| Finding | What the audit showed | Resolution |
+|---|---|---|
+| H1 (high) | The CLI Gate 4 checked only store observables; a same-day selector producing one contract per session passed | `gate_roll_causality` now executes the two-version causality fixture against the real selector, with an inert-fixture guard and a leaky-selector power guard. The audit's exact attack, replayed, now raises `GATE 4 FAILED` |
+| H2 (high) | With `data/` absent (it is git-ignored), pytest skipped all 63 real-store tests and exited green | Real-store fixtures `pytest.fail` instead of skip. A clean clone now exits 1 with 68 loud failures carrying the build command |
+| M1 (medium) | Gate 3 accepted `distinct_symbol_count = 999` and per-symbol counts altered under a preserved total | All aggregates are recomputed from the listed partition, and the CLI runner re-scans the source's symbol column to verify per-symbol counts value-for-value (a missing source fails the gate). Both attacks, replayed, now raise. The manifest-only layer still cannot see a total-preserving shuffle — that limitation is documented in the docstring and asserted by a test |
+| M2 (medium) | A YAML declaring `Europe/London` / a shifted break would build under the vendored Chicago rules while the manifest documented the YAML's | `SpineConstants` fails closed if `session_tz` or `maintenance_break_ct` diverges from what the vendored mask implements. Changing them requires a new pipeline version with a ledger entry |
+| L1 (low) | "Only `environment.commit` differed" was incomplete — `environment.dirty` differed too | Determinism paragraph above corrected to "environment fingerprint fields" |
+| NOTE | "None in [16:00,17:00)" needs the D4 exception; the seal is friction, not structure (indirect string construction defeats the AST scan) | Verification table above corrected. The seal's honest scope was already stated in `test_seal_guard.py` and spec §11; no change — the audit confirmed the disclaimer is accurate |
+
+Post-fix state: 229 tests pass, 5 xfail. Every audit attack was replayed against the
+hardened gates and raised; positive controls still pass.
 
 ## Next phase
 

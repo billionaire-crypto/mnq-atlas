@@ -192,6 +192,49 @@ reading; no code was written against it.
 
 ---
 
+## D10 — Finding F's percentages do not reproduce on any population — `OPEN`
+
+**Spec §3 finding F (marked "Computed"):** *"RTH `[08:30, 15:00)` CT = **71.2%** of
+volume. 08:29 → 08:30 volume jumps 0.146% → 0.724%."*
+
+**Measured (2026-07-28)**, volume share of RTH and of the two boundary minutes, over
+every population I could construct:
+
+| population | RTH share | 08:29 | 08:30 |
+|---|---|---|---|
+| spec §3 finding F | **71.2%** | **0.146%** | **0.724%** |
+| active chain, full 6.9y | 72.8511% | 0.1134% | 0.6572% |
+| active chain, exploration tier 2019–2023 | 71.6971% | 0.0980% | 0.6614% |
+| active chain, locked tier 2023–2026 | 73.7909% | 0.1260% | 0.6538% |
+| raw source, all 87 symbols | 72.7950% | 0.1136% | 0.6587% |
+| raw source, all outrights (not only active) | 72.7999% | — | — |
+
+No population reproduces 71.2%; the closest is the exploration tier at 71.70%, still
+0.5 pp away. The boundary-minute figures do not reproduce either.
+
+**What *is* confirmed, on every population without exception:**
+
+- 08:30 CT is the **highest-volume minute of the trading day**;
+- the 08:29 → 08:30 transition is a jump of roughly 5× (spec 4.96×, measured 5.80×);
+- the RTH share sits in a 71.7–73.8% band depending on era.
+
+**Assessment.** Finding F is load-bearing only for *where the RTH boundary is*, and that
+conclusion is robust — the jump is unambiguous and lands on 08:30 CT in every slice. The
+specific percentages are decorative and are not reproducible from this source. They were
+presumably computed on an earlier vintage, a different denominator, or a subset that is
+no longer identifiable.
+
+**Not verified:** which population produces 71.2%. I could not find one, and I am not
+going to search for a slice that matches the number — that would be fitting the
+population to the answer.
+
+**Impact:** none on Phase 1. Phase 2 uses the RTH *boundary*, which is confirmed. No
+report should quote 71.2%; quote the measured band and the population it came from.
+Nothing in `analysis_constants_v1.yaml` encodes these percentages, so no ledger entry is
+required — but §3 of the frozen spec should be corrected in a future revision.
+
+---
+
 ## D5 — `data_pipeline.py` imports torch at module scope — `ACCEPTED-DEVIATION`
 
 Spec §16.2 says to reuse `_sha256_file` and `_cme_session_mask` from `data_pipeline.py`.

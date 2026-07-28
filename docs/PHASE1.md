@@ -1,0 +1,106 @@
+# Phase 1 — Data spine, BarStore, fail-closed gates
+
+Spec §5 and §15 row 1. Gate to pass before Phase 2: §13 tests 3, 4, 5, 18.
+
+## Result
+
+All four fail-closed gates pass against the real source. 217 tests pass, 5 xfail
+(registered placeholders for later-phase prefix-invariance targets). No
+strategy-selection, ranking, optimization, or P&L functionality was introduced.
+
+| Gate | Check | Result |
+|---|---|---|
+| 1 | Rebuilt roll list == verified fixture | 28 rolls, exact match, 2019-06-18 → 2026-03-18 |
+| 2 | 5-min bars row-for-row identical to reference CSV | 211,968 rows, all 8 columns |
+| 3 | Symbol classification exhaustive and exact | 32 retained + 55 spread = 87 distinct |
+| 4 | Roll causality | 1,009 sessions, one contract each; 17:00 CT divergence fixture |
+
+## Reproducible commands
+
+```powershell
+# Build both tiers, 1-minute and 5-minute (~2m20s)
+python -m mnq_lab.spine.build `
+  --source-csv "C:\Users\kyawz\Downloads\GLBX-20260331-885WT5W7KA\glbx-mdp3-20100606-20260329.ohlcv-1m.csv" `
+  --out data
+
+# Four fail-closed gates against an existing build
+python -m mnq_lab.spine.gates --store data
+
+# Tests
+python -m pytest tests -q
+
+# Determinism: rebuild elsewhere and compare bytes
+python -m mnq_lab.spine.build --source-csv "<same source>" --out data_rebuild --quiet
+```
+
+## Design decisions worth knowing
+
+**Memory.** Two streaming passes plus per-year shards, as §16.2 directs. Pass 1
+validates and aggregates session volume (dict-bounded, not row-bounded). Pass 2 keeps
+only the causally selected contract and flushes one `.npz` shard per trade-date year. A
+trade date belongs to exactly one year, so no `(trade_date, symbol)` resample group ever
+spans a shard. Peak memory is one year of rows regardless of corpus length.
+
+**Prices.** Stored as exact `int32` ticks. `core/units.to_quanta` raises on any price
+that is not an exact multiple of the tick size — it never rounds. 0.25 is a dyadic
+rational, so the integrality test is a true test rather than a near-check.
+
+**Timestamps.** UTC nanoseconds, explicitly. pandas 3.0's `to_datetime(..., utc=True)`
+returns `datetime64[us]`, so a build that let the unit be inferred would silently store
+microseconds — values 1000× too small. `test_barstore_roundtrip` asserts every 5-minute
+timestamp is divisible by 300e9 ns, which microsecond storage would fail.
+
+**Component coverage.** Written during resample. `expected_1m_components` is *computed*
+from CME-session and same-trade-date membership of each of the five one-minute labels,
+not assumed to be 5. It measured 5 everywhere, which is the expected result given the
+session bounds are five-minute aligned — but it is now a verified fact rather than an
+assertion in prose.
+
+**`rollover` is window-relative.** It is derived per store from `symbol`, over exactly
+the rows that store contains. See `docs/DISCREPANCIES.md` D7 — this is the one-row trap
+that would otherwise fail Gate 2 and invite a tolerance.
+
+**Vendored helpers.** `_sha256_file` and `_cme_session_mask` are copied into
+`spine/vendored.py` rather than imported, because `data_pipeline.py` pulls torch at
+module scope. `tests/test_vendored_equivalence.py` proves bit-identical behaviour across
+an exhaustive minute grid spanning both US DST transitions, and **fails** rather than
+skips if the originals are unreachable (D5).
+
+## Verification of spec claims
+
+§16.7 instructs checking anything the spec asserts that is checkable.
+
+| Finding | Claim | Measured | Verdict |
+|---|---|---|---|
+| B | 0 explicit zero-volume rows in 3,665,228 | 0 | **confirmed** |
+| C | 28 rolls, 2019-06-18 → 2026-03-18 | identical | **confirmed** |
+| C | `trigger = effective − 1` | false as days, true as *sessions* | **D9** |
+| D | 87 symbols, outrights 98.4% | 87 = 32 + 55, 98.4198% | **confirmed** |
+| E | `ts_event` is bar OPEN | last label 15:59, none in [16:00,17:00), first 17:00 | **confirmed** |
+| F | RTH = 71.2% of volume | 71.70–73.79% by era; no population gives 71.2% | **D10** |
+| F | 08:30 CT jump, day's highest minute | ~5.8× jump, highest minute on every population | **confirmed** |
+
+Determinism: two builds from the same source produced 44/44 byte-identical column files.
+The manifests differed in exactly one field — `environment.commit`, because a commit
+landed between the builds. Spec §13 test 17 requires byte-identity only when the
+environment fingerprint matches, so this is the specified behaviour *and* it demonstrates
+the fingerprint is live rather than decorative.
+
+## Not verified
+
+- Whether the vendor's bar-generation rule omits no-trade intervals. Finding B says 0
+  explicit zero-volume rows were observed; that does **not** establish the rule, and §6
+  depends on not claiming it does.
+- Which population produces finding F's 71.2%. I did not search for a slice that matches
+  the number — that would be fitting the population to the answer.
+- Why the vendor emitted one bar inside the maintenance break (D4). It is excluded either
+  way, and the exclusion is now evidence-backed rather than assumed benign.
+- Spec §11 says the exploration tier is "~985 sessions"; it is **1,009**. The tilde makes
+  this approximate rather than a contradiction, but nothing should quote 985.
+
+## Next phase
+
+Phase 2 — time model, clock-window engine, completion accounting. Gate: §13 tests 1 and
+2. Starting point: `mnq_lab/core/causality.py` (the event-time rule, `shift()` is never
+the specification) and `mnq_lab/spine/calendar.py` (anchor observation time = bar label +
+`bar_seconds`; time-of-day buckets key on observation time, never the label).

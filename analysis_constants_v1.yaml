@@ -1,0 +1,117 @@
+spec_version: 6
+program_id: mnq-atlas-001
+
+time:
+  storage_tz: UTC
+  session_tz: America/Chicago
+  bar_label: open                 # ts_event = interval start
+  rth_start_ct: "08:30"
+  rth_end_ct:   "15:00"
+  maintenance_break_ct: ["16:00", "17:00"]
+  tick_size: 0.25
+
+session_phases:                   # observation-time CT
+  open:      ["08:30", "09:00"]
+  morning:   ["09:00", "10:30"]
+  midday:    ["10:30", "12:30"]
+  afternoon: ["12:30", "14:00"]
+  close:     ["14:00", "15:00"]
+
+horizons_minutes: [15, 30, 60]
+
+volatility:
+  ewma_halflife_bars: 78
+  seasonal_warmup_sessions: 60
+  seasonal_min_bucket_obs: 30
+  seasonal_shrink_k: 30           # weight = n / (n + k)
+  tercile_scheme: warmup_then_expanding
+  independent_estimator:
+    kind: rolling_mad
+    window_bars: 78
+    scale_factor: 1.4826
+    require_contiguous: true
+
+alternative_definitions:
+  tercile_shift_pctpoints: [-5, -2, 2, 5]
+  rolling_window_sessions: [60]
+  ewma_halflife_bars: [39, 156]
+
+estimands:
+  path: fully_labeled_1m_grid     # alt: observed_bar_path
+  weighting_primary: session_equal_weighted
+  population_primary: prospective_cell
+  population_diagnostic: common_session_paired
+  population_formal: standardized_shared_population
+
+completion:
+  source_population:
+    rth_only: true
+    years: ["2019-05-05", "2023-03-29"]
+    include_holidays_flagged: true
+    include_thin_cells: true
+  rule: "min_completion = max(0.90, floor(s00_p05 * 100) / 100)"
+  horizon_specific: true          # min_completion_h15 / h30 / h60
+  max_imbalance_absolute: 0.05
+
+positivity:
+  min_baseline_anchors_per_stratum: 30
+  min_contributing_sessions: 20
+  max_single_anchor_weight_share: 0.02
+  max_weight_cv: 2.0
+  max_unsupported_target_mass: 0.05
+
+bootstrap:
+  scheme: whole_session_stationary
+  mean_block_sessions_primary: 5
+  block_sensitivity: [1, 5, 10, 20]
+  truncate_partial_session: false
+
+interaction:
+  reference_phase: midday
+  reference_vol: mid
+  support: four_cell_common_sessions
+
+inference:
+  formal_tests: [vol_given_phase]
+  descriptive_only: [phase_given_vol, interaction]
+  null:
+    kind: whole_session_trajectory_reassignment
+    strata: [calendar_quarter, liquidity_era]
+    min_sessions_per_stratum: 20
+    exclude_early_close: true
+    exclude_holidays: true
+    without_replacement: true
+    disallow_self_assignment: true
+    joint_across_outputs: true
+  permutations_final: 4999
+  permutations_dev_min: 199
+  p_value: "(1 + #{T_b >= T_obs}) / (B + 1)"
+  sided: one_sided_upper
+  rng: PCG64
+  rng_seed: 20260728
+  early_stopping: false
+
+surface:
+  definition: "one outcome x one horizon x one statistic x one contrast x one estimand over 5x3"
+  primary:
+    outcome: downward_excursion
+    horizon_minutes: 30
+    statistic: q90
+    contrast: vol_effect_given_phase
+    estimand: prospective_cell
+  z_threshold_positive:  1.0
+  z_threshold_negative: -1.0
+  adjacency: rook            # 4-adjacent, NOT diagonal
+  use_abs_z: false
+  ordered_families: [session_phase, vol_rel_tercile, liquidity_era]
+  unordered_families: [day_type]
+
+forward:
+  alpha_per_vintage: 0.01
+  max_confirmatory_tests: 5
+  reset_allowed: false
+
+reporting:
+  significance_markers: false
+  require_n_sessions_beside_n_anchors: true
+  require_weight_ess: true

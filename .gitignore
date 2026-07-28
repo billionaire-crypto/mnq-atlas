@@ -1,0 +1,22 @@
+# Generated data stores — never committed (§16.4, repository policy)
+data/
+*.npy
+*.npz
+
+# Source datasets are read-only and external; never vendored into the repo
+*.csv
+!tests/fixtures/**/*.csv
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

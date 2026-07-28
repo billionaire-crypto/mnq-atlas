@@ -128,11 +128,25 @@ REAL_STORE_ROOT = REPO_ROOT / "data"
 
 
 def _require_real_store(corpus: Corpus, frequency: str) -> BarStore:
+    """Open a real store, or FAIL the test — never skip.
+
+    Audit finding H2 (2026-07-28): with `data/` absent (it is git-ignored), the suite
+    previously skipped all 63 real-store tests and exited green, so a clean checkout
+    could receive a passing pytest run without a single Phase 1 acceptance gate
+    executing against real artifacts. That is a fallback path around a gate
+    (spec §16.4.3). The stores are a Phase 1 deliverable; their absence is a failure
+    of the thing under test, not an environmental excuse.
+    """
     path = store_path(REAL_STORE_ROOT, corpus, frequency)
     if not (path / "manifest.json").is_file():
-        pytest.skip(
-            f"no built store at {path}. Run:\n"
-            "  python -m mnq_lab.spine.build --source-csv <source> --out data"
+        pytest.fail(
+            f"Phase 1 acceptance requires the built store at {path} and it is absent. "
+            "Real-store gates fail closed rather than skip (audit H2; spec §16.4.3). "
+            "Build it with:\n"
+            "  python -m mnq_lab.spine.build --source-csv "
+            '"C:\\Users\\kyawz\\Downloads\\GLBX-20260331-885WT5W7KA\\'
+            'glbx-mdp3-20100606-20260329.ohlcv-1m.csv" --out data',
+            pytrace=False,
         )
     return BarStore.open(path)
 

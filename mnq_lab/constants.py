@@ -115,6 +115,33 @@ class SpineConstants:
         if self.tick_size <= 0:
             raise SpineError(f"time.tick_size must be positive, got {self.tick_size}")
 
+        # Audit finding M2 (2026-07-28): the session mask and trade-date rule are
+        # vendored verbatim from the prior pipeline (Gate 2's row-for-row identity
+        # depends on them staying byte-equivalent), so they hardcode America/Chicago
+        # and the 16:00-17:00 CT maintenance interval. A YAML declaring different
+        # session rules would previously build under the vendored rules while the
+        # manifest reported the YAML's — two data definitions in one artifact. Fail
+        # closed instead: changing these constants requires a new pipeline version and
+        # a ledger entry, not a silent divergence between config and runtime.
+        from mnq_lab.spine.vendored import CME_TIMEZONE
+
+        vendored_break = ("16:00", "17:00")  # _cme_session_mask: 16*60 / 17*60
+        if self.session_tz != CME_TIMEZONE:
+            raise SpineError(
+                f"time.session_tz is {self.session_tz!r} but the vendored session "
+                f"runtime implements {CME_TIMEZONE!r}. The build would filter under "
+                "one rule and document another (audit M2). Changing the session "
+                "timezone requires a new pipeline version with a ledger entry."
+            )
+        if self.maintenance_break_ct != vendored_break:
+            raise SpineError(
+                f"time.maintenance_break_ct is {list(self.maintenance_break_ct)} but "
+                f"the vendored session mask implements {list(vendored_break)} CT. "
+                "The build would filter under one rule and document another (audit "
+                "M2). Changing the break requires a new pipeline version with a "
+                "ledger entry."
+            )
+
 
 def load_spine_constants(path: Path | None = None) -> SpineConstants:
     return SpineConstants(load_constants(path))

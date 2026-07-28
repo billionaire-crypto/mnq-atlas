@@ -30,6 +30,7 @@ import pandas as pd
 from mnq_lab import SpineError
 from mnq_lab.constants import REPO_ROOT, load_spine_constants
 from mnq_lab.core.units import to_quanta
+from mnq_lab.spine.rolls import build_causal_active_contract_map
 from mnq_lab.spine.seal import Corpus, store_path
 from mnq_lab.spine.store import BarStore
 from mnq_lab.spine.symbols import OUTRIGHT_PATTERN, SPREAD_PATTERN
@@ -230,6 +231,13 @@ def gate_symbol_classification(manifest: dict[str, Any]) -> dict[str, Any]:
     if overlap:
         raise SpineError(f"GATE 3 FAILED: symbols in both classes: {sorted(overlap)}")
 
+    # Every recorded aggregate is RECOMPUTED from the listed partition, never trusted.
+    # Audit finding M1 (2026-07-28): the previous version accepted a manifest whose
+    # distinct_symbol_count said 999 and whose row totals disagreed with the per-symbol
+    # lists, because it compared recorded numbers against each other instead of against
+    # the lists. Limitation, stated honestly: the per-symbol row values themselves are
+    # only verifiable at scan time against the source; this gate verifies that every
+    # aggregate is consistent with the lists and that the lists cover the source total.
     if block["retained_symbol_count"] != len(retained):
         raise SpineError(
             f"GATE 3 FAILED: retained_symbol_count is {block['retained_symbol_count']} "
@@ -240,8 +248,26 @@ def gate_symbol_classification(manifest: dict[str, Any]) -> dict[str, Any]:
             "GATE 3 FAILED: rejected_spread_symbol_count is "
             f"{block['rejected_spread_symbol_count']} but {len(rejected)} are listed"
         )
+    recomputed_distinct = len(retained) + len(rejected)
+    if block["distinct_symbol_count"] != recomputed_distinct:
+        raise SpineError(
+            f"GATE 3 FAILED: distinct_symbol_count is {block['distinct_symbol_count']} "
+            f"but the lists contain {recomputed_distinct} symbols"
+        )
+    recomputed_retained_rows = sum(int(count) for count in retained.values())
+    if block["retained_rows"] != recomputed_retained_rows:
+        raise SpineError(
+            f"GATE 3 FAILED: retained_rows is {block['retained_rows']} but the listed "
+            f"per-symbol counts sum to {recomputed_retained_rows}"
+        )
+    recomputed_rejected_rows = sum(int(count) for count in rejected.values())
+    if block["rejected_spread_rows"] != recomputed_rejected_rows:
+        raise SpineError(
+            f"GATE 3 FAILED: rejected_spread_rows is {block['rejected_spread_rows']} "
+            f"but the listed per-symbol counts sum to {recomputed_rejected_rows}"
+        )
 
-    total_rows = block["retained_rows"] + block["rejected_spread_rows"]
+    total_rows = recomputed_retained_rows + recomputed_rejected_rows
     source_rows = manifest["source"]["rows"]
     if total_rows != source_rows:
         raise SpineError(
@@ -263,21 +289,114 @@ def gate_symbol_classification(manifest: dict[str, Any]) -> dict[str, Any]:
 
 # --- gate 4 -------------------------------------------------------------------------
 
+def _causality_fixture(session_d_flips: bool) -> dict[tuple[str, str], int]:
+    """Per-session volume aggregates for the two-version Gate 4 fixture.
+
+    `daily_volume` is keyed by CME trade date, and a trade date's aggregate covers its
+    whole Globex session beginning 17:00 CT — so making session d's aggregate wholly
+    different IS the spec's "diverge from 17:00 CT at the start of session d" at this
+    layer. (The CSV-level 17:00 CT divergence, including the overnight-volume subtlety,
+    is additionally proven in tests/test_roll_causality.py.)
+    """
+    near, far = "MNQM1", "MNQU1"
+    sessions = ["2021-06-08", "2021-06-09", "2021-06-10", "2021-06-11"]
+    session_d = "2021-06-10"
+    volumes: dict[tuple[str, str], int] = {}
+    for trade_date in sessions:
+        flipped = session_d_flips and trade_date == session_d
+        volumes[(trade_date, near)] = 2 if flipped else 500
+        volumes[(trade_date, far)] = 20_000 if flipped else 3
+    return volumes
+
+
+def _run_causality_fixture() -> dict[str, Any]:
+    """Execute the real selector on the two-version fixture. Raises on any breach.
+
+    Audit finding H1 (2026-07-28): the previous version of this gate checked only
+    observable store properties, so `python -m mnq_lab.spine.gates` could report Gate 4
+    passed without ever executing the decisive fixture. This function closes that gap:
+    it calls `rolls.build_causal_active_contract_map` — the same function `build.py`
+    imports — directly.
+
+    Three assertions, each load-bearing:
+      1. session d's assignment is identical across the two versions (causality);
+      2. session d+1's assignment DIFFERS across versions (the divergence actually
+         reaches the map — without this, 1 passes vacuously on an inert fixture);
+      3. a deliberately leaky same-day selector produces DIFFERENT session-d
+         assignments on the same fixture (the fixture can detect the defect it exists
+         to detect — a gate that cannot fail is worse than no gate).
+    """
+    near, far = "MNQM1", "MNQU1"
+    session_d, session_after = "2021-06-10", "2021-06-11"
+    first_year = {near: 2021, far: 2021}
+
+    baseline = build_causal_active_contract_map(
+        _causality_fixture(session_d_flips=False), first_year
+    ).active
+    flipped = build_causal_active_contract_map(
+        _causality_fixture(session_d_flips=True), first_year
+    ).active
+
+    if baseline[session_d] != flipped[session_d] or baseline[session_d] != near:
+        raise SpineError(
+            f"GATE 4 FAILED: the selector assigned {flipped[session_d]!r} to session "
+            f"{session_d} when that session's own volume flipped ({baseline[session_d]!r} "
+            "without the flip). Session d's contract consumed session d's volume — the "
+            "selection is not causal (spec §5.1 gate 4)."
+        )
+    if baseline[session_after] == flipped[session_after]:
+        raise SpineError(
+            "GATE 4 FAILED (fixture inert): session d's flipped volume did not change "
+            f"session {session_after}'s assignment, so the fixture cannot distinguish "
+            "a causal selector from a non-causal one and the check above proved nothing."
+        )
+
+    def _leaky(volumes: dict[tuple[str, str], int]) -> str:
+        by_day: dict[str, dict[str, int]] = {}
+        for (trade_date, symbol), volume in volumes.items():
+            by_day.setdefault(trade_date, {})[symbol] = volume
+        day = by_day[session_d]
+        return max(day, key=lambda symbol: day[symbol])
+
+    leaky_baseline = _leaky(_causality_fixture(session_d_flips=False))
+    leaky_flipped = _leaky(_causality_fixture(session_d_flips=True))
+    if leaky_baseline == leaky_flipped:
+        raise SpineError(
+            "GATE 4 FAILED (self-check): a same-day selector was NOT caught by this "
+            "fixture, so the fixture has no detection power and Gate 4 is vacuous."
+        )
+
+    return {
+        "fixture_session_d": session_d,
+        "session_d_assignment": near,
+        "divergence_reached_next_session": [
+            baseline[session_after],
+            flipped[session_after],
+        ],
+        "leaky_selector_detected": True,
+    }
+
+
 def gate_roll_causality(store: BarStore, manifest: dict[str, Any]) -> dict[str, Any]:
-    """Gate 4, as observable on a built store.
+    """Gate 4: roll causality, tested directly (spec §5.1 gate 4).
 
-    Two properties are checkable here:
+    Three layers, all required:
 
-      a. every roll's effective trade date is strictly after its trigger trade date, so
-         no session's assignment consumed its own volume;
-      b. each CME trade date carries exactly one contract in the built bars — the
+      a. the synthetic two-version fixture executed against the real selector
+         (`_run_causality_fixture`) — the decisive test;
+      b. every roll's effective trade date is strictly after its trigger trade date, so
+         no recorded roll consumed the session it applies to;
+      c. each CME trade date carries exactly one contract in the built bars — the
          assignment is frozen for the whole Globex session and never recalculated at
          RTH.
 
-    Neither is sufficient on its own. The decisive test is the synthetic two-version
-    fixture diverging at 17:00 CT in `tests/test_roll_causality.py`; prefix invariance
-    alone does not establish causality (spec §5.1 gate 4).
+    Scope, stated honestly: layer (a) certifies the selector in `mnq_lab.spine.rolls`,
+    which is the function `build.py` imports. If a build bypassed that module entirely,
+    this gate would not see it — Gate 1's fixture equality and the full CSV-path test in
+    `tests/test_roll_causality.py` are the guards on that flank.
     """
+    fixture_report = _run_causality_fixture()
+
     for roll in manifest["rolls"]:
         trigger = roll.get("trigger_trade_date")
         effective = roll.get("effective_trade_date")
@@ -315,9 +434,10 @@ def gate_roll_causality(store: BarStore, manifest: dict[str, Any]) -> dict[str, 
         "status": "pass",
         "sessions_checked": int(len(np.unique(session_ids))),
         "rolls_checked": len(manifest["rolls"]),
+        "selector_fixture": fixture_report,
         "note": (
-            "observable properties only; the decisive 17:00 CT divergence fixture is "
-            "tests/test_roll_causality.py"
+            "certifies the selector in mnq_lab.spine.rolls plus store observables; the "
+            "full CSV-path 17:00 CT fixture is tests/test_roll_causality.py"
         ),
     }
 

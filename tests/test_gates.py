@@ -20,7 +20,13 @@ STORE_ROOT = REPO_ROOT / "data"
 @pytest.fixture(scope="module")
 def gate_report():
     if not (STORE_ROOT / "exploration" / "bars_5m" / "manifest.json").is_file():
-        pytest.skip("no built store; run python -m mnq_lab.spine.build --out data")
+        # Fail, never skip: a green suite with the gates unexecuted certifies nothing
+        # (audit H2; spec §16.4.3).
+        pytest.fail(
+            f"Phase 1 acceptance requires built stores under {STORE_ROOT}; run "
+            "python -m mnq_lab.spine.build --out data",
+            pytrace=False,
+        )
     return run_all_gates(STORE_ROOT)
 
 
@@ -71,6 +77,94 @@ def test_gate_4_checked_every_session(gate_report):
     gate = gate_report["gates"][3]
     assert gate["sessions_checked"] > 900  # ~985 exploration sessions per spec §11
     assert gate["rolls_checked"] == 28
+
+
+def test_gate_4_report_shows_the_selector_fixture_ran(gate_report):
+    """Audit H1: the CLI gate must execute the decisive fixture, not observe shapes."""
+    fixture = gate_report["gates"][3]["selector_fixture"]
+    assert fixture["leaky_selector_detected"] is True
+    diverged = fixture["divergence_reached_next_session"]
+    assert diverged[0] != diverged[1], "fixture was inert; the causality check is vacuous"
+
+
+def test_negative_case_gate_4_catches_a_same_day_selector(
+    exploration_5m, monkeypatch
+):
+    """Audit H1's exact attack: a selector using session d's own volume.
+
+    Swap the real selector for a leaky one inside the gates module and confirm the CLI
+    gate now fails — previously it returned pass because it never ran the selector.
+    """
+    from mnq_lab.spine import gates as gates_module
+    from mnq_lab.spine.rolls import RollMap
+
+    def leaky_map(daily_volume, first_year_by_symbol):
+        by_day = {}
+        for (trade_date, symbol), volume in daily_volume.items():
+            by_day.setdefault(trade_date, {})[symbol] = volume
+        active = {
+            trade_date: max(day, key=lambda symbol: day[symbol])
+            for trade_date, day in by_day.items()
+        }
+        return RollMap(active=active, rolls=[], expiries={})
+
+    monkeypatch.setattr(
+        gates_module, "build_causal_active_contract_map", leaky_map
+    )
+    with pytest.raises(SpineError, match="GATE 4 FAILED"):
+        gates_module.gate_roll_causality(exploration_5m, exploration_5m.manifest)
+
+
+def test_negative_case_gate_4_catches_an_inert_fixture(exploration_5m, monkeypatch):
+    """A selector that ignores volume entirely makes the fixture inert; the gate's
+    self-check must refuse to certify causality on evidence that cannot discriminate."""
+    from mnq_lab.spine import gates as gates_module
+    from mnq_lab.spine.rolls import RollMap
+
+    def constant_map(daily_volume, first_year_by_symbol):
+        sessions = sorted({trade_date for trade_date, _ in daily_volume})
+        return RollMap(
+            active={trade_date: "MNQM1" for trade_date in sessions},
+            rolls=[],
+            expiries={},
+        )
+
+    monkeypatch.setattr(
+        gates_module, "build_causal_active_contract_map", constant_map
+    )
+    with pytest.raises(SpineError, match="fixture inert"):
+        gates_module.gate_roll_causality(exploration_5m, exploration_5m.manifest)
+
+
+def test_negative_case_gate_3_catches_a_false_distinct_count(exploration_5m):
+    """Audit M1's exact attack: distinct_symbol_count = 999 previously passed."""
+    from mnq_lab.spine.gates import gate_symbol_classification
+
+    manifest = json_roundtrip(exploration_5m.manifest)
+    manifest["symbol_classification"]["distinct_symbol_count"] = 999
+    with pytest.raises(SpineError, match="distinct_symbol_count is 999"):
+        gate_symbol_classification(manifest)
+
+
+def test_negative_case_gate_3_catches_row_totals_disagreeing_with_the_lists(
+    exploration_5m,
+):
+    """Audit M1: per-symbol lists must sum to the recorded row totals."""
+    from mnq_lab.spine.gates import gate_symbol_classification
+
+    manifest = json_roundtrip(exploration_5m.manifest)
+    block = manifest["symbol_classification"]
+    first_symbol = next(iter(block["retained_symbols"]))
+    block["retained_symbols"][first_symbol] += 1  # lists no longer sum to the total
+    with pytest.raises(SpineError, match="per-symbol counts sum"):
+        gate_symbol_classification(manifest)
+
+
+def json_roundtrip(manifest):
+    """Deep copy via JSON so mutations cannot leak into the mmap'd manifest."""
+    import json
+
+    return json.loads(json.dumps(manifest))
 
 
 def test_negative_case_gate_4_detects_an_intrasession_contract_change(exploration_5m):

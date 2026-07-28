@@ -143,6 +143,53 @@ def test_absent_constant_halts_with_no_default(tmp_path):
         constants.get("time", "rth_start_ct")
 
 
+def _yaml_with(session_tz="America/Chicago", break_ct="['16:00','17:00']", bar_label="open"):
+    return (
+        "spec_version: 6\nprogram_id: x\nhorizons_minutes: [15]\n"
+        "time:\n  storage_tz: UTC\n"
+        f"  session_tz: {session_tz}\n"
+        f"  bar_label: {bar_label}\n  tick_size: 0.25\n  rth_start_ct: '08:30'\n"
+        f"  rth_end_ct: '15:00'\n  maintenance_break_ct: {break_ct}\n"
+    )
+
+
+def test_yaml_session_tz_divergence_halts(tmp_path):
+    """Audit M2: the vendored runtime implements America/Chicago; a YAML declaring a
+    different session timezone must refuse to build, not build under one rule while
+    the manifest documents another."""
+    path = tmp_path / "london.yaml"
+    path.write_text(_yaml_with(session_tz="Europe/London"), encoding="utf-8")
+    with pytest.raises(SpineError, match="vendored session runtime"):
+        load_spine_constants(path)
+
+
+def test_yaml_maintenance_break_divergence_halts(tmp_path):
+    """Audit M2, second half: the mask hardcodes [16:00, 17:00) CT."""
+    path = tmp_path / "shifted.yaml"
+    path.write_text(_yaml_with(break_ct="['15:00','16:00']"), encoding="utf-8")
+    with pytest.raises(SpineError, match="vendored session mask"):
+        load_spine_constants(path)
+
+
+def test_yaml_matching_the_vendored_rules_loads(tmp_path):
+    """Positive control for the two checks above."""
+    path = tmp_path / "good.yaml"
+    path.write_text(_yaml_with(), encoding="utf-8")
+    constants = load_spine_constants(path)
+    assert constants.session_tz == "America/Chicago"
+    assert constants.maintenance_break_ct == ("16:00", "17:00")
+
+
+def test_missing_real_store_fails_rather_than_skips(tmp_path, monkeypatch):
+    """Audit H2: a clean checkout must not get a green suite with the gates unrun."""
+    import tests.conftest as conftest_module
+    from mnq_lab.spine.seal import Corpus
+
+    monkeypatch.setattr(conftest_module, "REAL_STORE_ROOT", tmp_path / "no_data")
+    with pytest.raises(pytest.fail.Exception, match="fail closed rather than skip"):
+        conftest_module._require_real_store(Corpus.EXPLORATION, "5m")
+
+
 def test_wrong_bar_label_halts(tmp_path):
     path = tmp_path / "bad.yaml"
     path.write_text(

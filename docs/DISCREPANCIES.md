@@ -72,7 +72,7 @@ a new source hash.
 
 ---
 
-## D4 — `out_of_session_outright_rows_excluded = 1` — `OPEN`
+## D4 — `out_of_session_outright_rows_excluded = 1` — `RESOLVED`
 
 **Retrieved** from `mnq_active_5m_3y.csv.manifest.json`: the original build excluded
 exactly **one** outright row as falling outside the CME session mask, out of 3,607,321.
@@ -81,10 +81,50 @@ One is a suspicious count — it is either a genuine vendor artifact or an off-b
 session boundary in `_cme_session_mask`. A boundary bug affecting exactly one row would
 be invisible in aggregate but could indicate a misplaced `<` vs `<=` at 16:00 or 17:00 CT.
 
-**Action:** the build identifies and records this row explicitly in the manifest rather
-than counting it. Resolution deferred until that row is in hand.
+**Measured (2026-07-28):** the build now retains the row rather than counting it. It is:
 
-**Not verified:** anything about its cause. Do not assume it is benign.
+```json
+{"ts_event_utc": "2020-03-31T21:59:00+00:00",
+ "ts_event_ct":  "2020-03-31T16:59:00-05:00",
+ "weekday_ct": 1, "symbol": "MNQM0", "volume": 17}
+```
+
+16:59 CT on a Tuesday is **inside the daily maintenance break** `[16:00, 17:00)` CT, one
+minute before the Globex session reopens. The mask is therefore correct and the exclusion
+is right: the vendor emitted a single bar inside the halt window across 6.75 years. Not a
+boundary bug.
+
+This is also independent corroboration of finding E (`ts_event` is the bar open): a
+close-labelled bar at 16:59 would denote the interval `[16:58, 16:59)`, equally inside
+the halt, so the row is anomalous either way — but its isolation is consistent with a
+stray print rather than a systematic labelling error.
+
+The row is recorded verbatim in every store manifest under `out_of_session_source_rows`.
+
+**Not verified:** why the vendor emitted it. Not needed — it is excluded either way, and
+the exclusion is now evidence-backed rather than assumed benign.
+
+---
+
+## D7 — `rollover` is window-relative, not a property of the bar — `RESOLVED`
+
+The original pipeline computed `rollover = symbol.ne(symbol.shift())` **after** slicing to
+its three-year window, so the first row of the reference CSV is `True` even though MNQM3
+was already the active contract on the preceding trade date 2023-03-29. `rollover` is
+therefore a property of the *emitted window*, not of the bar.
+
+A naive full-history build that sliced afterwards would produce `False` on that row and
+fail Gate 2 on exactly one cell — a one-row discrepancy that is easy to "fix" with a
+tolerance and would then hide real roll-mapping errors.
+
+**Resolution:** `symbol` is authoritative and `rollover` is derived per store, via
+`resample.compute_rollover`, over exactly the rows that store contains. Because the locked
+tier begins at trade date 2023-03-30 — precisely the reference CSV's first trade date —
+the locked store's `rollover` column reproduces the reference exactly, and Gate 2 compares
+it rather than excusing it. **Measured: all 211,968 rows match on all 8 columns**,
+`rollover` included.
+
+`rollover` must never be used to reconstruct contract identity; read `symbol`.
 
 ---
 

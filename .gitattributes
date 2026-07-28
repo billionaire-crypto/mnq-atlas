@@ -1,0 +1,4 @@
+# Byte-exact checkout. The manifest records sha256 of REV6_FROZEN_SPEC.md and
+# analysis_constants_v1.yaml; an LF->CRLF conversion on checkout would change those
+# bytes and break artifact determinism (spec §13 test 17) on a fresh clone.
+* -text

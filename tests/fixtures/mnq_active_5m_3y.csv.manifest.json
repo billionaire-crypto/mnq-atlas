@@ -1,0 +1,372 @@
+{
+  "contract_expiries": {
+    "MNQH0": "2020-03-20",
+    "MNQH1": "2021-03-19",
+    "MNQH2": "2022-03-18",
+    "MNQH3": "2023-03-17",
+    "MNQH4": "2024-03-15",
+    "MNQH5": "2025-03-21",
+    "MNQH6": "2026-03-20",
+    "MNQH7": "2027-03-19",
+    "MNQM0": "2020-06-19",
+    "MNQM1": "2021-06-18",
+    "MNQM2": "2022-06-17",
+    "MNQM3": "2023-06-16",
+    "MNQM4": "2024-06-21",
+    "MNQM5": "2025-06-20",
+    "MNQM6": "2026-06-19",
+    "MNQM9": "2019-06-21",
+    "MNQU0": "2020-09-18",
+    "MNQU1": "2021-09-17",
+    "MNQU2": "2022-09-16",
+    "MNQU3": "2023-09-15",
+    "MNQU4": "2024-09-20",
+    "MNQU5": "2025-09-19",
+    "MNQU6": "2026-09-18",
+    "MNQU9": "2019-09-20",
+    "MNQZ0": "2020-12-18",
+    "MNQZ1": "2021-12-17",
+    "MNQZ2": "2022-12-16",
+    "MNQZ3": "2023-12-15",
+    "MNQZ4": "2024-12-20",
+    "MNQZ5": "2025-12-19",
+    "MNQZ6": "2026-12-18",
+    "MNQZ9": "2019-12-20"
+  },
+  "conversion_config": {
+    "chunksize": 250000,
+    "output_csv": "C:\\Users\\kyawz\\Documents\\Codex\\2026-07-27\\role-context-you-are-an-elite\\data\\mnq_active_5m_3y.csv",
+    "source_csv": "C:\\Users\\kyawz\\Downloads\\GLBX-20260331-885WT5W7KA\\glbx-mdp3-20100606-20260329.ohlcv-1m.csv",
+    "years": 3
+  },
+  "resample_report": {
+    "five_minute_rows": 211968,
+    "non_five_minute_transitions": 775,
+    "roll_boundaries": 12,
+    "symbols": {
+      "MNQH4": 17016,
+      "MNQH5": 17157,
+      "MNQH6": 17247,
+      "MNQM3": 14487,
+      "MNQM4": 18996,
+      "MNQM5": 17340,
+      "MNQM6": 2232,
+      "MNQU3": 17751,
+      "MNQU4": 17751,
+      "MNQU5": 18027,
+      "MNQZ3": 18123,
+      "MNQZ4": 18123,
+      "MNQZ5": 17718
+    },
+    "utc_end": "2026-03-29T23:55:00+00:00",
+    "utc_start": "2023-03-29T22:00:00+00:00"
+  },
+  "roll_policy": {
+    "direction": "next quarterly contract only; never switch back",
+    "effective_time": "next available CME trade date",
+    "expiry_guard": true,
+    "selection": "prior-session volume crossover"
+  },
+  "rolls": [
+    {
+      "current_volume": 17616,
+      "effective_trade_date": "2019-06-18",
+      "from": "MNQM9",
+      "next_volume": 59293,
+      "reason": "prior_session_volume_crossover",
+      "to": "MNQU9",
+      "trigger_trade_date": "2019-06-17"
+    },
+    {
+      "current_volume": 43187,
+      "effective_trade_date": "2019-09-16",
+      "from": "MNQU9",
+      "next_volume": 102617,
+      "reason": "prior_session_volume_crossover",
+      "to": "MNQZ9",
+      "trigger_trade_date": "2019-09-13"
+    },
+    {
+      "current_volume": 60276,
+      "effective_trade_date": "2019-12-16",
+      "from": "MNQZ9",
+      "next_volume": 163720,
+      "reason": "prior_session_volume_crossover",
+      "to": "MNQH0",
+      "trigger_trade_date": "2019-12-13"
+    },
+    {
+      "current_volume": 263161,
+      "effective_trade_date": "2020-03-16",
+      "from": "MNQH0",
+      "next_volume": 571553,
+      "reason": "prior_session_volume_crossover",
+      "to": "MNQM0",
+      "trigger_trade_date": "2020-03-13"
+    },
+    {
+      "current_volume": 291553,
+      "effective_trade_date": "2020-06-16",
+      "from": "MNQM0",
+      "next_volume": 466646,
+      "reason": "prior_session_volume_crossover",
+      "to": "MNQU0",
+      "trigger_trade_date": "2020-06-15"
+    },
+    {
+      "current_volume": 287254,
+      "effective_trade_date": "2020-09-15",
+      "from": "MNQU0",
+      "next_volume": 395416,
+      "reason": "prior_session_volume_crossover",
+      "to": "MNQZ0",
+      "trigger_trade_date": "2020-09-14"
+    },
+    {
+      "current_volume": 395242,
+      "effective_trade_date": "2020-12-14",
+      "from": "MNQZ0",
+      "next_volume": 473827,
+      "reason": "prior_session_volume_crossover",
+      "to": "MNQH1",
+      "trigger_trade_date": "2020-12-11"
+    },
+    {
+      "current_volume": 308559,
+      "effective_trade_date": "2021-03-16",
+      "from": "MNQH1",
+      "next_volume": 964626,
+      "reason": "prior_session_volume_crossover",
+      "to": "MNQM1",
+      "trigger_trade_date": "2021-03-15"
+    },
+    {
+      "current_volume": 257378,
+      "effective_trade_date": "2021-06-14",
+      "from": "MNQM1",
+      "next_volume": 272868,
+      "reason": "prior_session_volume_crossover",
+      "to": "MNQU1",
+      "trigger_trade_date": "2021-06-11"
+    },
+    {
+      "current_volume": 438841,
+      "effective_trade_date": "2021-09-13",
+      "from": "MNQU1",
+      "next_volume": 560635,
+      "reason": "prior_session_volume_crossover",
+      "to": "MNQZ1",
+      "trigger_trade_date": "2021-09-10"
+    },
+    {
+      "current_volume": 492834,
+      "effective_trade_date": "2021-12-13",
+      "from": "MNQZ1",
+      "next_volume": 732061,
+      "reason": "prior_session_volume_crossover",
+      "to": "MNQH2",
+      "trigger_trade_date": "2021-12-10"
+    },
+    {
+      "current_volume": 520600,
+      "effective_trade_date": "2022-03-15",
+      "from": "MNQH2",
+      "next_volume": 901027,
+      "reason": "prior_session_volume_crossover",
+      "to": "MNQM2",
+      "trigger_trade_date": "2022-03-14"
+    },
+    {
+      "current_volume": 996368,
+      "effective_trade_date": "2022-06-14",
+      "from": "MNQM2",
+      "next_volume": 1251990,
+      "reason": "prior_session_volume_crossover",
+      "to": "MNQU2",
+      "trigger_trade_date": "2022-06-13"
+    },
+    {
+      "current_volume": 612198,
+      "effective_trade_date": "2022-09-13",
+      "from": "MNQU2",
+      "next_volume": 846352,
+      "reason": "prior_session_volume_crossover",
+      "to": "MNQZ2",
+      "trigger_trade_date": "2022-09-12"
+    },
+    {
+      "current_volume": 442541,
+      "effective_trade_date": "2022-12-13",
+      "from": "MNQZ2",
+      "next_volume": 470111,
+      "reason": "prior_session_volume_crossover",
+      "to": "MNQH3",
+      "trigger_trade_date": "2022-12-12"
+    },
+    {
+      "current_volume": 852308,
+      "effective_trade_date": "2023-03-14",
+      "from": "MNQH3",
+      "next_volume": 1218990,
+      "reason": "prior_session_volume_crossover",
+      "to": "MNQM3",
+      "trigger_trade_date": "2023-03-13"
+    },
+    {
+      "current_volume": 339870,
+      "effective_trade_date": "2023-06-13",
+      "from": "MNQM3",
+      "next_volume": 501289,
+      "reason": "prior_session_volume_crossover",
+      "to": "MNQU3",
+      "trigger_trade_date": "2023-06-12"
+    },
+    {
+      "current_volume": 453908,
+      "effective_trade_date": "2023-09-12",
+      "from": "MNQU3",
+      "next_volume": 586578,
+      "reason": "prior_session_volume_crossover",
+      "to": "MNQZ3",
+      "trigger_trade_date": "2023-09-11"
+    },
+    {
+      "current_volume": 316517,
+      "effective_trade_date": "2023-12-13",
+      "from": "MNQZ3",
+      "next_volume": 553315,
+      "reason": "prior_session_volume_crossover",
+      "to": "MNQH4",
+      "trigger_trade_date": "2023-12-12"
+    },
+    {
+      "current_volume": 714121,
+      "effective_trade_date": "2024-03-12",
+      "from": "MNQH4",
+      "next_volume": 830212,
+      "reason": "prior_session_volume_crossover",
+      "to": "MNQM4",
+      "trigger_trade_date": "2024-03-11"
+    },
+    {
+      "current_volume": 491570,
+      "effective_trade_date": "2024-06-18",
+      "from": "MNQM4",
+      "next_volume": 815089,
+      "reason": "prior_session_volume_crossover",
+      "to": "MNQU4",
+      "trigger_trade_date": "2024-06-17"
+    },
+    {
+      "current_volume": 620537,
+      "effective_trade_date": "2024-09-17",
+      "from": "MNQU4",
+      "next_volume": 656939,
+      "reason": "prior_session_volume_crossover",
+      "to": "MNQZ4",
+      "trigger_trade_date": "2024-09-16"
+    },
+    {
+      "current_volume": 440502,
+      "effective_trade_date": "2024-12-18",
+      "from": "MNQZ4",
+      "next_volume": 924650,
+      "reason": "prior_session_volume_crossover",
+      "to": "MNQH5",
+      "trigger_trade_date": "2024-12-17"
+    },
+    {
+      "current_volume": 662836,
+      "effective_trade_date": "2025-03-19",
+      "from": "MNQH5",
+      "next_volume": 1379766,
+      "reason": "prior_session_volume_crossover",
+      "to": "MNQM5",
+      "trigger_trade_date": "2025-03-18"
+    },
+    {
+      "current_volume": 410269,
+      "effective_trade_date": "2025-06-17",
+      "from": "MNQM5",
+      "next_volume": 705648,
+      "reason": "prior_session_volume_crossover",
+      "to": "MNQU5",
+      "trigger_trade_date": "2025-06-16"
+    },
+    {
+      "current_volume": 224883,
+      "effective_trade_date": "2025-09-17",
+      "from": "MNQU5",
+      "next_volume": 759748,
+      "reason": "prior_session_volume_crossover",
+      "to": "MNQZ5",
+      "trigger_trade_date": "2025-09-16"
+    },
+    {
+      "current_volume": 533403,
+      "effective_trade_date": "2025-12-17",
+      "from": "MNQZ5",
+      "next_volume": 1705150,
+      "reason": "prior_session_volume_crossover",
+      "to": "MNQH6",
+      "trigger_trade_date": "2025-12-16"
+    },
+    {
+      "current_volume": 306895,
+      "effective_trade_date": "2026-03-18",
+      "from": "MNQH6",
+      "next_volume": 1334242,
+      "reason": "prior_session_volume_crossover",
+      "to": "MNQM6",
+      "trigger_trade_date": "2026-03-17"
+    }
+  ],
+  "selection_report": {
+    "final_trade_date": "2026-03-30",
+    "first_trade_date": "2023-03-30",
+    "requested_years": 3,
+    "selected_active_1m_rows": 1059836
+  },
+  "source_report": {
+    "calendar_spread_rows_excluded": 57907,
+    "out_of_session_outright_rows_excluded": 1,
+    "outright_rows": 3607321,
+    "outright_symbols": {
+      "MNQH0": 94622,
+      "MNQH1": 121220,
+      "MNQH2": 129338,
+      "MNQH3": 134125,
+      "MNQH4": 135675,
+      "MNQH5": 138778,
+      "MNQH6": 142658,
+      "MNQH7": 21,
+      "MNQM0": 103979,
+      "MNQM1": 127281,
+      "MNQM2": 143082,
+      "MNQM3": 130569,
+      "MNQM4": 143595,
+      "MNQM5": 148405,
+      "MNQM6": 62623,
+      "MNQM9": 42769,
+      "MNQU0": 108467,
+      "MNQU1": 124245,
+      "MNQU2": 137667,
+      "MNQU3": 133858,
+      "MNQU4": 145557,
+      "MNQU5": 149906,
+      "MNQU6": 8861,
+      "MNQU9": 93901,
+      "MNQZ0": 116026,
+      "MNQZ1": 125483,
+      "MNQZ2": 133411,
+      "MNQZ3": 140541,
+      "MNQZ4": 153057,
+      "MNQZ5": 140384,
+      "MNQZ6": 116,
+      "MNQZ9": 97100
+    },
+    "source_end_utc": "2026-03-29T23:59:00+00:00",
+    "source_rows": 3665228,
+    "source_start_utc": "2019-05-05T22:03:00+00:00"
+  }
+}

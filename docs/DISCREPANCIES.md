@@ -274,3 +274,83 @@ The tier split is on **CME trade date**, not UTC date: exploration `trade_date <
 2023-03-29`, locked `trade_date >= 2023-03-30`. Chosen because the spec's two tier bounds
 are contiguous calendar days and 2023-03-30 is the reference CSV's first trade date, so
 only the trade-date reading makes the tiers adjacent and non-overlapping.
+
+---
+
+## D11 — Two spec ambiguities ruled by the user (2026-07-28), implemented in Phase 2 — `RESOLVED`
+
+Both questions were surfaced per §16.6 before coding, put to the user, and ruled. The
+rulings are recorded in `docs/PHASE2_HANDOFF.md` §6.5; this entry logs their
+implementation. They are binding; neither is an implementer choice.
+
+### D11a — Anchor eligibility is by observation time τ, never the bar label
+
+**The ambiguity.** Spec §4.1's worked example starts the day at the 08:30-labeled bar
+(τ = 08:35), which *suggests* the anchor bar itself must lie inside RTH — but the spec
+never states that rule, and §4.2 keys phases on "observation-time CT" with buckets keyed
+on observation time "NEVER" the label.
+
+**Ruling.** `τ = bar_open_label + 5 min`; an anchor is eligible when
+`08:30 ≤ τ < 15:00` CT (half-open); phase is assigned from τ; the outcome begins
+strictly after τ. Consequences, implemented in `mnq_lab/spine/timemodel.py`:
+
+- the 08:25-labeled bar (overnight data, τ = 08:30) **is** the session's first
+  open-phase anchor;
+- the 14:55-labeled bar (τ = 15:00, contained in no phase) yields **no** anchor;
+- 78 anchors per full session (the rejected label-in-RTH reading gives 77);
+- the §4.1 worked example remains a verbatim test oracle but is an *illustrative*
+  anchor, not the first of the day;
+- the full declared τ-grid {08:30, 08:35, …, 14:55} is emitted per session; a missing
+  anchor bar produces the gridpoint with `status = "anchor_bar_missing"`, never a
+  silent absence (§16.4.5);
+- τ = 14:50/14:55 anchors are outcome-ineligible at every horizon but remain
+  `state_anchors` for prevalence (§10.2);
+- the anchor bar's **own** completeness is not required (the worked example lists only
+  outcome-path bars as required); its return entering the conditioner at τ is causal.
+
+**Measured (encoded as tests, since the spec's own numbers cannot discriminate):** the
+registered close-phase counts (Δ60→1, Δ30→7, Δ15→10) reproduce **identically** under
+both readings — `test_window_boundaries.py::test_the_registered_counts_cannot_discriminate_the_eligibility_ruling`
+proves it and locates the single differing gridpoint per session ({τ=08:30} vs
+{τ=15:00}). The open edge is therefore pinned explicitly:
+`test_time_and_timezone.py::test_tau_0830_anchor_exists_in_the_open_phase` and
+`::test_the_1455_labeled_bar_yields_no_anchor`. On the real exploration store the grid
+is 1009 × 78 = 78,702 gridpoints.
+
+**Why ruled now:** the decision moves exactly one anchor per session into the open
+phase (6 gridpoints vs 5, ~20% of open-phase anchor mass) and therefore changes the S00
+population Phase 3 freezes completion thresholds from.
+
+### D11b — No CME calendar exists; short sessions carry data-derived flags only
+
+**The gap.** §4.3 requires holidays "from a VERSIONED CME calendar table"; §13 test 1
+wants early-close coverage now; no versioned calendar exists in this repository, and
+§9.2/§14 hold that inventing one from memory is worse than declaring the gap.
+
+**Ruling.** The user will not supply a calendar now. Phase 2 implements data-derived
+flags with honest names in `TimeModel.session_flags`:
+
+```
+observed_short_session / observed_rth_ended_early   derived from data
+calendar_early_close                                "unknown" — unknown, not false
+formal calendar-dependent exclusion                 fail closed / deferred (Phase 10)
+```
+
+A scheduled early close, a feed outage, and a vendor gap all produce the same flag;
+that uncertainty is intentional. Truncated-end sessions and mid-session-gap sessions
+are distinguished (`n_rth_bars_missing_trailing` vs `_interior`; a session can be
+both). The YAML's `completion.source_population.include_holidays_flagged: true` is
+**satisfied by the data-derived flag** until a versioned CME calendar table arrives as
+a new versioned input with a ledger entry — required no later than the seasonal
+profile (Phase 7) and formal inference exclusions (Phase 10).
+
+**Measured (exploration tier, 1009 sessions, 2026-07-28):** 35 sessions have
+`observed_rth_ended_early` — last RTH bar ends 12:00 CT in 25 sessions, 12:15 in 7,
+10:00 in 1, 09:15 in 1, and one session (20210402) has **zero RTH bars** while its
+overnight bars exist (`last_rth_bar_end_ct_minute = -1`). 4 sessions have
+`observed_mid_rth_gap`; no session has both. §13 test 1's early-close coverage uses a
+synthetic shortened-session fixture plus one real session **selected by data** (the
+earliest observed RTH end), with no holiday name attached anywhere.
+
+**Not verified (by design):** which of the 35 shortenings were scheduled. That
+classification is impossible without the calendar table and is not claimed.

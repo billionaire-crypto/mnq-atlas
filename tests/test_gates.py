@@ -198,6 +198,63 @@ def test_negative_case_gate_3_fails_when_the_source_is_absent(exploration_5m, tm
         gate_symbol_classification(manifest, tmp_path / "gone.csv")
 
 
+def _tiny_source_and_manifest(tmp_path, recorded_sha):
+    """A minimal source CSV plus a manifest whose counts match it exactly."""
+    source = tmp_path / "tiny.csv"
+    source.write_text(
+        "symbol\nMNQH0\nMNQH0\nMNQH0-MNQM0\n", encoding="utf-8", newline=""
+    )
+    manifest = {
+        "symbol_classification": {
+            "retained_symbols": {"MNQH0": 2},
+            "rejected_spread_symbols": {"MNQH0-MNQM0": 1},
+            "retained_symbol_count": 1,
+            "rejected_spread_symbol_count": 1,
+            "distinct_symbol_count": 2,
+            "retained_rows": 2,
+            "rejected_spread_rows": 1,
+        },
+        "source": {"rows": 3, "sha256": recorded_sha},
+    }
+    return source, manifest
+
+
+def test_negative_case_gate_3_rejects_a_count_equivalent_source_forgery(tmp_path):
+    """Re-audit L2's exact attack: a hash-different file reproducing every recorded
+    count must not earn source_verified. Count agreement with an unauthenticated file
+    verifies nothing."""
+    from mnq_lab.spine.gates import gate_symbol_classification
+
+    source, manifest = _tiny_source_and_manifest(tmp_path, recorded_sha="0" * 64)
+    with pytest.raises(SpineError, match="sha256.*not the file"):
+        gate_symbol_classification(manifest, source)
+
+
+def test_gate_3_authenticated_source_passes_with_both_flags(tmp_path):
+    """Positive control: correct hash + correct counts -> both verifications recorded."""
+    from mnq_lab.spine.gates import gate_symbol_classification
+    from mnq_lab.spine.vendored import sha256_file
+
+    source, manifest = _tiny_source_and_manifest(tmp_path, recorded_sha="")
+    manifest["source"]["sha256"] = sha256_file(source)
+    report = gate_symbol_classification(manifest, source)
+    assert report["source_sha256_verified"] is True
+    assert report["per_symbol_counts_verified_against_source"] is True
+
+
+def test_gate_3_hash_check_precedes_count_comparison(tmp_path):
+    """A wrong hash must fail even when counts would also disagree — source revision
+    is the diagnosis, not count drift (gate-diagnosis skill: check the sha first)."""
+    from mnq_lab.spine.gates import gate_symbol_classification
+
+    source, manifest = _tiny_source_and_manifest(tmp_path, recorded_sha="0" * 64)
+    manifest["symbol_classification"]["retained_symbols"]["MNQH0"] = 99
+    manifest["symbol_classification"]["retained_rows"] = 99
+    manifest["source"]["rows"] = 100
+    with pytest.raises(SpineError, match="sha256"):
+        gate_symbol_classification(manifest, source)
+
+
 def json_roundtrip(manifest):
     """Deep copy via JSON so mutations cannot leak into the mmap'd manifest."""
     import json

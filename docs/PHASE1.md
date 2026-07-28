@@ -109,7 +109,7 @@ in commit `67aebdc` and its follow-up.
 | Finding | What the audit showed | Resolution |
 |---|---|---|
 | H1 (high) | The CLI Gate 4 checked only store observables; a same-day selector producing one contract per session passed | `gate_roll_causality` now executes the two-version causality fixture against the real selector, with an inert-fixture guard and a leaky-selector power guard. The audit's exact attack, replayed, now raises `GATE 4 FAILED` |
-| H2 (high) | With `data/` absent (it is git-ignored), pytest skipped all 63 real-store tests and exited green | Real-store fixtures `pytest.fail` instead of skip. A clean clone now exits 1 with 68 loud failures carrying the build command |
+| H2 (high) | With `data/` absent (it is git-ignored), pytest skipped all 63 real-store tests and exited green | Real-store fixtures `pytest.fail` instead of skip. A clean clone now exits 1 with **every** real-store test failing loudly with the build command (the exact count grows as real-store tests are added — do not pin it) |
 | M1 (medium) | Gate 3 accepted `distinct_symbol_count = 999` and per-symbol counts altered under a preserved total | All aggregates are recomputed from the listed partition, and the CLI runner re-scans the source's symbol column to verify per-symbol counts value-for-value (a missing source fails the gate). Both attacks, replayed, now raise. The manifest-only layer still cannot see a total-preserving shuffle — that limitation is documented in the docstring and asserted by a test |
 | M2 (medium) | A YAML declaring `Europe/London` / a shifted break would build under the vendored Chicago rules while the manifest documented the YAML's | `SpineConstants` fails closed if `session_tz` or `maintenance_break_ct` diverges from what the vendored mask implements. Changing them requires a new pipeline version with a ledger entry |
 | L1 (low) | "Only `environment.commit` differed" was incomplete — `environment.dirty` differed too | Determinism paragraph above corrected to "environment fingerprint fields" |
@@ -117,6 +117,30 @@ in commit `67aebdc` and its follow-up.
 
 Post-fix state: 229 tests pass, 5 xfail. Every audit attack was replayed against the
 hardened gates and raised; positive controls still pass.
+
+### Re-audit (2026-07-28, second pass) — PARTIALLY RESOLVED → closed
+
+The re-audit confirmed R2/R4 resolved and the diff loosened nothing, with three LOW
+residuals. Resolutions:
+
+| Finding | What the re-audit showed | Resolution |
+|---|---|---|
+| L1 (low) | Gate 4's docstring said it "certifies the selector in `mnq_lab.spine.rolls`", but fixture-aware selectors (size-aware or date-special-cased) evade a finite fixture | **Claim shrunk to the mechanism**: the gate *detects the registered same-day-volume defect class*; docstring and report note now say exactly that and name the flank guards (Gate 1 historical equality, the CSV-path test, review of `rolls.py`'s written-out causality argument). No finite fixture can certify arbitrary adversarial selectors — strengthening the wording was not an option, so the wording was corrected |
+| L2 (low) | A hash-different source forged to reproduce every recorded symbol count passed with `source_verified=True` | Gate 3 now **authenticates the source against the manifest's recorded sha256 before rescanning**; mismatch fails as source-revision. Report carries `source_sha256_verified`. Negative test reproduces the forgery attack with a count-equivalent scratch CSV; a further test asserts the hash check precedes count comparison |
+| L3 (low) | Docs pinned "68 loud failures" on a clean clone; the suite had grown to 71 | Count unpinned (see H2 row above) |
+| NOTE | `rth_start_ct`/`rth_end_ct` are recorded in manifests but consumed by nothing in Phase 1 — a YAML with `rth_start_ct: "09:00"` builds byte-identical data | Accurate, and acceptable *for Phase 1*: no Phase 1 column depends on RTH. Recorded as a **binding Phase 2 obligation** below |
+
+## Phase 2 obligations carried forward
+
+- **RTH bounds must be consumed from the YAML, not re-hardcoded.** The re-audit proved
+  a divergent `rth_start_ct` currently builds identical Phase 1 data (nothing consumes
+  it yet). The moment Phase 2 introduces anchors, phases, or any RTH-dependent
+  selection, those values must come from `analysis_constants_v1.yaml` — with a
+  spec-consistency test tying any runtime literal to the YAML, as was done for
+  `session_tz` and `maintenance_break_ct` after audit M2.
+- The `+7h` trade-date rule remains hardcoded with no corresponding YAML key; its
+  17:00 CT boundary and DST behaviour are covered by `test_session_id_equivalence`.
+  If a future spec revision adds a YAML key for it, tie them the same way.
 
 ## Next phase
 

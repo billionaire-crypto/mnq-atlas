@@ -34,6 +34,7 @@ from mnq_lab.spine.rolls import build_causal_active_contract_map
 from mnq_lab.spine.seal import Corpus, store_path
 from mnq_lab.spine.store import BarStore
 from mnq_lab.spine.symbols import OUTRIGHT_PATTERN, SPREAD_PATTERN
+from mnq_lab.spine.vendored import sha256_file
 
 __all__ = [
     "ROLL_FIXTURE_PATH",
@@ -210,11 +211,13 @@ def gate_symbol_classification(
     Spec §14 struck "assert ~1.6% spread rows". This checks membership and exact
     counts, never a proportion.
 
-    With `source_csv` supplied (the CLI runner always supplies it), the source's symbol
-    column is re-scanned and the recorded per-symbol counts are compared **value for
-    value** — closing the audit-M1 residual where per-symbol counts altered while
-    preserving their total passed the list-consistency checks. Without the source only
-    list consistency is verifiable, which is what the manifest-only unit tests cover.
+    With `source_csv` supplied (the CLI runner always supplies it), the file is first
+    **authenticated against the manifest's recorded sha256** (re-audit L2: a
+    count-equivalent forgery of the source previously passed), then its symbol column
+    is re-scanned and the recorded per-symbol counts compared **value for value** —
+    closing the audit-M1 residual where counts altered under a preserved total passed
+    the list-consistency checks. Without the source only list consistency is
+    verifiable, which is what the manifest-only unit tests cover.
     """
     block = manifest.get("symbol_classification")
     if not block:
@@ -285,6 +288,7 @@ def gate_symbol_classification(
         )
 
     per_symbol_verified = False
+    source_sha_verified = False
     if source_csv is not None:
         source_csv = Path(source_csv)
         if not source_csv.is_file():
@@ -293,6 +297,22 @@ def gate_symbol_classification(
                 "counts cannot be verified and the gate does not pass unverified "
                 "(spec §16.4.3)."
             )
+        # Authenticate the source BEFORE treating it as ground truth. Re-audit finding
+        # L2 (2026-07-28): a hash-different source engineered to reproduce the exact
+        # symbol counts previously passed with source_verified=True — the rescan
+        # verified counts against a file nobody had verified was the file. Counts are
+        # only evidence about the recorded source if this is the recorded source.
+        recorded_sha = manifest["source"]["sha256"]
+        observed_sha = sha256_file(source_csv)
+        if observed_sha != recorded_sha:
+            raise SpineError(
+                f"GATE 3 FAILED: source at {source_csv} has sha256 {observed_sha}, "
+                f"but the manifest records {recorded_sha}. The file being rescanned "
+                "is not the file the classification was built from (source revision "
+                "— see .claude/skills/gate-diagnosis); count agreement with an "
+                "unauthenticated file verifies nothing."
+            )
+        source_sha_verified = True
         observed: dict[str, int] = {}
         for chunk in pd.read_csv(
             source_csv, usecols=["symbol"], dtype={"symbol": "string"}, chunksize=1_000_000
@@ -323,6 +343,7 @@ def gate_symbol_classification(
     return {
         "gate": "symbol_classification",
         "status": "pass",
+        "source_sha256_verified": source_sha_verified,
         "per_symbol_counts_verified_against_source": per_symbol_verified,
         "retained_symbol_count": block["retained_symbol_count"],
         "rejected_spread_symbol_count": block["rejected_spread_symbol_count"],
@@ -428,17 +449,24 @@ def gate_roll_causality(store: BarStore, manifest: dict[str, Any]) -> dict[str, 
     Three layers, all required:
 
       a. the synthetic two-version fixture executed against the real selector
-         (`_run_causality_fixture`) — the decisive test;
+         (`_run_causality_fixture`);
       b. every roll's effective trade date is strictly after its trigger trade date, so
          no recorded roll consumed the session it applies to;
       c. each CME trade date carries exactly one contract in the built bars — the
          assignment is frozen for the whole Globex session and never recalculated at
          RTH.
 
-    Scope, stated honestly: layer (a) certifies the selector in `mnq_lab.spine.rolls`,
-    which is the function `build.py` imports. If a build bypassed that module entirely,
-    this gate would not see it — Gate 1's fixture equality and the full CSV-path test in
-    `tests/test_roll_causality.py` are the guards on that flank.
+    Scope, stated honestly (re-audit finding L1, 2026-07-28): layer (a) **detects the
+    registered defect class** — a selector that consumes session d's own volume — in
+    the selector `mnq_lab.spine.rolls` exports, which is the function `build.py`
+    imports. A finite fixture cannot certify arbitrary selector behaviour: a
+    fixture-aware selector (one that behaves causally on small inputs, or
+    special-cases the fixture's dates, and leaks same-day volume elsewhere) evades it,
+    and this was demonstrated during re-audit. The guards on that flank are Gate 1's
+    equality against the historical 28-roll fixture (which a differently-behaving
+    selector fails on real data), the full CSV-path test in
+    `tests/test_roll_causality.py`, and code review of `rolls.py` — whose causality
+    argument is written out line by line in its docstring for exactly that purpose.
     """
     fixture_report = _run_causality_fixture()
 
@@ -481,8 +509,11 @@ def gate_roll_causality(store: BarStore, manifest: dict[str, Any]) -> dict[str, 
         "rolls_checked": len(manifest["rolls"]),
         "selector_fixture": fixture_report,
         "note": (
-            "certifies the selector in mnq_lab.spine.rolls plus store observables; the "
-            "full CSV-path 17:00 CT fixture is tests/test_roll_causality.py"
+            "detects the registered same-day-volume defect class in the selector "
+            "mnq_lab.spine.rolls exports, plus store observables. A finite fixture "
+            "cannot certify arbitrary (fixture-aware) selector behaviour; that flank "
+            "is guarded by Gate 1's historical-fixture equality, the CSV-path test in "
+            "tests/test_roll_causality.py, and review of rolls.py"
         ),
     }
 

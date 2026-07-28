@@ -197,6 +197,82 @@ declared cell with a `status`; `n_anchors` never without `n_sessions` and
 - Before coding, run the full existing suite and the gates to confirm you inherit a
   green state; report your starting state to the user first, as Phase 1 did.
 
+## 6.5 USER DECISIONS — the two open questions are now ruled (2026-07-28)
+
+Both flagged decisions were put to the user and answered. These rulings are binding
+for Phase 2; do not re-litigate them. Log their implementation as D11 in
+`docs/DISCREPANCIES.md` (spec-ambiguity resolutions, with the rationale below).
+
+### Ruling 1 — anchor eligibility is by observation time τ, never the bar label
+
+```
+τ = bar_open_label + 5 minutes
+anchor eligible when 08:30 <= τ < 15:00   (half-open, observation-time CT)
+phase assigned from τ
+outcome begins strictly after τ
+```
+
+- Bar labeled 08:25 (covers [08:25,08:30), overnight data) has τ = 08:30: it IS the
+  first open-phase anchor of the session.
+- Bar labeled 14:55 has τ = 15:00: NOT an anchor (no phase contains 15:00).
+- The §4.1 worked example (08:30-labeled bar, τ 08:35) is an illustrative anchor,
+  not the first anchor of the day. It remains a verbatim test oracle for §13 test 1.
+
+Rationale (user): the spec calls phases "observation-time CT" and says buckets key on
+observation time "NEVER" the label; requiring the label itself inside RTH would add a
+rule absent from the spec. Supporting text: §7.1 treats anchors as a deterministic
+clock grid ("exact fixed timestamp or dropping the anchor").
+
+Facts established while checking the ruling — encode them as tests:
+
+- The whole decision is exactly ONE anchor per session (τ=08:30). Your rule → 78
+  anchors/full session; the rejected alternative → 77. That anchor is in the open
+  phase (6 gridpoints vs 5), so it moves ~20% of open-phase anchor mass and changes
+  the S00 population Phase 3 freezes thresholds from — which is why it was ruled now.
+- The spec's registered close-phase counts (Δ60→1, Δ30→7, Δ15→10) reproduce
+  IDENTICALLY under both readings — they cannot discriminate. Your tests MUST pin the
+  open edge explicitly: assert the τ=08:30 anchor exists in the open phase, and
+  assert the 14:55-labeled bar yields no anchor. Without those two assertions either
+  rule passes every count in the spec.
+- Emit the full declared τ-grid {08:30, 08:35, …, 14:55} per session; a missing
+  anchor bar (e.g. no 08:25 bar) produces the gridpoint WITH a status such as
+  `anchor_bar_missing`, never a silent absence (§16.4.5).
+- τ=14:50/14:55 anchors are outcome-ineligible at every horizon but remain
+  `state_anchors` for prevalence (§10.2). Coverage, gap, roll, and outcome-completion
+  rules apply separately from anchor eligibility.
+- The anchor bar's own completeness is NOT required by the spec (the worked example
+  lists only outcome-path bars as required). Its return entering the conditioner at
+  τ is causal — it ends exactly at τ.
+
+### Ruling 2 — data-derived short-session flags only; no CME calendar yet
+
+The user will NOT supply a calendar now. Implement honestly named, data-derived flags:
+
+- Name: `observed_short_session` / `observed_rth_ended_early` — NEVER
+  `official_early_close`, never holiday names, never a claim the shortening was
+  scheduled. A missing final bar or an outage produces the same flag; that
+  uncertainty is intentional.
+- Three-state semantics, exactly:
+
+```
+observed_short_session                 derived from data
+calendar_early_close                   unknown, not false
+formal calendar-dependent exclusion    fail closed / deferred (Phase 10)
+```
+
+- For §13 test 1's early-close coverage: use a SYNTHETIC shortened-session fixture to
+  prove timestamps, phases, and outcome windows behave when RTH ends early — a
+  synthetic test shape is not an invented historical calendar. Complement it with one
+  REAL session selected by data, not by name (e.g. the exploration session with the
+  earliest last RTH bar), asserting engine behaviour without any calendar claim.
+- Define the flag precisely and test that a truncated-end session and a
+  mid-session-gap session are distinguished (or state plainly that they are not).
+- The YAML's `completion.source_population.include_holidays_flagged: true` is
+  satisfied by the data-derived flag until a versioned calendar exists — record that
+  mapping in the D11 entry. When seasonal profiles (Phase 7) or formal inference
+  (Phase 10) need official classifications, a versioned CME calendar table becomes
+  mandatory and arrives as a new versioned input with a ledger entry.
+
 ## 7. Definition of done for Phase 2
 
 - §4.1 worked example asserted exactly; bar-end interpretation demonstrably fails.

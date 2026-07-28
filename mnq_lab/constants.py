@@ -49,6 +49,30 @@ class Constants:
         return self._data
 
 
+def _normalise_yaml_keys(node: Any) -> Any:
+    """Restore the *written* spelling of keys YAML resolves to non-strings.
+
+    `analysis_constants_v1.yaml` contains, under §12 `inference:`, a key written as
+    `null:`. YAML resolves an unquoted `null` to the null value, so `safe_load` returns
+    a mapping whose key is Python `None` — meaning `constants["inference"]["null"]`
+    raises `KeyError` while the file plainly reads `null:`.
+
+    The frozen file is **not** edited to work around this (§16.4.2 and the frozen-file
+    rule); the key is restored to the string it was written as, here, at load time. See
+    docs/DISCREPANCIES.md D8. `tests/test_spec_consistency.py` asserts both that the raw
+    YAML still has the `None` key and that the normalised lookup works, so this
+    accommodation cannot silently stop matching the file.
+    """
+    if isinstance(node, dict):
+        return {
+            ("null" if key is None else key): _normalise_yaml_keys(value)
+            for key, value in node.items()
+        }
+    if isinstance(node, list):
+        return [_normalise_yaml_keys(item) for item in node]
+    return node
+
+
 def load_constants(path: Path | None = None) -> Constants:
     resolved = Path(path) if path is not None else CONSTANTS_PATH
     if not resolved.is_file():
@@ -59,7 +83,7 @@ def load_constants(path: Path | None = None) -> Constants:
     parsed = yaml.safe_load(resolved.read_text(encoding="utf-8"))
     if not isinstance(parsed, dict):
         raise SpineError(f"{resolved} did not parse to a mapping")
-    return Constants(parsed, resolved)
+    return Constants(_normalise_yaml_keys(parsed), resolved)
 
 
 # --- Spine-relevant constants, resolved once and named -----------------------------

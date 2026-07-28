@@ -128,6 +128,70 @@ it rather than excusing it. **Measured: all 211,968 rows match on all 8 columns*
 
 ---
 
+## D8 — `null:` in the frozen YAML parses to Python `None` — `ACCEPTED-DEVIATION`
+
+**Measured (2026-07-28):** `analysis_constants_v1.yaml` §12 contains
+
+```yaml
+inference:
+  null:
+    kind: whole_session_trajectory_reassignment
+```
+
+YAML resolves an unquoted `null` to the null value, so `yaml.safe_load` returns a mapping
+whose key is Python `None`. `constants["inference"]["null"]` raises `KeyError` while the
+file plainly reads `null:`.
+
+```python
+>>> list(yaml.safe_load(open("analysis_constants_v1.yaml"))["inference"])
+['formal_tests', 'descriptive_only', None, 'permutations_final', ...]
+```
+
+This is a live landmine for Phase 10, which is the phase that reads the null engine's
+configuration. It would surface as a `KeyError` at the moment the permutation engine is
+wired up — or worse, as a `.get("null", {})` that silently returns an empty config and
+runs the null with default-shaped nothing.
+
+**Resolution:** the frozen file is **not** edited. `mnq_lab/constants.py`
+`_normalise_yaml_keys` restores the key to the string it was written as, at load time,
+with the reasoning recorded at the call site.
+`tests/test_spec_consistency.py::test_the_yaml_null_key_still_needs_normalising` asserts
+both that the raw YAML still has the `None` key and that the normalised lookup works, so
+if the frozen file is ever re-issued with the key quoted, the accommodation is revisited
+deliberately instead of lingering as dead code.
+
+**Recommendation for a future frozen revision:** quote it as `"null":`, or rename it to
+`null_engine:`. Either requires a ledger entry under §16.4.2. Not done here — this is a
+spec change, not an implementation decision.
+
+---
+
+## D9 — Finding C's "trigger = effective − 1" is one *session*, not one day — `RESOLVED`
+
+**Spec §3 finding C:** *"`trigger_trade_date` = `effective_trade_date` − 1"*.
+
+**Measured:** false when read literally. Of the 28 rolls, several span a weekend:
+
+| from → to | trigger | effective | calendar days |
+|---|---|---|---|
+| MNQU9 → MNQZ9 | 2019-09-13 (Fri) | 2019-09-16 (Mon) | **3** |
+
+The roll policy recorded in the source manifest says `"effective_time": "next available
+CME trade date"`, which is the correct reading: trigger and effective are adjacent
+*sessions*, and sessions are business days.
+
+**Resolution:** the executable form of the claim is *no trade date exists strictly
+between trigger and effective*. `test_roll_trigger_is_the_previous_session_not_the_previous_day`
+asserts exactly that against the union of both tiers' session ids, and additionally
+asserts that at least one gap is **not** one calendar day — otherwise the test could not
+distinguish the two readings and would prove nothing.
+
+Finding C's first and last rolls do happen to be consecutive calendar days, which is
+presumably how the imprecise phrasing survived review. Nothing depends on the literal
+reading; no code was written against it.
+
+---
+
 ## D5 — `data_pipeline.py` imports torch at module scope — `ACCEPTED-DEVIATION`
 
 Spec §16.2 says to reuse `_sha256_file` and `_cme_session_mask` from `data_pipeline.py`.

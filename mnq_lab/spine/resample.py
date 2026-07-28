@@ -153,8 +153,9 @@ def resample_to_five_minutes(active_rows: pd.DataFrame) -> ResampleResult:
         raise SpineError(
             f"bar at {bars['timestamp'].iloc[offset]} aggregated {observed[offset]} "
             f"one-minute rows but spans only {expected[offset]} in-session labels of "
-            "its own trade date. A bar is drawing components from another session "
-            "(spec §5); this is a fail-closed condition, not a coverage anomaly."
+            "its own trade date. Either the source contains duplicate one-minute rows "
+            "or the bar is drawing components from another session (spec §5). This is "
+            "a fail-closed condition, not a coverage anomaly."
         )
 
     bars["expected_1m_components"] = expected.astype(np.int8)

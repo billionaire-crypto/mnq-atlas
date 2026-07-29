@@ -85,6 +85,27 @@ def test_a_partially_labeled_bar_splits_the_two_estimands(time_model):
     assert not anchor[f"outcome_eligible_{ESTIMAND_FULLY_LABELED}_h15"]
 
 
+def test_a_bar_expecting_fewer_than_five_labels_is_not_fully_labeled(time_model):
+    """Audit finding M-3 (2026-07-28): the `expected == 5` conjunct was untested.
+
+    Every prior fixture set `expected_1m_components = 5`, so the criterion
+    `(observed == expected) & (expected == 5)` was indistinguishable from
+    `observed == expected` and the mutation dropping the second conjunct survived
+    the whole suite. Here the 09:00 bar has `observed == expected == 3`: it is
+    internally consistent but does NOT carry a full 1-minute grid, so
+    `fully_labeled_1m_grid` must reject it while `observed_bar_path` retains it.
+    """
+    frame = completion_frame(time_model, expected_components={"09:00": 3})
+    anchor = row_at(frame, 8 * 60 + 55)  # Δ15 window covers 08:55/09:00/09:05
+
+    assert anchor["n_present_h15"] == 3
+    assert anchor["n_fully_labeled_h15"] == 2  # the 09:00 bar does not count
+    assert not anchor[f"complete_{ESTIMAND_FULLY_LABELED}_h15"]
+    assert anchor[f"complete_{ESTIMAND_OBSERVED}_h15"]
+    assert not anchor[f"outcome_eligible_{ESTIMAND_FULLY_LABELED}_h15"]
+    assert anchor[f"outcome_eligible_{ESTIMAND_OBSERVED}_h15"]
+
+
 def test_a_wholly_missing_bar_fails_both_estimands(time_model):
     """A window crossing an absent 5-min interval is incomplete under BOTH — an
     excursion across it would invent prices (§6)."""
@@ -211,11 +232,36 @@ def test_completion_by_year_separates_years(time_model):
 
     y2021_h15 = by_year[(by_year["year"] == 2021) & (by_year["horizon_minutes"] == 15)].iloc[0]
     y2022_h15 = by_year[(by_year["year"] == 2022) & (by_year["horizon_minutes"] == 15)].iloc[0]
+    assert y2022_h15["n_anchors"] > 0
     # 2021 carries the partial 09:00 bar; three Δ15 windows cross it (τ 08:50,
     # 08:55, 09:00), so exactly 3 of 76 eligible windows fail the labeled grid.
     assert y2021_h15[f"n_complete_{ESTIMAND_FULLY_LABELED}"] == 73
     assert y2021_h15[f"n_complete_{ESTIMAND_OBSERVED}"] == 76
     assert y2022_h15[f"n_complete_{ESTIMAND_FULLY_LABELED}"] == 76
+
+
+def test_an_absent_intervening_year_is_emitted_as_an_empty_cell(time_model):
+    """Audit finding L-1 (2026-07-28): iterating only the years PRESENT dropped
+    absent intervening years, so a 2021+2023 corpus silently omitted all three
+    2022 cells. The declared year axis is the contiguous span (spec §16.4.5)."""
+    s1, t1, o1, e1 = synthetic_session_bars("2021-06-15")
+    s2, t2, o2, e2 = synthetic_session_bars("2023-06-15")
+    frame = anchor_outcome_completion(
+        time_model,
+        np.concatenate([s1, s2]),
+        np.concatenate([t1, t2]),
+        np.concatenate([o1, o2]),
+        np.concatenate([e1, e2]),
+    )
+    by_year = completion_by_year(frame, time_model)
+    assert by_year["year"].unique().tolist() == [2021, 2022, 2023]
+    assert len(by_year) == 9
+
+    absent = by_year[by_year["year"] == 2022]
+    assert len(absent) == 3
+    assert (absent["n_anchors"] == 0).all()
+    assert (absent["status"] == "no_structurally_eligible_anchors").all()
+    assert absent[f"completion_rate_{ESTIMAND_FULLY_LABELED}"].isna().all()
 
 
 # --- the real exploration store -----------------------------------------------------

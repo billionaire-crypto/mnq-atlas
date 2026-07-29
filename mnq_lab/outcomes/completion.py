@@ -62,6 +62,7 @@ from mnq_lab.spine.timemodel import (
     BAR_NS,
     STATUS_OK,
     TimeModel,
+    assert_store_bar_seconds,
 )
 
 __all__ = [
@@ -224,8 +225,13 @@ def completion_by_year(
     years = (
         completion_frame["session_id"].to_numpy(dtype=np.int64) // 10_000
     ).astype(np.int32)
+    # Audit finding L-1 (2026-07-28): iterating np.unique(years) emits only the
+    # years PRESENT, so a corpus spanning 2021 and 2023 silently omitted 2022's
+    # three cells. Spec §16.4.5 requires every declared cell with a status; the
+    # declared year axis is the contiguous span, so an absent year is emitted as
+    # an empty cell rather than vanishing.
     records = []
-    for year in np.unique(years):  # np.unique returns ascending == chronological
+    for year in range(int(years.min()), int(years.max()) + 1):
         for horizon in time_model.horizons_minutes:
             cell = {"year": int(year), "horizon_minutes": horizon}
             cell.update(_summarise(completion_frame, years == year, horizon))
@@ -239,6 +245,9 @@ def _run(store_root: Path) -> dict:
     exploration = BarStore.open(
         assert_exploration_safe(store_path(store_root, Corpus.EXPLORATION, "5m"))
     )
+    # Audit M-5: consume the store's own declared bar duration rather than
+    # assuming this engine's five minutes matches it.
+    assert_store_bar_seconds(exploration.manifest)
     time_model = TimeModel.from_constants(load_constants())
     frame = anchor_outcome_completion(
         time_model,

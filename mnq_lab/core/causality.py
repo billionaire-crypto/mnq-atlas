@@ -53,7 +53,34 @@ def _as_int64(values: np.ndarray, name: str) -> np.ndarray:
     return array
 
 
+def _as_scalar_int64(value: int, name: str) -> np.int64:
+    """Validate a SCALAR nanosecond quantity.
+
+    Audit finding M-1 (2026-07-28): array inputs were validated but scalars were
+    converted with a bare ``np.int64(...)``, so a ``datetime64[us]`` scalar was
+    silently reinterpreted as *nanoseconds* — a value 1000× too small, with no
+    error. Unit-bearing types are rejected outright rather than converted,
+    because converting one silently is exactly how an off-by-1000 reaches a
+    result nothing downstream can detect.
+    """
+    if isinstance(value, (np.datetime64, np.timedelta64)):
+        raise SpineError(
+            f"{name} must be a plain integer count of UTC nanoseconds, got "
+            f"{type(value).__name__} ({value!r}). A datetime64/timedelta64 scalar "
+            "carries its own unit and would be reinterpreted as nanoseconds; "
+            'convert explicitly with .astype("datetime64[ns]").view("int64").'
+        )
+    if isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer)):
+        raise SpineError(
+            f"{name} must be an integer count of UTC nanoseconds, got "
+            f"{type(value).__name__} ({value!r}); floats lose nanosecond precision"
+        )
+    return np.int64(value)
+
+
 def _validate_window(horizon_ns: int, interval_ns: int) -> None:
+    horizon_ns = int(_as_scalar_int64(horizon_ns, "horizon_ns"))
+    interval_ns = int(_as_scalar_int64(interval_ns, "interval_ns"))
     if interval_ns <= 0:
         raise SpineError(f"interval_ns must be positive, got {interval_ns}")
     if horizon_ns <= 0:
@@ -74,9 +101,10 @@ def interval_end_ns(interval_start_ns: np.ndarray, interval_ns: int) -> np.ndarr
     everything realized inside the interval.
     """
     starts = _as_int64(interval_start_ns, "interval_start_ns")
-    if interval_ns <= 0:
+    length = _as_scalar_int64(interval_ns, "interval_ns")
+    if length <= 0:
         raise SpineError(f"interval_ns must be positive, got {interval_ns}")
-    return starts + np.int64(interval_ns)
+    return starts + length
 
 
 def conditioner_input_mask(end_ns: np.ndarray, tau_ns: int) -> np.ndarray:
@@ -87,7 +115,7 @@ def conditioner_input_mask(end_ns: np.ndarray, tau_ns: int) -> np.ndarray:
     after τ — even by one nanosecond — is excluded.
     """
     ends = _as_int64(end_ns, "end_ns")
-    return ends <= np.int64(tau_ns)
+    return ends <= _as_scalar_int64(tau_ns, "tau_ns")
 
 
 def outcome_interval_mask(
@@ -101,7 +129,7 @@ def outcome_interval_mask(
     """
     starts = _as_int64(interval_start_ns, "interval_start_ns")
     _validate_window(horizon_ns, interval_ns)
-    tau = np.int64(tau_ns)
+    tau = _as_scalar_int64(tau_ns, "tau_ns")
     return (starts >= tau) & (starts < tau + np.int64(horizon_ns))
 
 
@@ -113,9 +141,8 @@ def required_interval_starts(tau_ns: int, horizon_ns: int, interval_ns: int) -> 
     last one starting at ``τ + horizon − interval``.
     """
     _validate_window(horizon_ns, interval_ns)
-    return np.arange(
-        np.int64(tau_ns), np.int64(tau_ns) + np.int64(horizon_ns), np.int64(interval_ns)
-    )
+    tau = _as_scalar_int64(tau_ns, "tau_ns")
+    return np.arange(tau, tau + np.int64(horizon_ns), np.int64(interval_ns))
 
 
 def interval_presence(

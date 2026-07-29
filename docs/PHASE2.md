@@ -46,28 +46,29 @@ labeled" with fewer than five.
 
 Reproduce with `python -m mnq_lab.outcomes.completion --store data`. `n_anchors` is the
 structurally eligible population per cell (state anchor AND window inside RTH);
-completion rates are over that population. `weight_ess` is NaN until Phase 4 and is
-omitted from the tables below for width.
+completion rates are over that population. `weight_ess` is rendered beside every
+`n_anchors` as §16.4.6 requires; it is `NaN` because the weighting layer arrives in
+Phase 4 — that is "not computed yet", not a computed value of zero.
 
 ### Completion by phase × horizon
 
-| phase | Δ | n_anchors | n_sessions | rate fully_labeled_1m_grid | rate observed_bar_path |
-|---|---|---|---|---|---|
-| open | 15 | 6,038 | 1,008 | 0.99868 | 0.99917 |
-| open | 30 | 6,038 | 1,008 | 0.99801 | 0.99884 |
-| open | 60 | 6,038 | 1,008 | 0.99669 | 0.99818 |
-| morning | 15 | 18,125 | 1,008 | 0.99895 | 0.99967 |
-| morning | 30 | 18,125 | 1,008 | 0.99834 | 0.99945 |
-| morning | 60 | 18,125 | 1,008 | 0.99757 | 0.99912 |
-| midday | 15 | 24,003 | 1,006 | 0.99429 | 0.99588 |
-| midday | 30 | 24,003 | 1,006 | 0.99000 | 0.99175 |
-| midday | 60 | 24,003 | 1,006 | 0.98188 | 0.98350 |
-| afternoon | 15 | 17,532 | 974 | 0.99949 | 1.00000 |
-| afternoon | 30 | 17,532 | 974 | 0.99926 | 1.00000 |
-| afternoon | 60 | 17,532 | 974 | 0.99914 | 1.00000 |
-| close | 15 | 9,740 | 974 | 1.00000 | 1.00000 |
-| close | 30 | 6,818 | 974 | 1.00000 | 1.00000 |
-| close | 60 | 974 | 974 | 1.00000 | 1.00000 |
+| phase | Δ | n_anchors | n_sessions | weight_ess | rate fully_labeled_1m_grid | rate observed_bar_path |
+|---|---|---|---|---|---|---|
+| open | 15 | 6,038 | 1,008 | NaN (Phase 4) | 0.99868 | 0.99917 |
+| open | 30 | 6,038 | 1,008 | NaN (Phase 4) | 0.99801 | 0.99884 |
+| open | 60 | 6,038 | 1,008 | NaN (Phase 4) | 0.99669 | 0.99818 |
+| morning | 15 | 18,125 | 1,008 | NaN (Phase 4) | 0.99895 | 0.99967 |
+| morning | 30 | 18,125 | 1,008 | NaN (Phase 4) | 0.99834 | 0.99945 |
+| morning | 60 | 18,125 | 1,008 | NaN (Phase 4) | 0.99757 | 0.99912 |
+| midday | 15 | 24,003 | 1,006 | NaN (Phase 4) | 0.99429 | 0.99588 |
+| midday | 30 | 24,003 | 1,006 | NaN (Phase 4) | 0.99000 | 0.99175 |
+| midday | 60 | 24,003 | 1,006 | NaN (Phase 4) | 0.98188 | 0.98350 |
+| afternoon | 15 | 17,532 | 974 | NaN (Phase 4) | 0.99949 | 1.00000 |
+| afternoon | 30 | 17,532 | 974 | NaN (Phase 4) | 0.99926 | 1.00000 |
+| afternoon | 60 | 17,532 | 974 | NaN (Phase 4) | 0.99914 | 1.00000 |
+| close | 15 | 9,740 | 974 | NaN (Phase 4) | 1.00000 | 1.00000 |
+| close | 30 | 6,818 | 974 | NaN (Phase 4) | 1.00000 | 1.00000 |
+| close | 60 | 974 | 974 | NaN (Phase 4) | 1.00000 | 1.00000 |
 
 The close-phase structural counts are exactly 10, 7, and 1 anchors per contributing
 session (9,740 / 6,818 / 974 over 974 sessions) — the §4.2 registered prediction
@@ -91,8 +92,12 @@ Completion is **not** uniform across the conditioning dimensions the atlas will 
   (0.98469 at Δ60 vs ≥0.99196 for every later year) — exactly §6's predicted
   direction: rejecting incomplete windows preferentially removes early, thinner data.
 - **By phase:** midday is the least complete phase at every horizon (0.98188 at Δ60 vs
-  ≥0.99669 elsewhere) — quiet-regime minutes are the ones that go missing, so
-  "quiet → less observable" is live in this data.
+  ≥0.99669 elsewhere). That is the entire measured claim. This document previously
+  added that "quiet-regime minutes are the ones that go missing", making
+  `quiet → less observable` sound established; it is not. Completion versus
+  volatility state cannot be measured until conditioners exist (Phase 7), and no
+  volatility variable was involved in producing this table. The phase-level result is
+  *consistent with* the §6 mechanism and is not evidence for it (audit finding M-8).
 - The gap between the two estimands (bars present but partially labeled) is
   concentrated in 2019–2020; from 2021 on the two rates coincide to 5 decimals.
 
@@ -103,15 +108,24 @@ volatility must carry it. Phase 3 computes `s00_p05` and freezes
 
 ### Session flags (D11b)
 
-35 sessions flagged `observed_rth_ended_early` (25 ending 12:00 CT, 7 at 12:15, 1 at
-10:00, 1 at 09:15, 1 with zero RTH bars: 20210402, `last_rth_bar_end_ct_minute = -1`);
-4 sessions flagged `observed_mid_rth_gap`; none flagged both. No calendar claim is
-made or possible (D11b); `calendar_early_close` is `"unknown"` for every session.
+Re-measured after the audit split the zero-RTH case out of "ended early":
+
+| flag | sessions | detail |
+|---|---|---|
+| `observed_rth_ended_early` | 34 | last RTH bar ends 12:00 CT ×25, 12:15 ×7, 10:00 ×1, 09:15 ×1 |
+| `observed_no_rth_bars` | 1 | 20210402 — no RTH bar at all; `last_rth_bar_end_ct_minute = -1` |
+| `observed_mid_rth_gap` | 4 | interior RTH labels missing, trading to 15:00 |
+| both early and gap | 0 | |
+
+The zero-RTH session was previously counted among 35 "ended early" sessions. It is now
+its own state: a session that never started did not end early, and the `-1` sentinel is
+excluded from any earliest-ending selection. No calendar claim is made or possible
+(D11b); `calendar_early_close` is `"unknown"` for all 1,009 sessions.
 
 ## Reproducible commands
 
 ```powershell
-# full suite (Phase 1 + Phase 2): expect 279 passed, 5 xfailed
+# full suite (Phase 1 + Phase 2): expect 288 passed, 5 xfailed
 python -m pytest tests -q
 
 # Phase 2 gate tests only
@@ -124,13 +138,54 @@ python -m mnq_lab.spine.gates --store data
 python -m mnq_lab.outcomes.completion --store data
 ```
 
+## External audit round 1 (2026-07-28) — verdict FAIL, and what changed
+
+An external adversarial audit replayed the baseline, mutation-tested the suite, and
+diffed these claims against their mechanisms. All 30 published completion figures
+reproduced exactly and Phase 1 did not regress, but **two required mutations survived
+the whole suite** and nine claims exceeded their mechanisms. Every finding is closed
+below; the completion tables above are unchanged by the fixes (re-measured, not
+transcribed), and the session-flag census changed as noted.
+
+| # | Finding | Resolution |
+|---|---|---|
+| M-1 | Scalar `tau_ns`/`horizon_ns` were converted with a bare `np.int64(...)`, so a `datetime64[us]` scalar silently became a value 1000× too small | `_as_scalar_int64` rejects unit-bearing and float scalars outright. `test_negative_scalar_unit_bearing_inputs_fail_closed` pins the exact leak. |
+| M-2 | The phase-tiling validator accepted a *backwards* phase (`morning = [10:30, 09:00]`), which chains end-to-start while overlapping its neighbours | Every phase must have positive duration and the boundary sequence must be strictly increasing. `test_negative_a_backwards_phase_is_refused`. |
+| M-3 | **Mutation survived:** dropping `expected == 5` from the fully-labeled criterion | Every fixture set `expected = 5`, so the conjunct was untestable. `synthetic_session_bars` gained `expected_components`; `test_a_bar_expecting_fewer_than_five_labels_is_not_fully_labeled` fails on the mutation. |
+| M-4 | **Mutation survived:** deleting the intra-RTH offset guard | Worse than reported — the guard was also *unreachable*: τ-grid localization raised an anonymous pandas `ValueError` first. The guard now runs before grid localization and is exercised by `test_the_intra_rth_offset_guard_actually_fires` (Africa/Khartoum, 2000-01-15, a real +02→+03 jump at 12:00 local). |
+| M-5 | `BAR_MINUTES = 5` claimed "structural to the store" but nothing consumed the store's declaration; a 10-minute store passed the divisibility check | `assert_store_bar_seconds` consumes the manifest's `bar_seconds` (300), and `_assert_bar_grid` checks the observed label stride. Two negative tests. |
+| M-6 | Presence matched by exact UTC instant across the whole input, without pairing on `session_id` | `_assert_sessions_own_their_bars` enforces `session_id == CME trade date` per bar via the spine's own rule. `test_negative_a_bar_labelled_with_the_wrong_session_is_refused`. |
+| M-7 | This document rendered `n_anchors` without `weight_ess` "for width" — a direct §16.4.6 violation | Column restored to the table above. |
+| M-8 | Prose claimed `quiet → less observable` is "live", which no measurement here supports | Rewritten to the measured claim only; see the confound section above. |
+| L-1 | `completion_by_year` iterated only the years present, dropping absent intervening years | Declared year axis is now the contiguous span, absent years emitted as empty cells with a status. `test_an_absent_intervening_year_is_emitted_as_an_empty_cell`. |
+| adj. | Session 20210402 (zero RTH bars) was flagged `observed_rth_ended_early` | Split into its own `observed_no_rth_bars` state; the `-1` sentinel is excluded from earliest-ending selection. |
+
+Both previously-surviving mutations were re-applied after the fix and now fail the
+suite; the mutation was reverted from a scratch backup, not from git, so no fix was
+lost in the process.
+
+## Open question the user must rule on before Phase 3
+
+**`observed_bar_path` window completeness is an implementer interpretation, not a
+ruled one.** This build treats a window as complete when all required 5-min bars are
+present, so a window missing an entire bar fails *both* estimands. §6's phrase
+"excursions across the bars present in the source" does not uniquely compel that
+reading — it can also be read as "measure across whatever bars exist, however sparse".
+The audit flagged this as unruled, and it is load-bearing: Phase 3 freezes completion
+thresholds computed under whichever reading is chosen. Logged as **D12 (OPEN)**. Under
+the current reading the two estimands differ only on 1-minute coverage, and the
+measured gap between them is small (worst cell 0.16 pp).
+
 ## What was not verified
 
-- Whether any of the 35 observed short sessions was a *scheduled* early close —
+- Whether any of the 34 observed short sessions was a *scheduled* early close —
   impossible without a versioned CME calendar table, and not claimed (D11b).
-- `BAR_MINUTES = 5` is asserted structural to the bars_5m store (all 274,847
-  exploration labels sit on the 300 s grid — measured) but is not a YAML constant; a
-  future store at another frequency must not reuse this module unchanged.
 - Completion-vs-**volatility-state** (the full §16.5-item-6 program) cannot be
   measured until conditioners exist (Phase 7); completion-vs-year and vs-phase are the
-  Phase 2 slice of it.
+  Phase 2 slice of it, and neither is evidence about volatility.
+- The engine is proven correct for 5-minute bars only. It now *refuses* other
+  frequencies (M-5) rather than assuming them, but no other frequency was tested for
+  correctness — refusal is the claim, not support.
+- `_assert_sessions_own_their_bars` enforces the CME trade-date rule specifically, so
+  it is meaningful only for a CME session calendar; the Khartoum guard fixture
+  deliberately runs before it.

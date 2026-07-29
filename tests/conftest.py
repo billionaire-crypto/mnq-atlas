@@ -143,6 +143,7 @@ def synthetic_session_bars(
     *,
     missing: tuple[str, ...] = (),
     partial: dict[str, int] | None = None,
+    expected_components: dict[str, int] | None = None,
     first_label: str = "08:25",
     last_label_exclusive: str = "15:00",
 ):
@@ -152,18 +153,25 @@ def synthetic_session_bars(
     labels ``[first_label, last_label_exclusive)`` — by default 08:25 (the bar
     whose close is the first eligible τ = 08:30 under handoff §6.5 Ruling 1)
     through 14:55. ``missing`` drops labels entirely; ``partial`` maps a label to
-    an ``observed_1m_components`` count below five.
+    an ``observed_1m_components`` count below five; ``expected_components`` maps a
+    label to an ``expected_1m_components`` count below five, which is what
+    distinguishes the two conjuncts of the fully-labeled criterion (audit M-3 —
+    every fixture previously set expected = 5, so dropping the `== 5` conjunct
+    was undetectable).
     """
     import numpy as np
 
     partial = partial or {}
+    expected_components = expected_components or {}
     times = [t for t in five_minute_times(first_label, last_label_exclusive)
              if t not in set(missing)]
     ts = np.asarray([ct_ns(f"{trade_date} {t}") for t in times], dtype=np.int64)
     session = np.full(len(times), int(trade_date.replace("-", "")), dtype=np.int32)
-    expected = np.full(len(times), 5, dtype=np.int8)
+    expected = np.asarray(
+        [expected_components.get(t, 5) for t in times], dtype=np.int8
+    )
     observed = np.asarray(
-        [partial.get(t, 5) for t in times], dtype=np.int8
+        [partial.get(t, expected_components.get(t, 5)) for t in times], dtype=np.int8
     )
     return session, ts, observed, expected
 

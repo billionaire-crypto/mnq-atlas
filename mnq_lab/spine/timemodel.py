@@ -42,22 +42,27 @@ import pandas as pd
 from mnq_lab import SpineError
 from mnq_lab.constants import Constants, load_constants
 from mnq_lab.core.causality import interval_end_ns
-from mnq_lab.spine.calendar import session_ids_to_strings
+from mnq_lab.spine.calendar import session_ids_to_strings, trade_date_ids
 from mnq_lab.spine.vendored import CME_TIMEZONE
 
 __all__ = [
     "BAR_MINUTES",
+    "BAR_SECONDS",
     "STATUS_OK",
     "STATUS_ANCHOR_BAR_MISSING",
     "TimeModel",
+    "assert_store_bar_seconds",
 ]
 
 # The spine's study bars are 5-minute bars (spec §4.1; the store is bars_5m). This is
 # a structural property of the store, not an analysis constant, which is why it is not
-# in analysis_constants_v1.yaml; anchor_grid fails closed if store labels ever sit off
-# the 5-minute grid.
+# in analysis_constants_v1.yaml. It is not merely asserted: `assert_store_bar_seconds`
+# checks the store manifest's declared `bar_seconds`, and `TimeModel._assert_bar_grid`
+# checks the observed label stride (audit M-5 — divisibility alone cannot tell a
+# 5-minute store from a 10-minute one).
 BAR_MINUTES = 5
-BAR_NS = BAR_MINUTES * 60 * 1_000_000_000
+BAR_SECONDS = BAR_MINUTES * 60
+BAR_NS = BAR_SECONDS * 1_000_000_000
 MINUTE_NS = 60 * 1_000_000_000
 
 STATUS_OK = "ok"
@@ -65,6 +70,30 @@ STATUS_ANCHOR_BAR_MISSING = "anchor_bar_missing"
 
 # Ruling 2 three-state semantics: the calendar truth is unknown, not false.
 CALENDAR_EARLY_CLOSE_UNKNOWN = "unknown"
+
+
+def assert_store_bar_seconds(manifest: dict) -> None:
+    """Refuse a store whose declared bar duration is not this engine's.
+
+    Audit finding M-5 (2026-07-28): `BAR_MINUTES = 5` was justified as "structural
+    to the store" but nothing consumed the store's own declaration of it. The
+    Phase 1 manifest carries `bar_seconds`; this consumes it, so a store built at
+    another frequency is rejected at the door rather than producing a τ-grid that
+    is half `anchor_bar_missing`.
+    """
+    declared = manifest.get("bar_seconds")
+    if declared is None:
+        raise SpineError(
+            "store manifest declares no bar_seconds; refusing to assume "
+            f"{BAR_SECONDS}s bars (audit M-5)"
+        )
+    if int(declared) != BAR_SECONDS:
+        raise SpineError(
+            f"store declares bar_seconds={int(declared)} but this engine is built "
+            f"for {BAR_SECONDS}s bars. The τ-grid and every horizon are expressed "
+            f"in {BAR_MINUTES}-minute bars; running it against another frequency "
+            "would silently mis-key every anchor. Stop and report (spec §16.6)."
+        )
 
 
 def _parse_ct_minutes(value: str, name: str) -> int:
@@ -148,12 +177,29 @@ class TimeModel:
                 f"last phase ends at minute {ends[-1]}, RTH ends at {rth_end}; "
                 "phases must tile RTH exactly (spec §4.2)"
             )
+        # Audit finding M-2 (2026-07-28): checking only "each end == the next start"
+        # accepts a BACKWARDS phase (e.g. morning = [10:30, 09:00]), which still
+        # chains but silently overlaps its neighbours and empties itself of anchors.
+        # Every phase must have positive duration and the whole boundary sequence
+        # must be strictly increasing, or the table does not tile RTH.
+        for name, start, end in zip(names, starts, ends):
+            if start >= end:
+                raise SpineError(
+                    f"phase {name!r} spans [{start}, {end}) minutes, which is empty "
+                    "or backwards; phases must tile RTH exactly (spec §4.2)"
+                )
         for i in range(len(names) - 1):
             if ends[i] != starts[i + 1]:
                 raise SpineError(
                     f"phase {names[i]!r} ends at minute {ends[i]} but {names[i+1]!r} "
                     f"starts at {starts[i+1]}; phases must be contiguous (spec §4.2)"
                 )
+        boundaries = [starts[0], *ends]
+        if any(later <= earlier for earlier, later in zip(boundaries, boundaries[1:])):
+            raise SpineError(
+                f"phase boundaries {boundaries} are not strictly increasing; phases "
+                "must tile RTH exactly with no overlap (spec §4.2)"
+            )
 
         horizons = constants.get("horizons_minutes")
         if not isinstance(horizons, list) or not horizons:
@@ -260,6 +306,100 @@ class TimeModel:
         )
         return localized.tz_convert("UTC").asi8
 
+    # --- fail-closed input guards (extracted so each is directly testable) ---------
+
+    def _assert_bar_grid(self, labels: np.ndarray) -> None:
+        """Labels must lie on the bar grid AND actually have the bar's stride.
+
+        Audit finding M-5 (2026-07-28): divisibility alone does not identify the
+        bar duration — a 10- or 15-minute store is also divisible by five
+        minutes, and would silently produce a τ-grid where every second gridpoint
+        reports ``anchor_bar_missing``. The smallest positive gap between
+        consecutive labels IS the store's bar duration wherever any two adjacent
+        bars exist, so it is checked directly. See also
+        ``assert_store_bar_seconds``, which consumes the manifest's declared
+        ``bar_seconds`` when a store (rather than a raw array) is available.
+        """
+        if labels.size and int((labels % BAR_NS != 0).sum()):
+            raise SpineError(
+                f"store labels off the {BAR_MINUTES}-minute grid; anchor grid "
+                "construction requires aligned 5-minute bars"
+            )
+        if labels.size < 2:
+            return
+        gaps = np.diff(labels)
+        if int((gaps <= 0).sum()):
+            raise SpineError(
+                "ts_event_ns must be strictly increasing; the spine emits one "
+                "chronological active-contract chain"
+            )
+        stride = int(gaps.min())
+        if stride != BAR_NS:
+            raise SpineError(
+                f"smallest gap between consecutive labels is {stride / 6e10:g} "
+                f"minutes, but this engine is built for {BAR_MINUTES}-minute bars. "
+                "Refusing to infer the bar duration: a 10- or 15-minute store is "
+                "also divisible by 5 minutes and would silently drop half the "
+                "τ-grid (audit M-5). Pass a 5-minute store, or re-derive the "
+                "engine's bar duration explicitly."
+            )
+
+    def _assert_no_offset_change_inside_rth(self, session_dates: np.ndarray) -> None:
+        """No UTC-offset change may fall inside RTH on any session.
+
+        Horizon arithmetic elsewhere adds *physical* minutes to τ while phase and
+        eligibility logic uses *wall-clock* minutes. The two agree only while the
+        UTC offset is constant across RTH. US DST switches at 02:00 local, so this
+        holds for every CME session — but it is a load-bearing assumption, so it
+        is proven per session rather than asserted in a comment.
+        """
+        rth_span_ns = np.int64((self.rth_end_minute - self.rth_start_minute) * MINUTE_NS)
+        bounds_ns = self._localize_session_minutes(
+            np.repeat(session_dates, 2),
+            np.tile(
+                np.asarray([self.rth_start_minute, self.rth_end_minute]),
+                len(session_dates),
+            ),
+        ).reshape(len(session_dates), 2)
+        offset_shifted = bounds_ns[:, 1] - bounds_ns[:, 0] != rth_span_ns
+        if int(offset_shifted.sum()):
+            bad = np.asarray(session_dates)[offset_shifted]
+            raise SpineError(
+                f"UTC offset changes inside RTH for sessions {bad[:5].tolist()}; "
+                "wall-clock horizon arithmetic is invalid there. Stop and report "
+                "(spec §16.6) — do not fall back to physical-time buckets."
+            )
+
+    def _assert_sessions_own_their_bars(
+        self, sessions: np.ndarray, labels: np.ndarray
+    ) -> None:
+        """Every bar's ``session_id`` must equal its own CME trade date.
+
+        Audit finding M-6 (2026-07-28): anchor and outcome presence are matched by
+        exact UTC instant across the whole input, without pairing on
+        ``session_id``. That is sound only because a UTC instant belongs to
+        exactly one CME session — true of the built stores (independently
+        verified: zero timestamp-to-session-ID mismatches), but an assumption
+        about the *input*, not a property enforced by this module. So it is
+        enforced here, once, using the spine's own trade-date rule.
+        """
+        if labels.size == 0:
+            return
+        derived = trade_date_ids(
+            pd.Series(pd.to_datetime(labels, unit="ns", utc=True))
+        )
+        mismatched = derived != np.asarray(sessions, dtype=np.int32)
+        if int(mismatched.sum()):
+            first = int(np.flatnonzero(mismatched)[0])
+            raise SpineError(
+                f"{int(mismatched.sum())} bar(s) carry a session_id that is not "
+                f"their CME trade date; first at index {first}: label "
+                f"{pd.Timestamp(int(labels[first]), unit='ns', tz='UTC')} is trade "
+                f"date {int(derived[first])} but is labelled {int(sessions[first])}. "
+                "Exact-instant presence matching would attribute one session's bar "
+                "to another (audit M-6)."
+            )
+
     def anchor_grid(
         self, session_id: np.ndarray, ts_event_ns: np.ndarray
     ) -> pd.DataFrame:
@@ -273,10 +413,13 @@ class TimeModel:
         UTC, ``anchor_label_ns`` int64 UTC (the bar whose close is observed at τ,
         label = τ − 5 min), ``phase`` str, ``status`` str.
 
-        Also proves, per session, that RTH start and end are separated by exactly
-        ``rth_end − rth_start`` physical minutes — i.e. no UTC-offset change falls
-        inside RTH — and fails closed otherwise, because horizon arithmetic
-        elsewhere adds physical minutes to τ.
+        Validation order matters and is deliberate (audit findings M-4, M-5, M-6):
+        the intra-RTH offset guard runs BEFORE the τ-grid is localized, because a
+        session whose offset changes inside RTH also has nonexistent or ambiguous
+        grid minutes, and localizing the grid first would raise an anonymous
+        pandas ``ValueError`` instead of this module's diagnostic. The
+        session-ownership check runs after the offset guard because it applies the
+        CME trade-date rule, which is meaningful only for a CME session calendar.
         """
         sessions = np.asarray(session_id)
         labels = np.asarray(ts_event_ns)
@@ -284,36 +427,19 @@ class TimeModel:
             raise SpineError(f"ts_event_ns must be int64, got {labels.dtype}")
         if sessions.shape != labels.shape:
             raise SpineError("session_id and ts_event_ns must be aligned")
-        if labels.size and int((labels % BAR_NS != 0).sum()):
-            raise SpineError(
-                f"store labels off the {BAR_MINUTES}-minute grid; anchor grid "
-                "construction requires aligned 5-minute bars"
-            )
+        self._assert_bar_grid(labels)
 
         unique_sessions = np.unique(sessions).astype(np.int32)
         session_dates = session_ids_to_strings(unique_sessions)
         grid = self.tau_grid_ct_minutes()
         n_sessions, n_grid = len(unique_sessions), len(grid)
 
+        self._assert_no_offset_change_inside_rth(session_dates)
+        self._assert_sessions_own_their_bars(sessions, labels)
+
         tau_ns = self._localize_session_minutes(
             np.repeat(session_dates, n_grid), np.tile(grid, n_sessions)
         )
-
-        # Fail closed if any UTC-offset change falls inside RTH (see docstring).
-        rth_span_ns = np.int64((self.rth_end_minute - self.rth_start_minute) * MINUTE_NS)
-        bounds_ns = self._localize_session_minutes(
-            np.repeat(session_dates, 2),
-            np.tile(np.asarray([self.rth_start_minute, self.rth_end_minute]), n_sessions),
-        ).reshape(n_sessions, 2)
-        offset_shifted = bounds_ns[:, 1] - bounds_ns[:, 0] != rth_span_ns
-        if int(offset_shifted.sum()):
-            bad = session_dates[offset_shifted]
-            raise SpineError(
-                f"UTC offset changes inside RTH for sessions {bad[:5].tolist()}; "
-                "wall-clock horizon arithmetic is invalid there. Stop and report "
-                "(spec §16.6) — do not fall back to physical-time buckets."
-            )
-
         anchor_label_ns = tau_ns - np.int64(BAR_NS)
         present = np.isin(anchor_label_ns, labels)
         status = np.where(present, STATUS_OK, STATUS_ANCHOR_BAR_MISSING)
@@ -337,19 +463,32 @@ class TimeModel:
     ) -> pd.DataFrame:
         """Per-session, data-derived RTH shape flags. No calendar claims.
 
-        ``observed_rth_ended_early`` — the trailing end of the RTH label grid is
-        missing: the last observed RTH bar ends before ``rth_end``. A scheduled
-        early close, a feed outage, and a vendor gap all produce the same flag;
-        that uncertainty is intentional (Ruling 2) and is why the name says
-        *observed*, never *official*.
+        ``observed_no_rth_bars`` — the session has **no** RTH bar at all, so it
+        never started as far as this data shows. Audit adjudication (2026-07-28):
+        such a session was previously flagged ``observed_rth_ended_early``, which
+        is a claim the data does not support — a session that never started did
+        not end early. It is now its own state, mutually exclusive with
+        ``observed_rth_ended_early``. Exactly one exploration session
+        (20210402) is in this state.
+
+        ``observed_rth_ended_early`` — some RTH bars exist AND the trailing end of
+        the RTH label grid is missing: the last observed RTH bar ends before
+        ``rth_end``. A scheduled early close, a feed outage, and a vendor gap all
+        produce the same flag; that uncertainty is intentional (Ruling 2) and is
+        why the name says *observed*, never *official*.
 
         ``observed_mid_rth_gap`` — at least one RTH label is missing strictly
         before the last observed one. Truncated-end and mid-session-gap sessions
         are therefore distinguished: a session missing 10:00–10:25 but trading to
         15:00 gaps without ending early, and vice versa. A session can be both.
 
-        ``observed_short_session`` — alias of ``observed_rth_ended_early`` (the
-        session's RTH, as observed in data, is short).
+        ``observed_short_session`` — alias of ``observed_rth_ended_early``: the
+        session's RTH, as observed in data, is short *but nonempty*.
+
+        ``last_rth_bar_end_ct_minute`` — CT minute at which the last observed RTH
+        bar ends, or the sentinel ``-1`` when ``observed_no_rth_bars``. Consumers
+        ranking sessions by this value must exclude the sentinel; it is not an
+        early end.
 
         ``calendar_early_close`` — the constant ``"unknown"``: whether any
         shortening was scheduled cannot be known without a versioned CME calendar
@@ -382,11 +521,13 @@ class TimeModel:
             np.cumprod(~present[:, ::-1], axis=1).sum(axis=1).astype(np.int32)
         )
         interior = missing - trailing
-        ended_early = trailing > 0
+        no_rth = observed == 0
+        # A session with no RTH bars did not "end early" — it never started.
+        ended_early = (trailing > 0) & ~no_rth
         last_end_minute = np.where(
-            observed > 0,
-            self.rth_end_minute - BAR_MINUTES * trailing,
+            no_rth,
             np.int32(-1),
+            self.rth_end_minute - BAR_MINUTES * trailing,
         ).astype(np.int32)
 
         return pd.DataFrame(
@@ -397,6 +538,7 @@ class TimeModel:
                 "n_rth_bars_missing_trailing": trailing,
                 "n_rth_bars_missing_interior": interior,
                 "last_rth_bar_end_ct_minute": last_end_minute,
+                "observed_no_rth_bars": no_rth,
                 "observed_rth_ended_early": ended_early,
                 "observed_mid_rth_gap": interior > 0,
                 "observed_short_session": ended_early,

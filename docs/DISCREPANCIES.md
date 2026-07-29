@@ -344,13 +344,64 @@ both). The YAML's `completion.source_population.include_holidays_flagged: true` 
 a new versioned input with a ledger entry — required no later than the seasonal
 profile (Phase 7) and formal inference exclusions (Phase 10).
 
-**Measured (exploration tier, 1009 sessions, 2026-07-28):** 35 sessions have
-`observed_rth_ended_early` — last RTH bar ends 12:00 CT in 25 sessions, 12:15 in 7,
-10:00 in 1, 09:15 in 1, and one session (20210402) has **zero RTH bars** while its
-overnight bars exist (`last_rth_bar_end_ct_minute = -1`). 4 sessions have
+**Measured (exploration tier, 1009 sessions, 2026-07-28; re-measured after the
+external audit):** 34 sessions have `observed_rth_ended_early` — last RTH bar ends
+12:00 CT in 25 sessions, 12:15 in 7, 10:00 in 1, 09:15 in 1. One further session
+(20210402) has **zero RTH bars** while its overnight bars exist. 4 sessions have
 `observed_mid_rth_gap`; no session has both. §13 test 1's early-close coverage uses a
 synthetic shortened-session fixture plus one real session **selected by data** (the
 earliest observed RTH end), with no holiday name attached anywhere.
 
-**Not verified (by design):** which of the 35 shortenings were scheduled. That
-classification is impossible without the calendar table and is not claimed.
+**Audit correction (2026-07-28).** 20210402 was initially counted among 35
+"ended early" sessions with the sentinel `last_rth_bar_end_ct_minute = -1`. The
+external audit judged that semantically weak, and it was: *a session that never
+started did not end early*, and the flag asserted more than the data shows. It is now
+a distinct state, `observed_no_rth_bars`, mutually exclusive with
+`observed_rth_ended_early`; the `-1` sentinel is documented as "no RTH bars", and any
+consumer ranking sessions by last-end minute must exclude it — the real-session test
+now asserts that exclusion.
+
+**Not verified (by design):** which of the 34 shortenings were scheduled, and whether
+20210402's absence was a holiday, an outage, or a vendor gap. That classification is
+impossible without the calendar table and is not claimed.
+
+---
+
+## D12 — `observed_bar_path` window completeness is not uniquely determined by §6 — `OPEN`
+
+**Spec §6:** the two estimands are `fully_labeled_1m_grid` — "every 5-min bar in the
+path contains all five expected 1-min labels" — and `observed_bar_path` — "excursions
+across the bars present in the source".
+
+**The ambiguity.** For `fully_labeled_1m_grid` the rule is explicit. For
+`observed_bar_path` "the bars present in the source" admits two readings when a
+required 5-min bar is entirely absent:
+
+1. **Implemented here (conservative):** a window is complete only if *all* required
+   5-min bars are present; 1-minute coverage is not required. A window missing a whole
+   bar is incomplete under **both** estimands, because an excursion measured across an
+   absent interval would invent the price path over that interval. The two estimands
+   then differ *exactly* on 1-minute coverage — which is what §13 test 5's
+   discriminating case tests.
+2. **Permissive:** measure the excursion across whatever bars exist, so a window with a
+   missing bar is still "observed", just sparser. Under this reading the estimand
+   places no completeness requirement at all, and `min_completion_*` would be
+   meaningless for it.
+
+**Raised by:** the external Phase 2 audit (2026-07-28), which confirmed the
+implementation is internally consistent and documented, but noted the spec text does
+not compel reading 1 and that no ruling exists.
+
+**Why it matters now:** Phase 3 freezes `min_completion_h15/h30/h60` into the YAML from
+the S00 population **under a chosen estimand**, with a ledger entry, and §16.4.2
+forbids changing a constant after the affected result is computed. Choosing the reading
+after the thresholds are frozen would be exactly that.
+
+**Measured impact under the current reading (exploration tier):** the two estimands
+differ by at most 0.16 pp in any phase × horizon cell (largest gap: midday Δ60,
+0.98188 vs 0.98350). Whole-bar absences are rare, so the two readings would produce
+similar thresholds — but "similar" is not "ruled", and the difference is not zero.
+
+**Status:** OPEN — requires a user ruling before Phase 3 freezes thresholds. Reading 1
+is implemented and documented; nothing is coded around the ambiguity, and no threshold
+has been frozen.

@@ -33,6 +33,7 @@ from mnq_lab.spine.timemodel import (
     STATUS_ANCHOR_BAR_MISSING,
     STATUS_OK,
     TimeModel,
+    assert_store_bar_seconds,
 )
 
 from tests.conftest import ct_ns, synthetic_session_bars
@@ -152,13 +153,17 @@ def test_negative_a_divergent_yaml_changes_anchor_output(tmp_path):
 
     Phase 1 built byte-identical data under this altered YAML because nothing
     consumed the constant. Phase 2 is the consumer: the same alteration must now
-    produce a different anchor grid. (Both occurrences of "08:30" move — the RTH
-    bound and the open-phase start — so the phase table still tiles and the model
-    constructs; the *tiling-violation* case is the next test.)
+    produce a different anchor grid. The phases are moved with the bound so the
+    table still tiles RTH and the model constructs — the point is that a VALID
+    but different YAML changes output, not that an invalid one is refused (the
+    two tests after this one cover refusal).
     """
     altered = tmp_path / "divergent.yaml"
     altered.write_text(
-        CONSTANTS_PATH.read_text(encoding="utf-8").replace('"08:30"', '"09:00"'),
+        CONSTANTS_PATH.read_text(encoding="utf-8")
+        .replace('rth_start_ct: "08:30"', 'rth_start_ct: "09:00"')
+        .replace('open:      ["08:30", "09:00"]', 'open:      ["09:00", "09:30"]')
+        .replace('morning:   ["09:00", "10:30"]', 'morning:   ["09:30", "10:30"]'),
         encoding="utf-8",
     )
     divergent = TimeModel.from_constants(load_constants(altered))
@@ -328,6 +333,9 @@ def test_a_real_short_session_selected_by_data_not_by_name(time_model, explorati
 
     short = flags[flags["observed_rth_ended_early"]]
     assert len(short) > 0, "no exploration session ends its RTH early — unexpected"
+    # The -1 sentinel means "no RTH bars at all", not "ended earliest"; sessions
+    # in that state are excluded from this flag entirely (audit adjudication).
+    assert not (short["last_rth_bar_end_ct_minute"] == -1).any()
     earliest_end = int(short["last_rth_bar_end_ct_minute"].to_numpy().min())
     assert earliest_end < 900
     example = short[short["last_rth_bar_end_ct_minute"] == earliest_end].iloc[0]
@@ -368,6 +376,121 @@ def test_negative_off_grid_bar_labels_are_rejected(time_model):
     off_grid = np.asarray([ct_ns(f"{ORDINARY} 08:31")], dtype=np.int64)
     with pytest.raises(SpineError, match="grid"):
         time_model.anchor_grid(session, off_grid)
+
+
+# --- audit-round fixes: each guard proven able to fire -------------------------------
+
+def test_the_intra_rth_offset_guard_actually_fires():
+    """Audit finding M-4 (2026-07-28): the guard was untested — and, as found
+    while fixing it, UNREACHABLE, because localizing the τ-grid raised an
+    anonymous pandas ValueError before the guard's diagnostic could run.
+
+    Africa/Khartoum really did jump +02:00 → +03:00 at 12:00 local on
+    2000-01-15, squarely inside an 08:30–15:00 window: the wall-clock span is 390
+    minutes but the physical span is 330. The model is constructed directly
+    rather than from the YAML, because `from_constants` (correctly) refuses any
+    zone but America/Chicago — the guard, not the loader, is under test here.
+    """
+    khartoum = TimeModel(
+        session_tz="Africa/Khartoum",
+        rth_start_minute=8 * 60 + 30,
+        rth_end_minute=15 * 60,
+        phase_names=("open",),
+        phase_starts=(8 * 60 + 30,),
+        phase_ends=(15 * 60,),
+        horizons_minutes=(15, 30, 60),
+    )
+    with pytest.raises(SpineError, match="UTC offset changes inside RTH"):
+        khartoum._assert_no_offset_change_inside_rth(np.asarray(["2000-01-15"]))
+
+    # Specific, not blanket: the day before and the day after are clean, so the
+    # guard is discriminating rather than failing on everything.
+    khartoum._assert_no_offset_change_inside_rth(
+        np.asarray(["2000-01-14", "2000-01-16"])
+    )
+
+    # And it fires through the public entry point, BEFORE the τ-grid is
+    # localized — the ordering that makes the diagnostic reachable at all.
+    session = np.asarray([20000115], dtype=np.int32)
+    label = np.asarray([ct_ns("2000-01-14 08:25")], dtype=np.int64)
+    with pytest.raises(SpineError, match="UTC offset changes inside RTH"):
+        khartoum.anchor_grid(session, label)
+
+
+def test_negative_a_backwards_phase_is_refused(tmp_path):
+    """Audit finding M-2: `open=[08:30,10:30]`, `morning=[10:30,09:00]`,
+    `midday=[09:00,12:30]` chains end-to-start at every step and previously
+    constructed, silently emptying `morning` and overlapping `midday`."""
+    import copy
+    from pathlib import Path
+
+    from mnq_lab.constants import Constants
+
+    data = copy.deepcopy(load_constants().as_dict())
+    data["session_phases"] = {
+        "open": ["08:30", "10:30"],
+        "morning": ["10:30", "09:00"],
+        "midday": ["09:00", "12:30"],
+        "afternoon": ["12:30", "14:00"],
+        "close": ["14:00", "15:00"],
+    }
+    with pytest.raises(SpineError, match="empty or backwards"):
+        TimeModel.from_constants(Constants(data, Path("<memory>")))
+
+
+def test_negative_a_ten_minute_store_is_refused(time_model):
+    """Audit finding M-5: 10-minute labels are divisible by five minutes, so the
+    old check accepted them and produced a grid half full of `anchor_bar_missing`."""
+    ten_minute = np.asarray(
+        [ct_ns(f"{ORDINARY} {m // 60:02d}:{m % 60:02d}") for m in range(505, 900, 10)],
+        dtype=np.int64,
+    )
+    session = np.full(len(ten_minute), 20210615, dtype=np.int32)
+    with pytest.raises(SpineError, match="smallest gap"):
+        time_model.anchor_grid(session, ten_minute)
+
+
+def test_negative_a_store_declaring_other_bar_seconds_is_refused(exploration_5m):
+    """The manifest's own `bar_seconds` is consumed, not assumed (audit M-5)."""
+    assert_store_bar_seconds(exploration_5m.manifest)
+    assert exploration_5m.manifest["bar_seconds"] == 300
+    with pytest.raises(SpineError, match="bar_seconds=600"):
+        assert_store_bar_seconds({**exploration_5m.manifest, "bar_seconds": 600})
+    with pytest.raises(SpineError, match="declares no bar_seconds"):
+        assert_store_bar_seconds({})
+
+
+def test_negative_a_bar_labelled_with_the_wrong_session_is_refused(time_model):
+    """Audit finding M-6: presence is matched by exact UTC instant across the
+    whole input, so a bar carrying another session's id would be counted for
+    whichever session claims the instant. The pairing is now enforced."""
+    session, ts, _, _ = synthetic_session_bars(ORDINARY)
+    corrupted = session.copy()
+    corrupted[10] = 20210616  # a real 2021-06-15 bar mislabelled as the next day
+    with pytest.raises(SpineError, match="not\n?\\s*their CME trade date|CME trade date"):
+        time_model.anchor_grid(corrupted, ts)
+    # The uncorrupted input still builds, so the guard is not blanket-failing.
+    assert len(time_model.anchor_grid(session, ts)) == 78
+
+
+def test_a_session_with_no_rth_bars_is_its_own_state(time_model):
+    """Audit adjudication: a session that never started did not 'end early'."""
+    session, ts, _, _ = synthetic_session_bars(
+        ORDINARY, first_label="16:00", last_label_exclusive="16:30"
+    )
+    flags = time_model.session_flags(session, ts).iloc[0]
+    assert flags["observed_no_rth_bars"]
+    assert not flags["observed_rth_ended_early"]
+    assert not flags["observed_short_session"]
+    assert flags["last_rth_bar_end_ct_minute"] == -1
+    assert flags["n_rth_bars_observed"] == 0
+
+    # A genuinely truncated session remains ended-early and is NOT no-RTH.
+    short_s, short_t, _, _ = synthetic_session_bars(
+        ORDINARY, last_label_exclusive="12:00"
+    )
+    short = time_model.session_flags(short_s, short_t).iloc[0]
+    assert short["observed_rth_ended_early"] and not short["observed_no_rth_bars"]
 
 
 def test_grid_timestamps_are_int64_ns(ordinary_grid):

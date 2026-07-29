@@ -23,6 +23,7 @@ from mnq_lab.core.causality import (
     conditioner_input_mask,
     interval_end_ns,
     outcome_interval_mask,
+    required_interval_starts,
 )
 
 from tests.conftest import ct_ns
@@ -145,3 +146,34 @@ def test_negative_malformed_inputs_fail_closed():
         outcome_interval_mask(good.astype(np.float64), TAU, 15 * MINUTE_NS, BAR_NS)
     with pytest.raises(SpineError, match="positive"):
         outcome_interval_mask(good, TAU, -15 * MINUTE_NS, BAR_NS)
+
+
+def test_negative_scalar_unit_bearing_inputs_fail_closed():
+    """Audit finding M-1 (2026-07-28): arrays were validated but SCALARS were
+    converted with a bare `np.int64(...)`, so a `datetime64[us]` τ silently became
+    its microsecond count — a value 1000× too small, with no error anywhere.
+
+    The concrete leak, before the fix:
+        required_interval_starts(np.datetime64('2021-06-15T15:00','us'), ...)
+        -> 1623769200000000   (want 1623769200000000000)
+    """
+    good = labels("09:55")
+    micro_tau = np.datetime64("2021-06-15T15:00", "us")
+
+    with pytest.raises(SpineError, match="datetime64"):
+        required_interval_starts(micro_tau, 15 * MINUTE_NS, BAR_NS)
+    with pytest.raises(SpineError, match="datetime64"):
+        conditioner_input_mask(good, micro_tau)
+    with pytest.raises(SpineError, match="datetime64"):
+        outcome_interval_mask(good, micro_tau, 15 * MINUTE_NS, BAR_NS)
+    with pytest.raises(SpineError, match="datetime64|timedelta64"):
+        outcome_interval_mask(good, TAU, np.timedelta64(15, "m"), BAR_NS)
+    # Floats lose nanosecond precision and are refused rather than truncated.
+    with pytest.raises(SpineError, match="integer"):
+        conditioner_input_mask(good, float(TAU))
+    with pytest.raises(SpineError, match="integer"):
+        interval_end_ns(good, 300.0)
+
+    # The correct scalar forms still work, so the guard is not blanket-failing.
+    assert conditioner_input_mask(good, TAU)[0]
+    assert int(required_interval_starts(TAU, 15 * MINUTE_NS, BAR_NS)[0]) == TAU

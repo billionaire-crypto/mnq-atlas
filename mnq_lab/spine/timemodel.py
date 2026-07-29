@@ -194,12 +194,11 @@ class TimeModel:
                     f"phase {names[i]!r} ends at minute {ends[i]} but {names[i+1]!r} "
                     f"starts at {starts[i+1]}; phases must be contiguous (spec §4.2)"
                 )
-        boundaries = [starts[0], *ends]
-        if any(later <= earlier for earlier, later in zip(boundaries, boundaries[1:])):
-            raise SpineError(
-                f"phase boundaries {boundaries} are not strictly increasing; phases "
-                "must tile RTH exactly with no overlap (spec §4.2)"
-            )
+        # No separate monotonicity check: positive duration (start < end) plus
+        # contiguity (end_i == start_{i+1}) already force the boundary sequence
+        # strictly increasing. A first draft of the M-2 fix asserted monotonicity
+        # again anyway — a check that could never fire, which is worse than no
+        # check (§16.7) — and it was removed once proven unreachable.
 
         horizons = constants.get("horizons_minutes")
         if not isinstance(horizons, list) or not horizons:
@@ -500,6 +499,14 @@ class TimeModel:
         labels = np.asarray(ts_event_ns)
         if labels.dtype != np.int64:
             raise SpineError(f"ts_event_ns must be int64, got {labels.dtype}")
+        if sessions.shape != labels.shape:
+            raise SpineError("session_id and ts_event_ns must be aligned")
+        # Found while preparing the round-2 audit: the round-1 M-6 fix guarded
+        # anchor_grid but left this method's identical exact-instant matching
+        # unguarded — the same borrow-across-sessions defect through another door.
+        # Same guards, same order, both entry points.
+        self._assert_bar_grid(labels)
+        self._assert_sessions_own_their_bars(sessions, labels)
 
         unique_sessions = np.unique(sessions).astype(np.int32)
         session_dates = session_ids_to_strings(unique_sessions)

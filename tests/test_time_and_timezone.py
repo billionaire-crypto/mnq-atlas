@@ -467,10 +467,15 @@ def test_negative_a_bar_labelled_with_the_wrong_session_is_refused(time_model):
     session, ts, _, _ = synthetic_session_bars(ORDINARY)
     corrupted = session.copy()
     corrupted[10] = 20210616  # a real 2021-06-15 bar mislabelled as the next day
-    with pytest.raises(SpineError, match="not\n?\\s*their CME trade date|CME trade date"):
+    with pytest.raises(SpineError, match="CME trade date"):
         time_model.anchor_grid(corrupted, ts)
+    # session_flags does the same exact-instant matching and must be guarded at
+    # its own door — the round-1 fix initially covered only anchor_grid.
+    with pytest.raises(SpineError, match="CME trade date"):
+        time_model.session_flags(corrupted, ts)
     # The uncorrupted input still builds, so the guard is not blanket-failing.
     assert len(time_model.anchor_grid(session, ts)) == 78
+    assert len(time_model.session_flags(session, ts)) == 1
 
 
 def test_a_session_with_no_rth_bars_is_its_own_state(time_model):

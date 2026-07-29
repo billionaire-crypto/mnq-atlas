@@ -1,0 +1,89 @@
+{
+  "affected_future_results": [
+    "S01A",
+    "all later results consuming completion thresholds"
+  ],
+  "artifact": {
+    "bytes": 7636,
+    "path": "data/exploration/s00/s00_threshold_input_v1.json",
+    "schema_version": "s00-completion-atlas-1",
+    "sha256": "725df33a00e53c6c356c4348df2a02fe9ed309d9d4e4118216894a70ef8a479d"
+  },
+  "audit": {
+    "auditor": "Opus 5",
+    "disclosures": [
+      "h30 is exactly one additional incomplete midday window away from a 0.98 candidate",
+      "observed_bar_path and round-not-floor happen to produce the same real-data candidates; synthetic mutations discriminate both rules"
+    ],
+    "reference": "Phase 3 implementation thread; Stage D independent candidate audit",
+    "verdict": "CLOSED",
+    "verdict_date": "2026-07-28"
+  },
+  "deriving_code_commit": "d9f2bc22bf0632531e57be2e5ae9dfb9c1e53124",
+  "entry_id": "phase3-s00-completion-thresholds-v1",
+  "entry_type": "completion_threshold_freeze_authorization",
+  "keys_previously_absent": [
+    "min_completion_h15",
+    "min_completion_h30",
+    "min_completion_h60"
+  ],
+  "ledger_format": "immutable_entry_file_v1",
+  "no_affected_result_has_run": true,
+  "no_affected_result_has_run_statement": "No S01A or later result affected by these thresholds has run.",
+  "old_yaml_sha256": "3f5c4bd5258eeb306d76d45aa4ad568a2483f007415e7d11df89ebbc8c4b182a",
+  "phase": 3,
+  "phase_date": "2026-07-28",
+  "program_id": "mnq-atlas-001",
+  "quantile": {
+    "all_five_phase_cells_required": true,
+    "convention": "discrete_inverse_cdf_equal_phase_weights",
+    "phase_weights": "equal",
+    "q_denominator": 20,
+    "q_numerator": 1
+  },
+  "source_population": {
+    "calendar_early_close_status": "unknown",
+    "declared_end_inclusive": "2023-03-29",
+    "declared_start_inclusive": "2019-05-05",
+    "horizons_minutes": [
+      15,
+      30,
+      60
+    ],
+    "include_holidays_and_short_sessions_flagged": true,
+    "include_thin_cells": true,
+    "path_estimand": "fully_labeled_1m_grid",
+    "phases": [
+      "open",
+      "morning",
+      "midday",
+      "afternoon",
+      "close"
+    ],
+    "rth_only": true,
+    "tier": "exploration"
+  },
+  "source_store": {
+    "bar_seconds": 300,
+    "build_id": "0ad7843647f17258",
+    "manifest_sha256": "1cf6ec5ce7822ce1333984909b52d5c937e4ccc06e280030bcacda22620ffd73",
+    "pipeline_version": "spine-1.0.0",
+    "row_count": 274847
+  },
+  "spec_version": 6,
+  "threshold_rule": "min_completion = max(0.90, floor(s00_p05 * 100) / 100)",
+  "thresholds": [
+    {
+      "key": "min_completion_h15",
+      "value": 0.99
+    },
+    {
+      "key": "min_completion_h30",
+      "value": 0.99
+    },
+    {
+      "key": "min_completion_h60",
+      "value": 0.98
+    }
+  ]
+}

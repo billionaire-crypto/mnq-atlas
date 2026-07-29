@@ -14,11 +14,20 @@ caught at the moment it happens rather than in the phase that finally reads them
 
 from __future__ import annotations
 
+import hashlib
+
 import pytest
 
 from mnq_lab.constants import CONSTANTS_PATH, SPEC_PATH, load_constants
 from mnq_lab.spine.gates import EXPECTED_ROLL_COUNT, ROLL_FIXTURE_PATH
 from mnq_lab.spine.seal import SEAL_BOUNDARY_TRADE_DATE
+
+PHASE5_PREREGISTRATION_PATH = (
+    SPEC_PATH.parent / "docs" / "PHASE5_PREREGISTRATION.md"
+)
+PHASE5_PREREGISTRATION_SHA256 = (
+    "22b82e3aef8a8dfb1410e3ad4ab5781fcef343371de3f156ec678c19d2a5b87c"
+)
 
 
 @pytest.fixture(scope="module")
@@ -29,6 +38,14 @@ def constants():
 def test_both_frozen_files_exist():
     assert SPEC_PATH.is_file(), "REV6_FROZEN_SPEC.md is missing"
     assert CONSTANTS_PATH.is_file(), "analysis_constants_v1.yaml is missing"
+
+
+def test_phase5_preregistration_bytes_are_pinned():
+    assert PHASE5_PREREGISTRATION_PATH.is_file()
+    assert (
+        hashlib.sha256(PHASE5_PREREGISTRATION_PATH.read_bytes()).hexdigest()
+        == PHASE5_PREREGISTRATION_SHA256
+    )
 
 
 def test_spec_version_and_program_id(constants):

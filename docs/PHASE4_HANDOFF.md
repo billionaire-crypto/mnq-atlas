@@ -39,9 +39,10 @@ Phase 3 signed off      65e9901a47902a67469dffdf99624e88623a833d
 next branch             phase-4-kernel
 ```
 
-The Phase 4 branch must be created from the commit containing this handoff,
-whose parent is the signed-off Phase 3 commit above. Do not branch from a remote
-tracking branch.
+The Phase 4 branch must be created from the exact handoff tip reported in the
+new-session prompt. The commits after the signed-off Phase 3 commit above are
+documentation-only continuity commits. Do not branch from a remote tracking
+branch.
 
 Starting replay:
 

@@ -435,4 +435,3 @@ def test_cli_writes_the_declared_artifact_without_editing_yaml(tmp_path):
     assert result["artifact"]["sha256"]
     assert output.read_bytes() == canonical_artifact_bytes(result["payload"])
     assert CONSTANTS_PATH.read_bytes() == before
-

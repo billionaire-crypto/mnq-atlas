@@ -51,6 +51,9 @@ completion:
     include_thin_cells: true
   rule: "min_completion = max(0.90, floor(s00_p05 * 100) / 100)"
   horizon_specific: true          # min_completion_h15 / h30 / h60
+  min_completion_h15: 0.99
+  min_completion_h30: 0.99
+  min_completion_h60: 0.98
   max_imbalance_absolute: 0.05
 
 positivity:

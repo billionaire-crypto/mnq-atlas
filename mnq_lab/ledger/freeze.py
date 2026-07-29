@@ -174,4 +174,3 @@ def load_phase3_completion_freeze(
             f"found {len(matches)}"
         )
     return matches[0]
-

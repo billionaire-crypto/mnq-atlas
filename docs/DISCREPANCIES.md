@@ -451,3 +451,56 @@ claim or a tolerance around CDF boundaries.
 **Not verified:** the audit did not establish a closed-form frequency for boundary
 changes outside its sampled binary64 populations. The measured 23% is a diagnostic of
 the adversarial fixture distribution, not an expected rate for atlas weights.
+
+---
+
+## D14 — “dual estimand” in §15 row 5 was undefined — `RESOLVED`
+
+**Frozen text:** §15 row 5 says:
+
+```text
+Bootstrap: whole-session, block sensitivity, dual estimand
+```
+
+The phrase “dual estimand” appears only there and is not defined locally. At
+least three pairs elsewhere in the frozen spec could initially appear to fit:
+
+1. §6’s two path estimands, `fully_labeled_1m_grid` and
+   `observed_bar_path`;
+2. §7.1’s session-equal primary and anchor-equal companion weightings; or
+3. §7.3’s horizon-specific and common support.
+
+Those readings imply different deliverables, so Phase 5 did not choose one
+silently.
+
+**Independent audit:** Opus 5 tied the phrase to §6. Section 6 is the only
+frozen location that explicitly counts exactly two objects and calls them
+“estimands.” Section 7.1 defines three population estimands and describes
+session-equal and anchor-equal as weightings within an estimand. Section 7.3
+calls horizon-specific and common alternatives “support,” not estimands.
+
+**User ruling (2026-07-29):** “dual estimand” in frozen-spec §15 row 5 means
+the two §6 path estimands:
+
+```text
+fully_labeled_1m_grid
+observed_bar_path
+```
+
+Phase 5 proves only the market-free abstraction required to support that pair:
+one coherent global resample plan can serve two aligned value/eligibility-mask
+paths with differing support, with masks applied only after the plan. Phase 5
+does not construct either market path estimand, import outcome logic into
+`core/`, or begin Phase 6+ work.
+
+Session-equal primary and anchor-equal companion weighting remain independently
+required Phase 5 paths under §7.1 and the signed-off Phase 4 contract. They are
+not the meaning of “dual estimand.”
+
+**Governance ruling:** this resolved discrepancy plus the committed
+`docs/PHASE5_PREREGISTRATION.md` and its SHA-256-pinning test are sufficient.
+The frozen YAML is unchanged. No Phase 5 entry is added to the Phase 3-only
+threshold ledger, and its schema is not expanded.
+
+**Status:** `RESOLVED` before any Phase 5 production implementation or
+stochastic acceptance execution.

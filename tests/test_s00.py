@@ -398,9 +398,9 @@ def test_s00_is_unchanged_after_its_derived_threshold_keys_exist(real_s00_payloa
     altered_data = copy.deepcopy(load_constants().as_dict())
     altered_data["completion"].update(
         {
-            "min_completion_h15": 0.99,
-            "min_completion_h30": 0.99,
-            "min_completion_h60": 0.98,
+            "min_completion_h15": 0.90,
+            "min_completion_h30": 0.91,
+            "min_completion_h60": 0.92,
         }
     )
     altered = Constants(altered_data, Path("<threshold-invariance-test>"))
@@ -412,18 +412,11 @@ def test_s00_is_unchanged_after_its_derived_threshold_keys_exist(real_s00_payloa
     )
 
 
-def test_threshold_keys_are_absent_before_the_freeze():
-    completion = load_constants().get("completion")
-    for key in (
-        "min_completion_h15",
-        "min_completion_h30",
-        "min_completion_h60",
-    ):
-        assert key not in completion
-    text = CONSTANTS_PATH.read_text(encoding="utf-8")
-    assert "\n  min_completion_h15:" not in text
-    assert "\n  min_completion_h30:" not in text
-    assert "\n  min_completion_h60:" not in text
+def test_s00_artifact_does_not_embed_its_derived_threshold_keys(real_s00_payload):
+    artifact = canonical_artifact_bytes(real_s00_payload)
+    assert b"min_completion_h15" not in artifact
+    assert b"min_completion_h30" not in artifact
+    assert b"min_completion_h60" not in artifact
 
 
 def test_cli_writes_the_declared_artifact_without_editing_yaml(tmp_path):

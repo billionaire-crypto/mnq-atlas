@@ -7,6 +7,8 @@ never supplies a default for a missing key.
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
+from numbers import Real
 from pathlib import Path
 from typing import Any
 
@@ -84,6 +86,65 @@ def load_constants(path: Path | None = None) -> Constants:
     if not isinstance(parsed, dict):
         raise SpineError(f"{resolved} did not parse to a mapping")
     return Constants(_normalise_yaml_keys(parsed), resolved)
+
+
+def load_completion_thresholds(path: Path | None = None) -> dict[int, float]:
+    """Load the Phase 3 horizon thresholds with no defaults.
+
+    S00 itself deliberately does not call this function: its threshold-input
+    artifact must be unchanged before and after the derived keys are frozen.
+    Every Phase 3+ consumer that applies completion gates must call this loader
+    rather than embedding a candidate value.
+    """
+    constants = load_constants(path)
+    horizons = constants.get("horizons_minutes")
+    if horizons != [15, 30, 60]:
+        raise SpineError(
+            "completion thresholds require the exact frozen horizons [15, 30, 60]"
+        )
+    completion = constants.get("completion")
+    if not isinstance(completion, dict):
+        raise SpineError("completion must be a mapping")
+
+    expected_keys = [f"min_completion_h{horizon}" for horizon in horizons]
+    actual_keys = [
+        key
+        for key in completion
+        if isinstance(key, str) and key.startswith("min_completion_h")
+    ]
+    if actual_keys != expected_keys:
+        raise SpineError(
+            "completion must contain exactly the horizon-specific threshold keys "
+            f"{expected_keys} in horizon order; found {actual_keys}. No default is "
+            "permitted."
+        )
+
+    loaded: dict[int, float] = {}
+    for horizon, key in zip(horizons, expected_keys):
+        value = constants.get("completion", key)
+        if isinstance(value, bool) or not isinstance(value, Real):
+            raise SpineError(f"completion.{key} must be numeric, got {value!r}")
+        try:
+            exact = Decimal(str(value))
+        except InvalidOperation as exc:
+            raise SpineError(
+                f"completion.{key} is not a finite decimal: {value!r}"
+            ) from exc
+        if not exact.is_finite():
+            raise SpineError(
+                f"completion.{key} is not a finite decimal: {value!r}"
+            )
+        if exact < Decimal("0.90") or exact > Decimal("1.00"):
+            raise SpineError(
+                f"completion.{key}={exact} is outside the frozen [0.90, 1.00] "
+                "range"
+            )
+        if exact * 100 != (exact * 100).to_integral_value():
+            raise SpineError(
+                f"completion.{key}={exact} is not an exact hundredth"
+            )
+        loaded[int(horizon)] = float(exact)
+    return loaded
 
 
 # --- Spine-relevant constants, resolved once and named -----------------------------

@@ -125,7 +125,7 @@ excluded from any earliest-ending selection. No calendar claim is made or possib
 ## Reproducible commands
 
 ```powershell
-# full suite (Phase 1 + Phase 2): expect 293 passed, 5 xfailed
+# full suite (Phase 1 + Phase 2): expect 294 passed, 5 xfailed
 python -m pytest tests -q
 
 # Phase 2 gate tests only
@@ -197,7 +197,7 @@ Suite after round 2: **291 passed, 5 xfailed**; gates 4/4; all 30 completion fig
 and the flag census unchanged (doc-number corrections only — M-2 changed a *claim
 about* the numbers, not the numbers).
 
-## Developer response to external audit round 3 (2026-07-28) — pending Fable 5 audit
+## Initial developer response submitted for external audit round 3 (2026-07-28)
 
 The round-3 audit confirmed the four round-2 repairs, then found one fresh medium
 defect and one low mutation-coverage gap. These changes are implementation claims,
@@ -210,6 +210,24 @@ not an audit closure:
 
 Developer replay after these changes: **293 passed, 5 xfailed**; gates 4/4; completion
 figures and session flags unchanged. D12 remains **OPEN** and still blocks Phase 3.
+
+### Developer response to the round-3 audit finding — pending Opus 5 verification
+
+The round-3 audit verified both fixes above, but correctly returned **FAIL** because
+the original fixed-offset mutation had not been applied independently to both
+timezone-conversion sites. Replacing `TimeModel.ct_minute_of_day`'s conversion with
+fixed UTC−5 survived all 293 tests: every direct caller fixture was in CDT, where
+UTC−5 is accidentally correct.
+
+`test_ct_minute_of_day_tracks_cst_and_cdt_not_a_fixed_offset` now drives that public
+method with the same 08:30 CT wall minute in both summer and winter. The instants
+are 13:30 and 14:30 UTC respectively, while both must map to CT minute 510 and the
+open phase. In an external scratch clone the named test fails under both mutations:
+fixed UTC−5 maps winter to minute 570; fixed UTC−6 maps summer to minute 450.
+
+Developer replay after this change: **294 passed, 5 xfailed**; gates 4/4; completion
+figures and session flags unchanged. This is an implementation claim pending Opus
+5's independent audit. D12 remains **OPEN** and continues to block Phase 3.
 
 ## What was not verified
 

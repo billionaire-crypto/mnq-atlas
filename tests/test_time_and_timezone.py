@@ -79,6 +79,27 @@ def test_worked_example_exact(time_model):
     assert pd.Timestamp(int(tau[0]), unit="ns", tz="UTC").hour == 13
 
 
+def test_ct_minute_of_day_tracks_cst_and_cdt_not_a_fixed_offset(time_model):
+    """Round-3 M-1: pin the public UTC-instant -> CT-minute conversion itself.
+
+    The worked example covered only CDT, so replacing this method's timezone
+    conversion with fixed UTC-5 survived. The same 08:30 wall minute is 13:30 UTC
+    in summer but 14:30 UTC in winter; asserting both dates kills either fixed
+    offset while keeping the expected exchange-local bucket identical.
+    """
+    summer = ct_ns("2021-06-15 08:30")
+    winter = ct_ns("2021-12-15 08:30")
+    instants = np.asarray([summer, winter], dtype=np.int64)
+
+    assert [
+        pd.Timestamp(int(value), unit="ns", tz="UTC").hour for value in instants
+    ] == [13, 14]
+    assert time_model.ct_minute_of_day(instants).tolist() == [510, 510]
+    assert time_model.phase_of(
+        time_model.ct_minute_of_day(instants)
+    ).tolist() == ["open", "open"]
+
+
 def test_bar_end_interpretation_fails(time_model, ordinary_grid):
     """Under bar-end semantics (τ = the label itself) every assertion below flips.
 

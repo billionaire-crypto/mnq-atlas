@@ -87,6 +87,17 @@ def assert_store_bar_seconds(manifest: dict) -> None:
             "store manifest declares no bar_seconds; refusing to assume "
             f"{BAR_SECONDS}s bars (audit M-5)"
         )
+    # Round-2 audit finding M-4 (2026-07-28): comparing int(declared) truncated
+    # 300.9 to 300 and coerced "300", so malformed declarations passed a check
+    # whose entire job is exactness. The manifest is written with a JSON integer;
+    # anything else is a corrupt or foreign manifest, not a value to repair.
+    if isinstance(declared, bool) or not isinstance(declared, (int, np.integer)):
+        raise SpineError(
+            f"store manifest bar_seconds is {declared!r} "
+            f"({type(declared).__name__}); it must be a plain integer. A float or "
+            "string here means the manifest was not written by this pipeline "
+            "(round-2 audit M-4)."
+        )
     if int(declared) != BAR_SECONDS:
         raise SpineError(
             f"store declares bar_seconds={int(declared)} but this engine is built "
@@ -313,11 +324,17 @@ class TimeModel:
         Audit finding M-5 (2026-07-28): divisibility alone does not identify the
         bar duration — a 10- or 15-minute store is also divisible by five
         minutes, and would silently produce a τ-grid where every second gridpoint
-        reports ``anchor_bar_missing``. The smallest positive gap between
-        consecutive labels IS the store's bar duration wherever any two adjacent
-        bars exist, so it is checked directly. See also
-        ``assert_store_bar_seconds``, which consumes the manifest's declared
-        ``bar_seconds`` when a store (rather than a raw array) is available.
+        reports ``anchor_bar_missing``. So the smallest positive gap between
+        consecutive labels is checked against the bar duration.
+
+        Scope, weakened per the round-2 audit adjudication: this is a fail-closed
+        *frequency check*, not a reliable inference of the bar duration. A
+        genuine 5-minute store so sparse that no two adjacent bars sit 5 minutes
+        apart would be refused with a wrong-frequency diagnostic — it errs toward
+        refusal, never toward silently accepting the wrong stride. The
+        authoritative declaration is the manifest's ``bar_seconds``, consumed by
+        ``assert_store_bar_seconds`` wherever a store (rather than a raw array)
+        is available.
         """
         if labels.size and int((labels % BAR_NS != 0).sum()):
             raise SpineError(

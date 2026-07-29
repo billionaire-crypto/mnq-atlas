@@ -125,7 +125,7 @@ excluded from any earliest-ending selection. No calendar claim is made or possib
 ## Reproducible commands
 
 ```powershell
-# full suite (Phase 1 + Phase 2): expect 288 passed, 5 xfailed
+# full suite (Phase 1 + Phase 2): expect 291 passed, 5 xfailed
 python -m pytest tests -q
 
 # Phase 2 gate tests only
@@ -174,7 +174,28 @@ reading — it can also be read as "measure across whatever bars exist, however 
 The audit flagged this as unruled, and it is load-bearing: Phase 3 freezes completion
 thresholds computed under whichever reading is chosen. Logged as **D12 (OPEN)**. Under
 the current reading the two estimands differ only on 1-minute coverage, and the
-measured gap between them is small (worst cell 0.16 pp).
+measured gap between them is small (worst cell **0.175 pp, midday Δ30** — round 2
+corrected the original "0.16 pp at Δ60" claim, which had compared only within one
+horizon; see D12).
+
+## External audit round 2 (2026-07-28) — verdict FAIL, and what changed
+
+Round 2 confirmed every round-1 repair present and effective (all 18 round-1
+mutations plus 9 new ones discriminated by named tests, all 30 published figures
+reproduced, D12 not silently adjudicated) — but found one surviving required
+mutation and three fresh claim/mechanism defects. All four are closed:
+
+| # | Finding | Resolution |
+|---|---|---|
+| M-1 | **Mutation survived:** deleting the `assert_store_bar_seconds` call from the completion CLI — the helper was tested standalone, the *wiring* was not | `test_the_cli_entry_point_refuses_a_wrong_duration_store` drives `completion._run` end to end against a real on-disk store declaring 600-second bars (no mocks), with a 300-second positive control through the same path. Mutation re-applied and verified caught. |
+| M-2 | D12's measured-impact claim was numerically false: "at most 0.16 pp, worst at midday Δ60". The real worst is **0.174978 pp at midday Δ30** — the gap is not monotone in horizon, and only Δ60 cells had been compared | Corrected in D12 and above, with the faulty reasoning named. |
+| M-3 | `_as_scalar_int64` accepted `np.uint64(2**63)`, which `np.int64(...)` silently WRAPS to the negative extreme — nonsensical comparisons instead of an error | Scalars now convert through exact Python int and are range-checked against int64 bounds. `test_negative_unsigned_overflow_scalars_fail_closed` pins every entry point; representable unsigned scalars still pass. |
+| M-4 | `assert_store_bar_seconds` compared `int(declared)`, truncating `300.9` and coercing `"300"` into passing an exactness check | The declaration must be a plain (or numpy) integer equal to 300; bool, float, string, and list forms are refused. `test_negative_a_malformed_bar_seconds_declaration_is_refused`. |
+| adj. | `_assert_bar_grid`'s docstring claimed the smallest label gap "IS the bar duration", stronger than the mechanism on a pathologically sparse store | Docstring weakened to what it is: a fail-closed frequency check that errs toward refusal; the manifest's `bar_seconds` is the authoritative declaration. |
+
+Suite after round 2: **291 passed, 5 xfailed**; gates 4/4; all 30 completion figures
+and the flag census unchanged (doc-number corrections only — M-2 changed a *claim
+about* the numbers, not the numbers).
 
 ## What was not verified
 

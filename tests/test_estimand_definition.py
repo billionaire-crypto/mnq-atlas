@@ -300,6 +300,50 @@ def test_real_store_completion_rates_are_coherent(real_completion, time_model):
     )
 
 
+# --- the CLI entry point, end to end -------------------------------------------------
+
+def _write_cli_store(root, trade_date, bar_seconds):
+    """A real on-disk store (no mocks) shaped the way `completion._run` opens it."""
+    from mnq_lab.spine.store import write_store
+
+    session, ts, observed, expected = synthetic_session_bars(trade_date)
+    write_store(
+        root / "exploration" / "bars_5m",
+        {
+            "session_id": session,
+            "ts_event_ns": ts,
+            "observed_1m_components": observed,
+            "expected_1m_components": expected,
+        },
+        metadata={"bar_seconds": bar_seconds},
+    )
+    return root
+
+
+def test_the_cli_entry_point_refuses_a_wrong_duration_store(tmp_path):
+    """Round-2 audit finding M-1 (2026-07-28): `assert_store_bar_seconds` was
+    tested only as a standalone helper, so DELETING ITS CALL from the CLI path
+    survived the whole suite — the wiring, not the helper, was the unpinned
+    claim. This drives `completion._run` end to end against a real on-disk store
+    whose manifest declares 600-second bars, and must fail closed there.
+    """
+    from mnq_lab import SpineError
+    from mnq_lab.outcomes import completion
+
+    bad = _write_cli_store(tmp_path / "bad", ORDINARY, bar_seconds=600)
+    with pytest.raises(SpineError, match="bar_seconds=600"):
+        completion._run(bad)
+
+    # Positive control through the SAME entry point: a 300-second store passes
+    # the guard and produces the full declared cell grid, so the negative case
+    # above fails on the guard, not on some unrelated breakage in _run.
+    good = _write_cli_store(tmp_path / "good", ORDINARY, bar_seconds=300)
+    result = completion._run(good)
+    assert result["n_sessions"] == 1
+    assert result["n_gridpoints"] == 78
+    assert len(result["by_cell"]) == 15
+
+
 def test_real_store_prevalence_support_is_horizon_invariant(real_completion):
     """§10.2 on real data: state anchors do not depend on any horizon column."""
     n_state = int(real_completion["state_anchor"].sum())

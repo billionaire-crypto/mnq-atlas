@@ -41,6 +41,9 @@ __all__ = [
     "interval_presence",
 ]
 
+_INT64_MIN = np.iinfo(np.int64).min
+_INT64_MAX = np.iinfo(np.int64).max
+
 
 def _as_int64(values: np.ndarray, name: str) -> np.ndarray:
     array = np.asarray(values)
@@ -75,7 +78,17 @@ def _as_scalar_int64(value: int, name: str) -> np.int64:
             f"{name} must be an integer count of UTC nanoseconds, got "
             f"{type(value).__name__} ({value!r}); floats lose nanosecond precision"
         )
-    return np.int64(value)
+    # Round-2 audit finding M-3 (2026-07-28): np.int64(np.uint64(2**63)) WRAPS to
+    # the negative extreme instead of raising, so an unsigned scalar above the
+    # signed range produced nonsensical comparisons rather than a SpineError.
+    # Convert through Python int (exact for every np.integer) and range-check.
+    as_int = int(value)
+    if not (_INT64_MIN <= as_int <= _INT64_MAX):
+        raise SpineError(
+            f"{name} = {as_int} does not fit in int64 nanoseconds; an unsigned or "
+            "oversized scalar would silently wrap (round-2 audit M-3)"
+        )
+    return np.int64(as_int)
 
 
 def _validate_window(horizon_ns: int, interval_ns: int) -> None:

@@ -398,8 +398,12 @@ forbids changing a constant after the affected result is computed. Choosing the 
 after the thresholds are frozen would be exactly that.
 
 **Measured impact under the current reading (exploration tier):** the two estimands
-differ by at most 0.16 pp in any phase × horizon cell (largest gap: midday Δ60,
-0.98188 vs 0.98350). Whole-bar absences are rare, so the two readings would produce
+differ by at most **0.175 pp** in any phase × horizon cell (largest gap: **midday
+Δ30**, 0.99000 vs 0.99175; midday Δ60 is second at 0.162 pp). *Correction
+(round-2 audit, 2026-07-28): this entry originally claimed "at most 0.16 pp, worst at
+midday Δ60" — wrong because the gap was compared only within Δ60 on the assumption
+the worst cell sat at the longest horizon. The gap is not monotone in Δ; all 15 cells
+are now compared.* Whole-bar absences are rare, so the two readings would produce
 similar thresholds — but "similar" is not "ruled", and the difference is not zero.
 
 **Status:** OPEN — requires a user ruling before Phase 3 freezes thresholds. Reading 1

@@ -177,3 +177,32 @@ def test_negative_scalar_unit_bearing_inputs_fail_closed():
     # The correct scalar forms still work, so the guard is not blanket-failing.
     assert conditioner_input_mask(good, TAU)[0]
     assert int(required_interval_starts(TAU, 15 * MINUTE_NS, BAR_NS)[0]) == TAU
+
+
+def test_negative_unsigned_overflow_scalars_fail_closed():
+    """Round-2 audit finding M-3 (2026-07-28): `np.int64(np.uint64(2**63))` WRAPS
+    to the negative extreme instead of raising, so an oversized unsigned scalar
+    sailed through the round-1 guard and produced nonsensical comparisons.
+
+    The concrete leak, before the fix:
+        required_interval_starts(np.uint64(2**63), 5, 1)
+        -> array([-9223372036854775808, ...])
+    """
+    good = labels("09:55")
+    overflow = np.uint64(2**63)
+
+    with pytest.raises(SpineError, match="does not fit in int64"):
+        required_interval_starts(overflow, 15 * MINUTE_NS, BAR_NS)
+    with pytest.raises(SpineError, match="does not fit in int64"):
+        conditioner_input_mask(good, overflow)
+    with pytest.raises(SpineError, match="does not fit in int64"):
+        outcome_interval_mask(good, overflow, 15 * MINUTE_NS, BAR_NS)
+    with pytest.raises(SpineError, match="does not fit in int64"):
+        outcome_interval_mask(good, TAU, np.uint64(2**63), BAR_NS)
+    with pytest.raises(SpineError, match="does not fit in int64"):
+        interval_end_ns(good, 2**64)  # oversized Python int, same wrap risk
+
+    # Representable unsigned and numpy scalars still work: the guard rejects the
+    # unrepresentable range, not the unsigned type.
+    assert conditioner_input_mask(good, np.uint64(TAU))[0]
+    assert conditioner_input_mask(good, np.int64(TAU))[0]

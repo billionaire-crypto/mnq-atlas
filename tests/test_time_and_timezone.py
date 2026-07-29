@@ -460,6 +460,17 @@ def test_negative_a_store_declaring_other_bar_seconds_is_refused(exploration_5m)
         assert_store_bar_seconds({})
 
 
+def test_negative_a_malformed_bar_seconds_declaration_is_refused():
+    """Round-2 audit finding M-4 (2026-07-28): `int(declared)` truncated 300.9 to
+    300 and coerced "300", so malformed declarations passed a check whose entire
+    job is exactness. The declaration must be a plain integer equal to 300."""
+    for malformed in (300.9, "300", 300.0, True, None, [300]):
+        with pytest.raises(SpineError):
+            assert_store_bar_seconds({"bar_seconds": malformed})
+    assert_store_bar_seconds({"bar_seconds": 300})  # the one accepted form
+    assert_store_bar_seconds({"bar_seconds": np.int64(300)})  # numpy integer ok
+
+
 def test_negative_a_bar_labelled_with_the_wrong_session_is_refused(time_model):
     """Audit finding M-6: presence is matched by exact UTC instant across the
     whole input, so a bar carrying another session's id would be counted for

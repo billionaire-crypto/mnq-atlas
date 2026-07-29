@@ -81,6 +81,9 @@ Each contributing group therefore has mathematical mass `1/S`. Unequal group
 sizes can produce binary64 totals differing at rounding scale; unbalanced tests
 use relative tolerance no larger than `1e-12` and must still kill the
 anchor-equal mutation. Anchor-equal weights assign every row mass `1/n`.
+Session-equal group masses sum to `1.0` only within binary64 rounding, so the
+maximum group-mass fraction divides by the observed total group mass rather than
+assuming that total is exactly one.
 
 Group identifiers are opaque labels. They carry no calendar, exchange, market,
 or trading meaning.
@@ -127,7 +130,7 @@ When a result surface is introduced later, `n_anchors`, `n_sessions`, and
   At `q=0.25`, the two weightings return different observed support values.
 - A separate 2/3/5-row grouped fixture returns a maximum group-mass fraction of
   approximately `1/3`, distinct from its maximum individual row weight `1/6`.
-- Stage D focused verification passed 121 tests; the full suite passed 442 tests
+- Stage D focused verification passed 122 tests; the full suite passed 443 tests
   with the same 5 expected failures.
 
 ## Inferred

@@ -219,6 +219,29 @@ def test_max_group_mass_fraction_uses_group_totals_not_anchor_maximum():
     assert diagnostics.max_group_mass_fraction != np.max(weights)
 
 
+def test_max_group_mass_fraction_divides_by_total_group_mass():
+    sizes = (27, 19, 28, 13)
+    group_ids = np.array(
+        [
+            f"g{index}"
+            for index, size in enumerate(sizes)
+            for _ in range(size)
+        ]
+    )
+    _, diagnostics = session_equal_weights(group_ids)
+    masses = np.array(
+        [mass for _, mass in diagnostics.group_total_mass],
+        dtype=np.float64,
+    )
+
+    assert diagnostics.max_group_mass_fraction == float(
+        np.max(masses) / np.sum(masses, dtype=np.float64)
+    )
+    assert diagnostics.max_group_mass_fraction != float(np.max(masses)), (
+        "the fixture no longer kills reporting raw group mass as a fraction"
+    )
+
+
 def test_anchor_equal_weights_and_diagnostics():
     weights, diagnostics = anchor_equal_weights(8)
 

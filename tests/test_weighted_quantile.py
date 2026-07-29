@@ -176,6 +176,51 @@ def test_q_one_uses_final_cumulative_mass_not_an_independent_sum():
     assert weighted_quantile(values, weights, 1.0) == 7.0
 
 
+def _division_form_quantile(values, weights, q):
+    cumulative = np.cumsum(weights, dtype=np.float64)
+    index = np.searchsorted(cumulative / cumulative[-1], q, side="left")
+    return float(values[index])
+
+
+def test_multiplication_form_boundary_kills_division_form_comparison():
+    values = np.array([0.0, 1.0])
+    weights = np.array(
+        [
+            float.fromhex("0x1.2e406a476e443p-9"),
+            float.fromhex("0x1.111b1a8bf8dfep-7"),
+        ]
+    )
+    q = float.fromhex("0x1.bbd6cdf73ddbep-3")
+
+    assert weighted_quantile(values, weights, q) == 0.0
+    assert _division_form_quantile(values, weights, q) == 1.0, (
+        "the exact fixture no longer kills cumulative/total >= q"
+    )
+
+
+def _prenormalized_quantile(values, weights, q):
+    normalized = weights / np.sum(weights)
+    cumulative = np.cumsum(normalized, dtype=np.float64)
+    index = np.searchsorted(cumulative, q * cumulative[-1], side="left")
+    return float(values[index])
+
+
+def test_binary64_boundary_kills_pre_normalization_by_total_mass():
+    values = np.array([0.0, 1.0])
+    weights = np.array(
+        [
+            float.fromhex("0x1.b8408469042adp+21"),
+            float.fromhex("0x1.7e0662da5302fp+19"),
+        ]
+    )
+    q = float.fromhex("0x1.a4ba9f98a6d54p-1")
+
+    assert weighted_quantile(values, weights, q) == 0.0
+    assert _prenormalized_quantile(values, weights, q) == 1.0, (
+        "the exact fixture no longer kills weight pre-normalization"
+    )
+
+
 def test_multi_quantile_output_preserves_caller_order_and_duplicates():
     values = np.array([0.0, 10.0, 20.0, 30.0])
     weights = np.ones(4)
@@ -199,21 +244,26 @@ def test_default_linear_interpolation_is_detectably_wrong():
     assert actual != linear
 
 
-def test_calls_do_not_mutate_values_weights_or_their_dtypes():
+def test_calls_do_not_mutate_values_weights_quantiles_or_their_dtypes():
     values = np.array([30, 10, 20, 10], dtype=np.int32)
     weights = np.array([0.5, 0.1, 0.3, 0.2], dtype=np.float32)
+    quantiles = np.array([0.75, 0.25], dtype=np.float32)
     values_before = values.tobytes()
     weights_before = weights.tobytes()
+    quantiles_before = quantiles.tobytes()
     value_dtype = values.dtype
     weight_dtype = weights.dtype
+    quantile_dtype = quantiles.dtype
 
     weighted_quantile(values, weights, 0.5)
-    weighted_quantiles(values, weights, [0.75, 0.25])
+    weighted_quantiles(values, weights, quantiles)
 
     assert values.tobytes() == values_before
     assert weights.tobytes() == weights_before
+    assert quantiles.tobytes() == quantiles_before
     assert values.dtype == value_dtype
     assert weights.dtype == weight_dtype
+    assert quantiles.dtype == quantile_dtype
 
 
 @pytest.mark.parametrize(

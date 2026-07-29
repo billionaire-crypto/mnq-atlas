@@ -12,6 +12,7 @@ They are asserted anyway, because a slip is the likely failure and it is cheap t
 from __future__ import annotations
 
 import ast
+import re
 
 import pytest
 
@@ -26,6 +27,16 @@ SELECTION_VERBS = {"sort_values", "nlargest", "nsmallest", "idxmax", "idxmin",
 
 # §11 forbidden names. Listed knowing full well that `score` defeats the whole list.
 FORBIDDEN_NAMES = {"pnl", "profit", "expectancy", "sharpe", "equity_curve", "drawdown"}
+FORBIDDEN_CORE_IMPORT_ROOTS = {
+    "spine",
+    "conditioners",
+    "outcomes",
+    "studies",
+    "report",
+    "nulls",
+    "ledger",
+}
+LOCKED_TIER_PATTERN = re.compile(r"\blocked(?:[_-]confirmation)?\b", re.IGNORECASE)
 
 
 def _modules(root):
@@ -41,6 +52,47 @@ def _attribute_calls(path):
     return names
 
 
+def _forbidden_core_imports(path):
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    offenders = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                parts = alias.name.split(".")
+                if (
+                    len(parts) > 1
+                    and parts[0] == "mnq_lab"
+                    and parts[1] in FORBIDDEN_CORE_IMPORT_ROOTS
+                ):
+                    offenders.append(f"{path.name} imports {alias.name}")
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            parts = module.split(".")
+            if (
+                len(parts) > 1
+                and parts[0] == "mnq_lab"
+                and parts[1] in FORBIDDEN_CORE_IMPORT_ROOTS
+            ):
+                offenders.append(f"{path.name} imports {module}")
+            elif module == "mnq_lab":
+                for alias in node.names:
+                    if alias.name in FORBIDDEN_CORE_IMPORT_ROOTS:
+                        offenders.append(
+                            f"{path.name} imports mnq_lab.{alias.name}"
+                        )
+    return offenders
+
+
+def _locked_tier_references(path):
+    return [
+        (line_number, line.strip())
+        for line_number, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), start=1
+        )
+        if LOCKED_TIER_PATTERN.search(line)
+    ]
+
+
 def test_core_contains_no_selection_verbs():
     offenders = []
     for path in _modules(CORE_ROOT):
@@ -52,22 +104,52 @@ def test_core_contains_no_selection_verbs():
 
 def test_core_imports_nothing_market_aware():
     """§16.3: "core/ knows nothing about markets"."""
-    forbidden_roots = {"spine", "conditioners", "outcomes", "studies", "report", "nulls"}
     offenders = []
     for path in _modules(CORE_ROOT):
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in ast.walk(tree):
-            module = None
-            if isinstance(node, ast.ImportFrom):
-                module = node.module or ""
-            elif isinstance(node, ast.Import):
-                module = node.names[0].name
-            if not module or not module.startswith("mnq_lab"):
-                continue
-            parts = module.split(".")
-            if len(parts) > 1 and parts[1] in forbidden_roots:
-                offenders.append(f"{path.relative_to(PACKAGE_ROOT)} imports {module}")
+        offenders.extend(_forbidden_core_imports(path))
     assert not offenders, offenders
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from mnq_lab.ledger import freeze\n",
+        "from mnq_lab import ledger\n",
+    ],
+)
+def test_core_import_guard_detects_a_planted_ledger_import(tmp_path, source):
+    leaky = tmp_path / "leaky.py"
+    leaky.write_text(source, encoding="utf-8")
+
+    assert _forbidden_core_imports(leaky), (
+        "the core import guard did not detect its planted ledger mutation"
+    )
+
+
+def test_core_does_not_name_the_locked_tier():
+    offenders = []
+    for path in _modules(CORE_ROOT):
+        for line_number, line in _locked_tier_references(path):
+            offenders.append(
+                f"{path.relative_to(PACKAGE_ROOT)}:{line_number} {line}"
+            )
+    assert not offenders, offenders
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "_TIER = 'data/locked_confirmation'\n",
+        "import os\nos.path.isdir('locked')\n",
+    ],
+)
+def test_locked_tier_guard_detects_a_planted_reference(tmp_path, source):
+    leaky = tmp_path / "leaky.py"
+    leaky.write_text(source, encoding="utf-8")
+
+    assert _locked_tier_references(leaky), (
+        "the locked-tier guard did not detect its planted source mutation"
+    )
 
 
 def test_sorting_outside_core_is_only_ever_chronological():

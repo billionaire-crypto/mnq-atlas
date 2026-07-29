@@ -117,21 +117,37 @@ When a result surface is introduced later, `n_anchors`, `n_sessions`, and
 ## Measured
 
 - The Phase 4 starting replay produced 332 passed and 5 expected failures.
-- All four signed-off spine gates passed.
-- Completion remained 1,009 sessions and 78,702 gridpoints.
+- The Stage F replay produced 443 passed and the same 5 expected failures.
+- The market-free focused suite produced 122 passed.
+- All four signed-off spine gates passed at closeout.
+- The completion CLI remained 1,009 sessions and 78,702 gridpoints.
 - The S00 artifact remained 7,636 bytes with SHA-256
   `725df33a00e53c6c356c4348df2a02fe9ed309d9d4e4118216894a70ef8a479d`.
+  Two consecutive Stage F CLI generations, and the bytes present before them,
+  all had that exact size and hash.
+- The frozen-spec SHA-256 remained
+  `70dae16c8b12fe26d38a7bfdabf0202066fe7149f790d0d2942279d9c3b8ff50`.
 - The frozen YAML SHA-256 remained
   `1c95aa595c30c48b853303291a7dbaabceaf5b7331bca565a30863e8dcf138d4`.
+- Ledger/YAML validation passed, and the no-default threshold loader returned
+  `{15: 0.99, 30: 0.99, 60: 0.98}`.
 - The independent quant audit measured arbitrary-factor boundary changes and
   canonical-order behavior recorded in D13 and the contract above.
+- Independent mutation audits ran in disposable clones. Stage C and Stage D
+  closed all five reported enforcement defects; the required inverse-CDF,
+  validation, scope, `weight_ess`, construction, and diagnostic mutations were
+  killed by named tests or fail-closed guards.
 - Stage D's synthetic one-versus-seven fixture gives each group mass `0.5`;
   anchor-equal weighting instead gives those groups mass `0.125` and `0.875`.
   At `q=0.25`, the two weightings return different observed support values.
 - A separate 2/3/5-row grouped fixture returns a maximum group-mass fraction of
   approximately `1/3`, distinct from its maximum individual row weight `1/6`.
-- Stage D focused verification passed 122 tests; the full suite passed 443 tests
-  with the same 5 expected failures.
+- The final 27/19/28/13-row diagnostic fixture measured raw maximum group mass
+  `0.24999999999999997`, observed total mass `0.9999999999999998`, and normalized
+  maximum mass fraction `0.25000000000000006`.
+- The final core package contains only `__init__.py`, `causality.py`, `units.py`,
+  and `weights.py`. Scope tests found no market-aware or ledger import and no
+  name or access path for the locked tier.
 
 ## Inferred
 
@@ -139,11 +155,22 @@ When a result surface is introduced later, `n_anchors`, `n_sessions`, and
   maximum positive-mass support point by construction.
 - Canonical tied-weight accumulation makes row-order invariance structural for
   a fixed multiset of binary64 pairs.
+- Creating unused `kernel.py` or `result.py` abstractions would add no verified
+  Phase 4 consumer contract, so their deferral is the smaller ratified boundary.
 
 ## Not verified
 
-- Phase 4 has not computed any market result.
-- Bootstrap and fractional resampling behavior remain Phase 5 work.
+- No Phase 4 primitive has been applied to market observations; no market
+  `weight_ess` or conditional result has been computed.
+- Bootstrap and fractional resampling behavior remain Phase 5 work. In
+  particular, the current grouped-label factorization and per-group boolean
+  scans have not been performance-benchmarked across bootstrap replicates.
 - No cross-environment byte-identity claim is made. Semantic determinism is the
   cross-environment contract; byte determinism requires an identical environment
   fingerprint.
+
+## Audit status
+
+The mathematical preflight and both implementation units are independently
+closed. Final Phase 4 closeout remains pending the Stage F audit; Phase 5 is not
+authorized by this document.

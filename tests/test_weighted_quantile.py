@@ -244,10 +244,19 @@ def test_default_linear_interpolation_is_detectably_wrong():
     assert actual != linear
 
 
-def test_calls_do_not_mutate_values_weights_quantiles_or_their_dtypes():
-    values = np.array([30, 10, 20, 10], dtype=np.int32)
-    weights = np.array([0.5, 0.1, 0.3, 0.2], dtype=np.float32)
-    quantiles = np.array([0.75, 0.25], dtype=np.float32)
+@pytest.mark.parametrize(
+    ("value_dtype", "weight_dtype", "quantile_dtype"),
+    [
+        (np.int32, np.float32, np.float32),
+        (np.float64, np.float64, np.float64),
+    ],
+)
+def test_calls_do_not_mutate_values_weights_quantiles_or_their_dtypes(
+    value_dtype, weight_dtype, quantile_dtype
+):
+    values = np.array([30, 10, 20, 10], dtype=value_dtype)
+    weights = np.array([0.5, 0.1, 0.3, 0.2], dtype=weight_dtype)
+    quantiles = np.array([0.75, 0.25], dtype=quantile_dtype)
     values_before = values.tobytes()
     weights_before = weights.tobytes()
     quantiles_before = quantiles.tobytes()

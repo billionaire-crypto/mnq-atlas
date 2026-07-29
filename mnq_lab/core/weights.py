@@ -10,17 +10,43 @@ market data, outcomes, conditioners, studies, reports, or the freeze ledger.
 
 from __future__ import annotations
 
-from numbers import Real
-from typing import Any
+from dataclasses import dataclass
+from numbers import Integral, Real
+from typing import Any, Hashable
 
 import numpy as np
 
 from mnq_lab import SpineError
 
-__all__ = ["weighted_quantile", "weighted_quantiles"]
+__all__ = [
+    "GroupWeightDiagnostics",
+    "WeightDiagnostics",
+    "anchor_equal_weights",
+    "session_equal_weights",
+    "weight_ess",
+    "weighted_quantile",
+    "weighted_quantiles",
+]
 
 _MAX_EXACT_BINARY64_INTEGER = 2**53
 _REAL_DTYPE_KINDS = frozenset({"i", "u", "f"})
+
+
+@dataclass(frozen=True)
+class WeightDiagnostics:
+    """Generic diagnostics shared by every weight construction."""
+
+    row_count: int
+    weight_ess: float
+
+
+@dataclass(frozen=True)
+class GroupWeightDiagnostics(WeightDiagnostics):
+    """Diagnostics proving how mass is distributed across opaque groups."""
+
+    contributing_group_count: int
+    group_total_mass: tuple[tuple[Hashable, float], ...]
+    max_group_mass_fraction: float
 
 
 def _reject_embedded_bools(values: Any, name: str) -> None:
@@ -215,3 +241,157 @@ def weighted_quantile(values: Any, weights: Any, q: Any) -> float:
     probability = _as_quantile_scalar(q)
     result = weighted_quantiles(values, weights, [probability])
     return float(result[0])
+
+
+def _validated_concentration_weights(weights: Any) -> np.ndarray:
+    array = _as_real_float64_vector(weights, "weights")
+    if bool(np.any(array < 0.0)):
+        bad = int(np.flatnonzero(array < 0.0)[0])
+        raise SpineError(f"weights contains a negative value at index {bad}")
+    if not bool(np.any(array > 0.0)):
+        raise SpineError("weights must have strictly positive total mass")
+    return array
+
+
+def weight_ess(weights: Any) -> float:
+    """Return the frozen weight-concentration formula ``(Σw)² / Σ(w²)``."""
+    array = _validated_concentration_weights(weights)
+    with np.errstate(over="ignore", invalid="ignore"):
+        total = np.sum(array, dtype=np.float64)
+        squared_total = np.sum(np.square(array), dtype=np.float64)
+        result = (total * total) / squared_total
+    if not np.isfinite(total) or not total > 0.0:
+        raise SpineError(
+            "binary64 weight accumulation must be finite and strictly positive"
+        )
+    if not np.isfinite(squared_total) or not squared_total > 0.0:
+        raise SpineError(
+            "binary64 squared-weight accumulation must be finite and positive"
+        )
+    if not np.isfinite(result):
+        raise SpineError("weight_ess is non-finite under the frozen formula")
+    return float(result)
+
+
+def _as_opaque_group_labels(group_ids: Any) -> tuple[Hashable, ...]:
+    try:
+        array = np.asarray(group_ids, dtype=object)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise SpineError(
+            f"group_ids cannot be converted to a one-dimensional array: {exc}"
+        ) from exc
+    if array.ndim != 1:
+        raise SpineError(
+            f"group_ids must be one-dimensional, got ndim={array.ndim}"
+        )
+    if array.size == 0:
+        raise SpineError("group_ids must contain at least one label")
+
+    labels: list[Hashable] = []
+    for index, raw_label in enumerate(array):
+        label = raw_label.item() if isinstance(raw_label, np.generic) else raw_label
+        if isinstance(label, bool) or label is None:
+            raise SpineError(
+                f"group_ids contains an invalid label at index {index}: {label!r}"
+            )
+        if isinstance(label, Real):
+            try:
+                numeric_label = float(label)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise SpineError(
+                    f"group_ids contains an invalid numeric label at index {index}"
+                ) from exc
+            if not np.isfinite(numeric_label):
+                raise SpineError(
+                    f"group_ids contains a non-finite label at index {index}"
+                )
+        elif not isinstance(label, (str, bytes)):
+            raise SpineError(
+                "group_ids labels must be finite real numbers, strings, or bytes; "
+                f"index {index} is {type(label).__name__}"
+            )
+        try:
+            hash(label)
+        except TypeError as exc:
+            raise SpineError(
+                f"group_ids contains an unhashable label at index {index}"
+            ) from exc
+        labels.append(label)
+    return tuple(labels)
+
+
+def session_equal_weights(
+    group_ids: Any,
+) -> tuple[np.ndarray, GroupWeightDiagnostics]:
+    """Give equal mass to opaque groups, then equal mass within each group.
+
+    ``group_ids`` are generic labels only. They carry no calendar, exchange, or
+    market meaning. Output weights align with the caller's original row order.
+    """
+    labels = _as_opaque_group_labels(group_ids)
+    group_index: dict[Hashable, int] = {}
+    unique_labels: list[Hashable] = []
+    counts: list[int] = []
+    inverse = np.empty(len(labels), dtype=np.intp)
+
+    for row_index, label in enumerate(labels):
+        index = group_index.get(label)
+        if index is None:
+            index = len(unique_labels)
+            group_index[label] = index
+            unique_labels.append(label)
+            counts.append(0)
+        counts[index] += 1
+        inverse[row_index] = index
+
+    group_count = len(unique_labels)
+    weights = np.empty(len(labels), dtype=np.float64)
+    for index, count in enumerate(counts):
+        weights[inverse == index] = 1.0 / (group_count * count)
+
+    group_masses = np.array(
+        [
+            np.sum(weights[inverse == index], dtype=np.float64)
+            for index in range(group_count)
+        ],
+        dtype=np.float64,
+    )
+    total_group_mass = np.sum(group_masses, dtype=np.float64)
+    if not np.isfinite(total_group_mass) or not total_group_mass > 0.0:
+        raise SpineError("constructed group weights have invalid total mass")
+    max_group_mass_fraction = float(
+        np.max(group_masses) / total_group_mass
+    )
+    diagnostics = GroupWeightDiagnostics(
+        row_count=len(labels),
+        weight_ess=weight_ess(weights),
+        contributing_group_count=group_count,
+        group_total_mass=tuple(
+            (label, float(mass))
+            for label, mass in zip(unique_labels, group_masses)
+        ),
+        max_group_mass_fraction=max_group_mass_fraction,
+    )
+    return weights, diagnostics
+
+
+def anchor_equal_weights(n: Any) -> tuple[np.ndarray, WeightDiagnostics]:
+    """Give each of ``n`` generic rows equal mass."""
+    if isinstance(n, (bool, np.bool_)) or not isinstance(n, Integral):
+        raise SpineError(f"n must be a positive non-bool integer, got {n!r}")
+    row_count = int(n)
+    if row_count <= 0:
+        raise SpineError(f"n must be strictly positive, got {row_count}")
+    try:
+        weights = np.full(
+            row_count, 1.0 / row_count, dtype=np.float64
+        )
+    except (MemoryError, ValueError, OverflowError) as exc:
+        raise SpineError(
+            f"cannot construct {row_count} equal weights: {exc}"
+        ) from exc
+    diagnostics = WeightDiagnostics(
+        row_count=row_count,
+        weight_ess=weight_ess(weights),
+    )
+    return weights, diagnostics

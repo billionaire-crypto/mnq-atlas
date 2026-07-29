@@ -68,7 +68,7 @@ move an exact boundary by binary64 rounding; D13 records the limitation.
 It is always named `weight_ess`, never “effective sample size.” It measures
 weight concentration only and does not correct overlapping outcomes, serial
 dependence, or regime dependence. Floating identities use declared relative
-tolerance where non-dyadic inputs make bit equality false.
+tolerance `1e-12` where non-dyadic inputs make bit equality false.
 
 For `S` contributing groups and `n_s` rows carrying group label `s`,
 session-equal weights are:
@@ -97,6 +97,15 @@ session_equal_weights(group_ids)               -> weights plus diagnostics
 anchor_equal_weights(n)                        -> weights plus diagnostics
 ```
 
+Both constructors return `(weights, diagnostics)`. Anchor-equal construction
+uses `WeightDiagnostics(row_count, weight_ess)`. Session-equal construction uses
+`GroupWeightDiagnostics`, which adds `contributing_group_count`,
+`group_total_mass`, and `max_group_mass_fraction`. Group-mass records retain
+first-occurrence label order while the row-aligned weights retain original input
+order. Accepted group labels are finite real scalars, strings, or bytes; bool,
+missing, non-finite, complex, multidimensional, and container-valued labels fail
+closed.
+
 `kernel.py` and `result.py` are deliberately deferred. No Phase 4 consumer
 justifies them, and the Phase 4 handoff explicitly permits the smaller unit.
 When a result surface is introduced later, `n_anchors`, `n_sessions`, and
@@ -113,6 +122,13 @@ When a result surface is introduced later, `n_anchors`, `n_sessions`, and
   `1c95aa595c30c48b853303291a7dbaabceaf5b7331bca565a30863e8dcf138d4`.
 - The independent quant audit measured arbitrary-factor boundary changes and
   canonical-order behavior recorded in D13 and the contract above.
+- Stage D's synthetic one-versus-seven fixture gives each group mass `0.5`;
+  anchor-equal weighting instead gives those groups mass `0.125` and `0.875`.
+  At `q=0.25`, the two weightings return different observed support values.
+- A separate 2/3/5-row grouped fixture returns a maximum group-mass fraction of
+  approximately `1/3`, distinct from its maximum individual row weight `1/6`.
+- Stage D focused verification passed 121 tests; the full suite passed 442 tests
+  with the same 5 expected failures.
 
 ## Inferred
 

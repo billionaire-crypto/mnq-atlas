@@ -359,6 +359,13 @@ def build_spine(
     symbols = sorted(scan.classification.retained)
     symbol_codes = {symbol: index for index, symbol in enumerate(symbols)}
 
+    # The complete constants file is a build input, not merely its spine subset.
+    # Phase 3 later added derived thresholds to that file without falsifying the
+    # already-sealed manifests. Reproducing its build_id therefore requires the
+    # historical build-time YAML bytes, then restoring the current YAML before
+    # validation. Full manifest-byte identity additionally depends on the original
+    # dirty environment fingerprint and is not claimed. See
+    # docs/SEALED_STORE_REBUILD.md.
     build_id = hashlib.sha256(
         "|".join(
             [

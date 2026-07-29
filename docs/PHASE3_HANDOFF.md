@@ -76,12 +76,18 @@ that adds `min_completion_h15/h30/h60` to the YAML. Therefore the YAML hash is
 expected to change **only after** the values are derived, independently audited,
 and recorded in the ledger. Record both the old and new hashes.
 
-If `data` is absent, rebuild from the unchanged source:
+Historical instruction at Phase 3 entry:
+
+> **Post-freeze note:** The command below predates the authorized YAML threshold
+> insertion. At the current Phase 4 state it creates a new provenance identity
+> and must not replace canonical `data/`. Restore the preserved sealed artifact
+> or follow `docs/SEALED_STORE_REBUILD.md` for a disposable scientific
+> reconstruction and its byte-regeneration limits.
 
 ```powershell
 python -m mnq_lab.spine.build `
   --source-csv "C:\Users\kyawz\Downloads\GLBX-20260331-885WT5W7KA\glbx-mdp3-20100606-20260329.ohlcv-1m.csv" `
-  --out data
+  --out data_scientific_rebuild
 ```
 
 If any fail-closed gate fires during a rebuild, stop and report. Do not work

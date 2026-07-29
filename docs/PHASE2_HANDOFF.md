@@ -42,10 +42,19 @@ data/locked_confirmation/bars_1m   20230330..20260330   775 sessions  1,059,836 
 data/locked_confirmation/bars_5m                        775 sessions    211,968 rows
 ```
 
+> **Post-Phase-3 historical note:** The command below was valid at this handoff,
+> before the completion thresholds changed the YAML hash. At the current
+> Phase 4 state, do not use it to replace canonical `data/`: a current-YAML
+> build has a different provenance identity. Restore the preserved sealed
+> artifact or follow `docs/SEALED_STORE_REBUILD.md` for a disposable scientific
+> reconstruction and its byte-regeneration limits.
+
 ```powershell
-# rebuild if data/ is absent (real-store tests FAIL, never skip, without it)
-python -m mnq_lab.spine.build --source-csv "C:\Users\kyawz\Downloads\GLBX-20260331-885WT5W7KA\glbx-mdp3-20100606-20260329.ohlcv-1m.csv" --out data
-python -m mnq_lab.spine.gates --store data
+# Historical build example only; use a disposable clone and a non-canonical target.
+python -m mnq_lab.spine.build --source-csv "C:\Users\kyawz\Downloads\GLBX-20260331-885WT5W7KA\glbx-mdp3-20100606-20260329.ohlcv-1m.csv" --out data_scientific_rebuild
+python -m mnq_lab.spine.gates --store data_scientific_rebuild
+
+# The full suite still requires the preserved sealed artifact at canonical data/.
 python -m pytest tests -q
 ```
 

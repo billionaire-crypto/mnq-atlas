@@ -23,8 +23,10 @@ def gate_report():
         # Fail, never skip: a green suite with the gates unexecuted certifies nothing
         # (audit H2; spec §16.4.3).
         pytest.fail(
-            f"Phase 1 acceptance requires built stores under {STORE_ROOT}; run "
-            "python -m mnq_lab.spine.build --out data",
+            f"Phase 1 acceptance requires the sealed stores under {STORE_ROOT}. "
+            "Restore the preserved artifact or follow "
+            "docs/SEALED_STORE_REBUILD.md for a disposable scientific "
+            "reconstruction; a current-YAML build is different provenance.",
             pytrace=False,
         )
     return run_all_gates(STORE_ROOT)

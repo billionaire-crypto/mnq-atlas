@@ -171,6 +171,10 @@ When a result surface is introduced later, `n_anchors`, `n_sessions`, and
 
 ## Audit status
 
-The mathematical preflight and both implementation units are independently
-closed. Final Phase 4 closeout remains pending the Stage F audit; Phase 5 is not
-authorized by this document.
+The mathematical preflight, both implementation units, and final Phase 4
+closeout independently returned `CLOSED`. A subsequent Phases 1–4 red-team audit
+also returned `CLOSED` with one operational finding: a direct build with the
+post-freeze YAML changes sealed provenance while preserving scientific content.
+`docs/SEALED_STORE_REBUILD.md` records the remediation, preservation requirement,
+scientific-reconstruction procedure, and the dirty-fingerprint limit on exact
+artifact regeneration. Phase 5 is not authorized by this document.

@@ -196,10 +196,11 @@ def _require_real_store(corpus: Corpus, frequency: str) -> BarStore:
         pytest.fail(
             f"Phase 1 acceptance requires the built store at {path} and it is absent. "
             "Real-store gates fail closed rather than skip (audit H2; spec §16.4.3). "
-            "Build it with:\n"
-            "  python -m mnq_lab.spine.build --source-csv "
-            '"C:\\Users\\kyawz\\Downloads\\GLBX-20260331-885WT5W7KA\\'
-            'glbx-mdp3-20100606-20260329.ohlcv-1m.csv" --out data',
+            "The canonical store is sealed against the pre-Phase-3 YAML; a direct "
+            "build with the current YAML creates different provenance and is expected "
+            "to fail the pinned manifest tests. Restore the preserved sealed artifact "
+            "or follow docs/SEALED_STORE_REBUILD.md for the limits and procedure of a "
+            "disposable scientific reconstruction.",
             pytrace=False,
         )
     return BarStore.open(path)

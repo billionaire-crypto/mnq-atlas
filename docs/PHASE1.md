@@ -15,22 +15,22 @@ strategy-selection, ranking, optimization, or P&L functionality was introduced.
 | 3 | Symbol classification exhaustive and exact | 32 retained + 55 spread = 87 distinct |
 | 4 | Roll causality | 1,009 sessions, one contract each; 17:00 CT divergence fixture |
 
-## Reproducible commands
+## Historical build and current validation
+
+The original Phase 1 build predates the Phase 3 threshold freeze. At the current
+Phase 4 commit, a direct build uses the post-freeze YAML and therefore creates a
+new `build_id` even though the scientific arrays reproduce. The sealed manifest
+also records a dirty working tree whose uncommitted contents were not preserved,
+so certified artifact-byte regeneration is not claimed. Follow
+`docs/SEALED_STORE_REBUILD.md`; do not overwrite canonical `data/` with a
+current-YAML rebuild. The commands below validate the preserved artifact.
 
 ```powershell
-# Build both tiers, 1-minute and 5-minute (~2m20s)
-python -m mnq_lab.spine.build `
-  --source-csv "C:\Users\kyawz\Downloads\GLBX-20260331-885WT5W7KA\glbx-mdp3-20100606-20260329.ohlcv-1m.csv" `
-  --out data
-
-# Four fail-closed gates against an existing build
+# Four fail-closed gates against the preserved sealed build
 python -m mnq_lab.spine.gates --store data
 
 # Tests
 python -m pytest tests -q
-
-# Determinism: rebuild elsewhere and compare bytes
-python -m mnq_lab.spine.build --source-csv "<same source>" --out data_rebuild --quiet
 ```
 
 ## Design decisions worth knowing

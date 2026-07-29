@@ -143,9 +143,14 @@ plainly what you did not verify.
 # Full test suite
 python -m pytest tests -q
 
-# Build the spine (both tiers) and run all four fail-closed gates
-python -m mnq_lab.spine.build --source-csv "C:\Users\kyawz\Downloads\GLBX-20260331-885WT5W7KA\glbx-mdp3-20100606-20260329.ohlcv-1m.csv" --out data
-
 # Gates only, against an existing build
 python -m mnq_lab.spine.gates --store data
 ```
+
+The canonical store is sealed against the pre-Phase-3 YAML. Do **not** run
+`spine.build` with the current YAML into canonical `data/` and expect the pinned
+provenance tests to pass: the scientific arrays reproduce, but the full-file YAML
+hash intentionally gives the new build a different `build_id`. Follow
+`docs/SEALED_STORE_REBUILD.md` for sealed-artifact handling, the limits of
+byte-level regeneration, a disposable scientific-reconstruction procedure, and
+guidance on creating a genuinely new provenance version.

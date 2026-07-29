@@ -5,9 +5,11 @@ Spec §5: "Store format: `.npy` column store. `pyarrow` and `fastparquet` are bo
 per-file sha256 ... Loads via `mmap_mode="r"`."
 
 The manifest deliberately contains **no wall-clock timestamp**. Spec §13 test 17 requires
-artifact determinism (identical bytes) whenever the environment fingerprint matches, and
-a build time would break that on every rebuild. Provenance comes from `build_id`, the
-source hash, and the git commit instead.
+artifact determinism (identical bytes) whenever the complete build fingerprint matches,
+including the exact frozen-file bytes. A build time would break that on every rebuild.
+Provenance comes from `build_id`, the source hash, and the git commit instead. The sealed
+Phase 1–4 artifact and the limits of regenerating a dirty build fingerprint are
+documented in ``docs/SEALED_STORE_REBUILD.md``.
 """
 
 from __future__ import annotations

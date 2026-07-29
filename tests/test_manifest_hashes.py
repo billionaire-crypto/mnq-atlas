@@ -4,9 +4,11 @@ Deliverable 5: build id, source sha256, per-column sha256, row counts, dtypes, t
 size, timezone rules, session rules, roll list, exact retained-symbol count, exact
 rejected-spread-symbol count, environment fingerprint.
 
-The manifest carries no wall-clock timestamp, so two builds from the same source in the
-same environment produce identical bytes (spec §13 test 17: artifact determinism when
-the fingerprint matches).
+The manifest carries no wall-clock timestamp, so two builds from the same source with
+the same complete fingerprint — including exact frozen-file bytes — produce identical
+bytes (spec §13 test 17: artifact determinism when the fingerprint matches). The sealed
+Phase 1–4 store predates the Phase 3 YAML threshold insertion; see
+``docs/SEALED_STORE_REBUILD.md``.
 """
 
 from __future__ import annotations

@@ -138,6 +138,14 @@ The exploration store manifest correctly retains the old, build-time YAML hash.
 It was not rewritten after the freeze. The ledger records that old hash; the
 current YAML hash and exact ledger/YAML values are checked independently.
 
+Operational consequence: because `build_id` hashes the complete YAML file, a
+direct spine rebuild with the current post-freeze YAML produces scientifically
+identical arrays under a different provenance identity and intentionally fails
+the sealed-manifest pins. `docs/SEALED_STORE_REBUILD.md` records the disposable
+scientific-reconstruction procedure using the historical build-time YAML and
+the additional dirty-fingerprint limitation on byte-level regeneration. The
+canonical manifest must not be rewritten to make a rebuild appear identical.
+
 The YAML now contains exactly:
 
 ```yaml

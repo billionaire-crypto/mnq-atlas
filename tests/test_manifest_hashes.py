@@ -18,6 +18,10 @@ import pytest
 
 from mnq_lab import SpineError
 from mnq_lab.constants import CONSTANTS_PATH, SPEC_PATH
+from mnq_lab.ledger.freeze import (
+    load_phase3_completion_freeze,
+    validate_phase3_freeze_against_constants,
+)
 from mnq_lab.spine.store import BarStore, write_store
 from mnq_lab.spine.vendored import sha256_file
 
@@ -56,10 +60,23 @@ def test_source_hash_is_recorded_and_correct(exploration_5m):
     )
 
 
-def test_frozen_file_hashes_match_the_files_on_disk(exploration_5m):
+def test_frozen_file_hashes_track_build_input_and_authorized_yaml(exploration_5m):
+    """The store preserves its build-time YAML hash after an authorized freeze.
+
+    Phase 3 is explicitly allowed to add its derived thresholds after the store
+    exists. Rewriting the generated store manifest would falsify provenance, so
+    its YAML hash must equal the ledger's recorded old hash while the current
+    YAML is validated against the ledgered values separately.
+    """
     frozen = exploration_5m.manifest["frozen_files"]
     assert frozen["REV6_FROZEN_SPEC.md"] == sha256_file(SPEC_PATH)
-    assert frozen["analysis_constants_v1.yaml"] == sha256_file(CONSTANTS_PATH)
+    entry = validate_phase3_freeze_against_constants()
+    assert (
+        frozen["analysis_constants_v1.yaml"]
+        == entry["old_yaml_sha256"]
+        == load_phase3_completion_freeze()["old_yaml_sha256"]
+    )
+    assert sha256_file(CONSTANTS_PATH) != frozen["analysis_constants_v1.yaml"]
 
 
 def test_every_column_has_a_dtype_row_count_and_live_hash(exploration_5m):

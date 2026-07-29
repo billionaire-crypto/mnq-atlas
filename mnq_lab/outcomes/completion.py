@@ -20,8 +20,8 @@ in this package, including this docstring):
   visible in ``n_fully_labeled_h*`` (§13 test 5's discriminating case). A window
   missing an entire 5-min bar is incomplete under BOTH estimands — an excursion
   across an absent interval would invent prices. The estimands differ exactly on
-  1-minute coverage; that boundary choice is documented here and in
-  docs/PHASE2.md.
+  1-minute coverage. This is the binding D12 user ruling, documented here, in
+  docs/PHASE2.md, and in docs/DISCREPANCIES.md.
 
 Prevalence distinction (§10.2), kept structural in the output schema:
 

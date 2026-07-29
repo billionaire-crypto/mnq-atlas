@@ -164,19 +164,20 @@ Both previously-surviving mutations were re-applied after the fix and now fail t
 suite; the mutation was reverted from a scratch backup, not from git, so no fix was
 lost in the process.
 
-## Open question the user must rule on before Phase 3
+## D12 user ruling — conservative `observed_bar_path` completeness
 
-**`observed_bar_path` window completeness is an implementer interpretation, not a
-ruled one.** This build treats a window as complete when all required 5-min bars are
-present, so a window missing an entire bar fails *both* estimands. §6's phrase
-"excursions across the bars present in the source" does not uniquely compel that
-reading — it can also be read as "measure across whatever bars exist, however sparse".
-The audit flagged this as unruled, and it is load-bearing: Phase 3 freezes completion
-thresholds computed under whichever reading is chosen. Logged as **D12 (OPEN)**. Under
-the current reading the two estimands differ only on 1-minute coverage, and the
-measured gap between them is small (worst cell **0.175 pp, midday Δ30** — round 2
-corrected the original "0.16 pp at Δ60" claim, which had compared only within one
-horizon; see D12).
+The user selected Reading 1 on 2026-07-28. A window is complete under
+`observed_bar_path` only when **every required 5-minute bar exists**; 1-minute
+component coverage is not required. A wholly missing required bar makes the window
+incomplete under *both* estimands. This prevents an excursion across an absent
+interval from being treated as an observed price path and preserves a meaningful
+completion threshold for Phase 3.
+
+This is the mechanism already implemented and pinned by
+`test_a_wholly_missing_bar_fails_both_estimands`, so the ruling changes no published
+measurement. The estimands differ only on 1-minute coverage; the largest measured
+gap remains **0.175 pp at midday Δ30**. D12 is now **RESOLVED** in the discrepancy
+ledger, before any `min_completion_h15/h30/h60` value is frozen.
 
 ## External audit round 2 (2026-07-28) — verdict FAIL, and what changed
 
@@ -209,7 +210,8 @@ not an audit closure:
 | L-1 | Changing the inclusive scalar range check to strict inequalities rejected valid `INT64_MIN`/`INT64_MAX` values but survived the suite | `test_exact_int64_boundaries_are_accepted_when_arithmetic_is_safe` pins both scalar endpoints through public entry points, including a representable `np.uint64(INT64_MAX)`. |
 
 Developer replay after these changes: **293 passed, 5 xfailed**; gates 4/4; completion
-figures and session flags unchanged. D12 remains **OPEN** and still blocks Phase 3.
+figures and session flags unchanged. At that replay, D12 remained **OPEN** and still
+blocked Phase 3.
 
 ### Developer response to the round-3 audit finding — pending Opus 5 verification
 
@@ -227,7 +229,8 @@ fixed UTC−5 maps winter to minute 570; fixed UTC−6 maps summer to minute 450
 
 Developer replay after this change: **294 passed, 5 xfailed**; gates 4/4; completion
 figures and session flags unchanged. This is an implementation claim pending Opus
-5's independent audit. D12 remains **OPEN** and continues to block Phase 3.
+5's independent audit. At that replay, D12 remained **OPEN** and continued to block
+Phase 3.
 
 ### Round-4 verification audit — CLOSED
 

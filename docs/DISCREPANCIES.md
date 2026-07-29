@@ -367,7 +367,7 @@ impossible without the calendar table and is not claimed.
 
 ---
 
-## D12 — `observed_bar_path` window completeness is not uniquely determined by §6 — `OPEN`
+## D12 — `observed_bar_path` window completeness was not uniquely determined by §6 — `RESOLVED`
 
 **Spec §6:** the two estimands are `fully_labeled_1m_grid` — "every 5-min bar in the
 path contains all five expected 1-min labels" — and `observed_bar_path` — "excursions
@@ -377,7 +377,7 @@ across the bars present in the source".
 `observed_bar_path` "the bars present in the source" admits two readings when a
 required 5-min bar is entirely absent:
 
-1. **Implemented here (conservative):** a window is complete only if *all* required
+1. **Conservative:** a window is complete only if *all* required
    5-min bars are present; 1-minute coverage is not required. A window missing a whole
    bar is incomplete under **both** estimands, because an excursion measured across an
    absent interval would invent the price path over that interval. The two estimands
@@ -397,7 +397,7 @@ the S00 population **under a chosen estimand**, with a ledger entry, and §16.4.
 forbids changing a constant after the affected result is computed. Choosing the reading
 after the thresholds are frozen would be exactly that.
 
-**Measured impact under the current reading (exploration tier):** the two estimands
+**Measured impact under the ruled reading (exploration tier):** the two estimands
 differ by at most **0.175 pp** in any phase × horizon cell (largest gap: **midday
 Δ30**, 0.99000 vs 0.99175; midday Δ60 is second at 0.162 pp). *Correction
 (round-2 audit, 2026-07-28): this entry originally claimed "at most 0.16 pp, worst at
@@ -406,6 +406,13 @@ the worst cell sat at the longest horizon. The gap is not monotone in Δ; all 15
 are now compared.* Whole-bar absences are rare, so the two readings would produce
 similar thresholds — but "similar" is not "ruled", and the difference is not zero.
 
-**Status:** OPEN — requires a user ruling before Phase 3 freezes thresholds. Reading 1
-is implemented and documented; nothing is coded around the ambiguity, and no threshold
-has been frozen.
+**User ruling (2026-07-28):** adopt Reading 1, the conservative definition. Every
+required 5-minute bar must exist. A wholly missing required bar makes the window
+incomplete under **both** estimands; `observed_bar_path` relaxes 1-minute component
+coverage only, never 5-minute path continuity. Measuring an excursion across an
+absent interval would treat an unknown path as observed, and the permissive reading
+would make `min_completion_*` meaningless for this estimand.
+
+**Status:** RESOLVED — Reading 1 was already the implemented and tested mechanism, so
+the ruling changes no measurements. It closes the ambiguity before Phase 3 freezes
+`min_completion_h15/h30/h60`.

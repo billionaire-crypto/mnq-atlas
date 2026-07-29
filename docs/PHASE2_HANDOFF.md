@@ -197,11 +197,11 @@ declared cell with a `status`; `n_anchors` never without `n_sessions` and
 - Before coding, run the full existing suite and the gates to confirm you inherit a
   green state; report your starting state to the user first, as Phase 1 did.
 
-## 6.5 USER DECISIONS — the two open questions are now ruled (2026-07-28)
+## 6.5 USER DECISIONS — binding Phase 2 rulings (2026-07-28)
 
-Both flagged decisions were put to the user and answered. These rulings are binding
-for Phase 2; do not re-litigate them. Log their implementation as D11 in
-`docs/DISCREPANCIES.md` (spec-ambiguity resolutions, with the rationale below).
+The flagged decisions were put to the user and answered. These rulings are binding
+for Phase 2; do not re-litigate them. Rulings 1–2 are logged as D11 and Ruling 3 as
+D12 in `docs/DISCREPANCIES.md`.
 
 ### Ruling 1 — anchor eligibility is by observation time τ, never the bar label
 
@@ -272,6 +272,30 @@ formal calendar-dependent exclusion    fail closed / deferred (Phase 10)
   mapping in the D11 entry. When seasonal profiles (Phase 7) or formal inference
   (Phase 10) need official classifications, a versioned CME calendar table becomes
   mandatory and arrives as a new versioned input with a ledger entry.
+
+### Ruling 3 — `observed_bar_path` requires every 5-minute path bar
+
+The user selected the conservative D12 reading:
+
+```
+fully_labeled_1m_grid:
+    every required 5-minute bar exists
+    AND every required bar has all five expected 1-minute labels
+
+observed_bar_path:
+    every required 5-minute bar exists
+    1-minute component coverage is not required
+```
+
+A wholly missing required 5-minute bar makes the window incomplete under **both**
+estimands. An excursion across an absent interval is not an observed path. The
+permissive alternative—measuring across whatever bars remain—would give
+`observed_bar_path` no meaningful completeness requirement and is rejected.
+
+This ruling matches the existing Phase 2 mechanism and
+`test_a_wholly_missing_bar_fails_both_estimands`; it changes no completion figure.
+D12 must be marked `RESOLVED` before Phase 3 freezes
+`min_completion_h15/h30/h60`.
 
 ## 7. Definition of done for Phase 2
 

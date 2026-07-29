@@ -108,7 +108,7 @@ def test_a_bar_expecting_fewer_than_five_labels_is_not_fully_labeled(time_model)
 
 def test_a_wholly_missing_bar_fails_both_estimands(time_model):
     """A window crossing an absent 5-min interval is incomplete under BOTH — an
-    excursion across it would invent prices (§6)."""
+    excursion across it would invent prices (binding D12 user ruling)."""
     frame = completion_frame(time_model, missing=("10:00",))
     anchor = row_at(frame, 9 * 60 + 55)  # τ=09:55, Δ15 window needs 10:00
 

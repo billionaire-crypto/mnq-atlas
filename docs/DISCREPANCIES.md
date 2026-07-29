@@ -416,3 +416,38 @@ would make `min_completion_*` meaningless for this estimand.
 **Status:** RESOLVED — Reading 1 was already the implemented and tested mechanism, so
 the ruling changes no measurements. It closes the ambiguity before Phase 3 freezes
 `min_completion_h15/h30/h60`.
+
+---
+
+## D13 — weighted-quantile scale invariance is not exact for arbitrary binary64 factors — `RESOLVED`
+
+**Frozen spec §7.2:** weighted inverse-CDF statistics are replication-invariant. The
+Phase 4 handoff additionally proposed that positive rescaling of every weight could not
+change the returned support value.
+
+**Measured by the independent Phase 4 quant audit (2026-07-29):** at exact CDF
+boundaries, multiplying every binary64 weight by an arbitrary positive factor changed
+the returned adjacent support value in 23,017 of 100,000 trials. Random-q testing hid
+the defect completely: zero changes in 300,000 trials. Power-of-two factors
+`{0.25, 0.5, 2, 4, 1024}` produced zero changes in 100,000 boundary trials because
+binary scaling is exact.
+
+**Cause:** arbitrary multiplication rounds individual binary64 weights. Near an exact
+CDF boundary, those rounded inputs need not preserve the equality between cumulative
+mass and `q * total_mass`. This is a property of the supplied finite-precision inputs,
+not interpolation or a failure of the inverse-CDF definition.
+
+**Ruling:** Phase 4 guarantees exact scale invariance for exactly representable
+power-of-two factors. For a general positive factor it guarantees invariance except
+where binary64 rounding moves `q * total_mass` across a cumulative boundary. No
+tolerance, epsilon, normalization, or nearest-boundary repair is allowed in quantile
+selection. Tests use a power-of-two factor or integer replication counts for the exact
+invariance claim.
+
+**Cross-phase impact:** Phase 5 bootstrap fractional weights must use the same canonical
+Phase 4 accumulation path. It must not reintroduce a general exact-scale-invariance
+claim or a tolerance around CDF boundaries.
+
+**Not verified:** the audit did not establish a closed-form frequency for boundary
+changes outside its sampled binary64 populations. The measured 23% is a diagnostic of
+the adversarial fixture distribution, not an expected rate for atlas weights.

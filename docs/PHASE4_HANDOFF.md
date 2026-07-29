@@ -547,4 +547,3 @@ The first Phase 4 turn should:
 6. prepare the exact §7.2/§7.1 preflight question for Opus;
 7. stop before production code until Opus ratifies the boundary contract or
    identifies a discrepancy requiring a user ruling.
-

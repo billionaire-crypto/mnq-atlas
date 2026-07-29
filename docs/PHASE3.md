@@ -202,5 +202,18 @@ quantile, and pooled horizons. Zero survived.
   system.
 - No Phase 4 weight, bootstrap, conditioner, null, or S01A output has been
   computed.
-- Final Opus freeze audit is pending. Phase 3 is not closed until that verdict
-  is `CLOSED`.
+
+## Final audit closure
+
+Opus 5 returned final `VERDICT: CLOSED` at commit `65e9901` after independently
+verifying the freeze ordering from Git objects, canonical ledger contents,
+old/build-time versus new/current YAML provenance, full replay, artifact
+identity, mutation behavior, documentation, and Phase 3 scope.
+
+One non-blocking low observation remains: the test name
+`test_ledger_artifact_provenance_matches_generated_bytes` overstates its direct
+mechanism. The test compares the existing generated artifact's size and hash to
+the ledger; it does not itself regenerate S00. Regenerating after an S00-payload
+mutation does change the bytes and is caught, so the protection is real. A
+future maintenance unit may rename the test or strengthen it to regenerate
+before comparing. This does not reopen Phase 3.

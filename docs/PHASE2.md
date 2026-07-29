@@ -125,7 +125,7 @@ excluded from any earliest-ending selection. No calendar claim is made or possib
 ## Reproducible commands
 
 ```powershell
-# full suite (Phase 1 + Phase 2): expect 291 passed, 5 xfailed
+# full suite (Phase 1 + Phase 2): expect 293 passed, 5 xfailed
 python -m pytest tests -q
 
 # Phase 2 gate tests only
@@ -196,6 +196,20 @@ mutation and three fresh claim/mechanism defects. All four are closed:
 Suite after round 2: **291 passed, 5 xfailed**; gates 4/4; all 30 completion figures
 and the flag census unchanged (doc-number corrections only — M-2 changed a *claim
 about* the numbers, not the numbers).
+
+## Developer response to external audit round 3 (2026-07-28) — pending Fable 5 audit
+
+The round-3 audit confirmed the four round-2 repairs, then found one fresh medium
+defect and one low mutation-coverage gap. These changes are implementation claims,
+not an audit closure:
+
+| # | Finding | Developer implementation |
+|---|---|---|
+| M-1 | `_as_scalar_int64` validated each operand, but valid operands could still overflow when `interval_end_ns` formed `start + interval` or an outcome function formed `tau + horizon` | Result bounds are now checked in exact Python integers before NumPy arithmetic. `test_negative_int64_result_arithmetic_overflow_fails_closed` covers all three public result-producing paths and exact-boundary positive controls. |
+| L-1 | Changing the inclusive scalar range check to strict inequalities rejected valid `INT64_MIN`/`INT64_MAX` values but survived the suite | `test_exact_int64_boundaries_are_accepted_when_arithmetic_is_safe` pins both scalar endpoints through public entry points, including a representable `np.uint64(INT64_MAX)`. |
+
+Developer replay after these changes: **293 passed, 5 xfailed**; gates 4/4; completion
+figures and session flags unchanged. D12 remains **OPEN** and still blocks Phase 3.
 
 ## What was not verified
 

@@ -91,19 +91,35 @@ def _as_scalar_int64(value: int, name: str) -> np.int64:
     return np.int64(as_int)
 
 
-def _validate_window(horizon_ns: int, interval_ns: int) -> None:
-    horizon_ns = int(_as_scalar_int64(horizon_ns, "horizon_ns"))
-    interval_ns = int(_as_scalar_int64(interval_ns, "interval_ns"))
-    if interval_ns <= 0:
+def _checked_scalar_sum(
+    left: np.int64, right: np.int64, expression: str
+) -> np.int64:
+    """Add two validated int64 scalars without allowing NumPy wraparound."""
+    result = int(left) + int(right)
+    if not (_INT64_MIN <= result <= _INT64_MAX):
+        raise SpineError(
+            f"{expression} = {result} does not fit in int64 nanoseconds; "
+            "refusing wrapped event-time arithmetic"
+        )
+    return np.int64(result)
+
+
+def _validate_window(
+    horizon_ns: int, interval_ns: int
+) -> tuple[np.int64, np.int64]:
+    horizon = _as_scalar_int64(horizon_ns, "horizon_ns")
+    interval = _as_scalar_int64(interval_ns, "interval_ns")
+    if interval <= 0:
         raise SpineError(f"interval_ns must be positive, got {interval_ns}")
-    if horizon_ns <= 0:
+    if horizon <= 0:
         raise SpineError(f"horizon_ns must be positive, got {horizon_ns}")
-    if horizon_ns % interval_ns != 0:
+    if horizon % interval != 0:
         raise SpineError(
             f"horizon_ns={horizon_ns} is not a whole number of intervals of "
             f"interval_ns={interval_ns}; a partial trailing interval would make "
             "the window boundary ambiguous"
         )
+    return horizon, interval
 
 
 def interval_end_ns(interval_start_ns: np.ndarray, interval_ns: int) -> np.ndarray:
@@ -117,6 +133,14 @@ def interval_end_ns(interval_start_ns: np.ndarray, interval_ns: int) -> np.ndarr
     length = _as_scalar_int64(interval_ns, "interval_ns")
     if length <= 0:
         raise SpineError(f"interval_ns must be positive, got {interval_ns}")
+    # External audit round 3 (2026-07-28): validating each operand does not
+    # validate their sum. NumPy silently wrapped INT64_MAX + 1 to INT64_MIN.
+    largest_safe_start = _INT64_MAX - int(length)
+    if starts.size and int(np.max(starts)) > largest_safe_start:
+        raise SpineError(
+            "interval_end_ns = interval_start_ns + interval_ns does not fit in "
+            "int64 nanoseconds; refusing wrapped event-time arithmetic"
+        )
     return starts + length
 
 
@@ -141,9 +165,10 @@ def outcome_interval_mask(
     extremes are realized history, not outcome (spec §4.1).
     """
     starts = _as_int64(interval_start_ns, "interval_start_ns")
-    _validate_window(horizon_ns, interval_ns)
+    horizon, _ = _validate_window(horizon_ns, interval_ns)
     tau = _as_scalar_int64(tau_ns, "tau_ns")
-    return (starts >= tau) & (starts < tau + np.int64(horizon_ns))
+    window_end = _checked_scalar_sum(tau, horizon, "tau_ns + horizon_ns")
+    return (starts >= tau) & (starts < window_end)
 
 
 def required_interval_starts(tau_ns: int, horizon_ns: int, interval_ns: int) -> np.ndarray:
@@ -153,9 +178,10 @@ def required_interval_starts(tau_ns: int, horizon_ns: int, interval_ns: int) -> 
     is exactly the labels 08:35, 08:40, 08:45 — ``horizon/interval`` labels, the
     last one starting at ``τ + horizon − interval``.
     """
-    _validate_window(horizon_ns, interval_ns)
+    horizon, interval = _validate_window(horizon_ns, interval_ns)
     tau = _as_scalar_int64(tau_ns, "tau_ns")
-    return np.arange(tau, tau + np.int64(horizon_ns), np.int64(interval_ns))
+    window_end = _checked_scalar_sum(tau, horizon, "tau_ns + horizon_ns")
+    return np.arange(tau, window_end, interval)
 
 
 def interval_presence(

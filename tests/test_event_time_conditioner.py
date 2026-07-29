@@ -206,3 +206,64 @@ def test_negative_unsigned_overflow_scalars_fail_closed():
     # unrepresentable range, not the unsigned type.
     assert conditioner_input_mask(good, np.uint64(TAU))[0]
     assert conditioner_input_mask(good, np.int64(TAU))[0]
+
+
+def test_exact_int64_boundaries_are_accepted_when_arithmetic_is_safe():
+    """Round-3 audit L-1: both endpoints belong to the int64 domain.
+
+    A strict-inequality mutation in the scalar range check rejected INT64_MIN and
+    INT64_MAX but survived the suite. Public entry points pin both boundaries
+    here; arithmetic-producing functions use boundary-adjacent values whose
+    results remain representable.
+    """
+    int64_min = np.iinfo(np.int64).min
+    int64_max = np.iinfo(np.int64).max
+    endpoints = np.asarray([int64_min, int64_max], dtype=np.int64)
+
+    assert conditioner_input_mask(endpoints, int64_min).tolist() == [True, False]
+    assert conditioner_input_mask(endpoints, int64_max).tolist() == [True, True]
+    assert conditioner_input_mask(endpoints, np.uint64(int64_max)).tolist() == [
+        True,
+        True,
+    ]
+
+    assert interval_end_ns(
+        np.asarray([int64_min, int64_max - 1], dtype=np.int64), 1
+    ).tolist() == [int64_min + 1, int64_max]
+    assert required_interval_starts(int64_min, 2, 1).tolist() == [
+        int64_min,
+        int64_min + 1,
+    ]
+    assert outcome_interval_mask(
+        np.asarray([int64_min, int64_min + 1, int64_min + 2], dtype=np.int64),
+        int64_min,
+        2,
+        1,
+    ).tolist() == [True, True, False]
+
+
+def test_negative_int64_result_arithmetic_overflow_fails_closed():
+    """Round-3 audit M-1: valid operands must not create a wrapped timestamp."""
+    int64_max = np.iinfo(np.int64).max
+
+    with pytest.raises(SpineError, match="interval_end_ns.*does not fit"):
+        interval_end_ns(np.asarray([int64_max], dtype=np.int64), 1)
+
+    with pytest.raises(SpineError, match=r"tau_ns \+ horizon_ns.*does not fit"):
+        outcome_interval_mask(
+            np.asarray([int64_max - 1], dtype=np.int64),
+            int64_max - 1,
+            2,
+            1,
+        )
+    with pytest.raises(SpineError, match=r"tau_ns \+ horizon_ns.*does not fit"):
+        required_interval_starts(int64_max - 1, 2, 1)
+
+    # Exact-boundary results remain valid: refusal is specific to overflow.
+    assert interval_end_ns(
+        np.asarray([int64_max - 1], dtype=np.int64), 1
+    ).tolist() == [int64_max]
+    assert required_interval_starts(int64_max - 2, 2, 1).tolist() == [
+        int64_max - 2,
+        int64_max - 1,
+    ]

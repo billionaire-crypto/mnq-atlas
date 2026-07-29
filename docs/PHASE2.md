@@ -229,6 +229,20 @@ Developer replay after this change: **294 passed, 5 xfailed**; gates 4/4; comple
 figures and session flags unchanged. This is an implementation claim pending Opus
 5's independent audit. D12 remains **OPEN** and continues to block Phase 3.
 
+### Round-4 verification audit — CLOSED
+
+Opus 5 independently replayed the baseline and both fixed-offset mutations at
+commit `b5281bb`. The UTC−5 mutation failed on the winter instant (minute 570
+instead of 510); the UTC−6 mutation failed on the summer instant (minute 450
+instead of 510). The full baseline reproduced at **294 passed, 5 xfailed**, gates
+4/4, with all completion figures, session flags, and frozen hashes unchanged.
+Round 4's overall verdict is **CLOSED**.
+
+The audit also recorded one non-blocking scope observation: `ct_minute_of_day` is a
+public API with no production caller inside `mnq_lab` in Phase 2. The defect was a
+real coverage hole in a promised DST-correct API, but never affected the Phase 2
+measurement path. Its likely first consumer is a later seasonal-profile phase.
+
 ## What was not verified
 
 - Whether any of the 34 observed short sessions was a *scheduled* early close —
@@ -242,3 +256,6 @@ figures and session flags unchanged. This is an implementation claim pending Opu
 - `_assert_sessions_own_their_bars` enforces the CME trade-date rule specifically, so
   it is meaningful only for a CME session calendar; the Khartoum guard fixture
   deliberately runs before it.
+- `ct_minute_of_day` has no production consumer in Phase 2. Its public DST contract
+  is pinned by the summer/winter test for later adopters, but current measurement
+  outputs exercise the separate `_localize_session_minutes` path.

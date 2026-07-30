@@ -92,10 +92,13 @@ def test_more_than_the_generic_minimum_draw_count_is_admitted():
 
 
 def test_interval_does_not_mutate_or_alias_replicate_statistics():
-    replicates = np.linspace(-5.0, 5.0, 999, dtype=np.float64)
+    replicates = np.random.Generator(np.random.PCG64(91)).permutation(
+        np.linspace(-5.0, 5.0, 999, dtype=np.float64)
+    )
     before = replicates.tobytes()
     dtype = replicates.dtype
 
+    assert not np.array_equal(replicates, np.sort(replicates))
     interval = percentile_interval(replicates, 0.95)
 
     assert replicates.tobytes() == before

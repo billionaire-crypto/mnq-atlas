@@ -10,7 +10,7 @@ separate Phase 5 unit.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from numbers import Real
+from numbers import Integral, Real
 from typing import Any, Hashable
 
 import numpy as np
@@ -26,6 +26,7 @@ from mnq_lab.core.weights import (
 __all__ = [
     "StationaryGroupResamplePlan",
     "apply_group_multiplicities",
+    "bootstrap_weighted_quantile_replicates",
     "percentile_interval",
     "stationary_group_resample",
 ]
@@ -366,3 +367,131 @@ def percentile_interval(
         probabilities,
     )
     return float(endpoints[0]), float(endpoints[1])
+
+
+def bootstrap_weighted_quantile_replicates(
+    group_ids: Any,
+    baseline_weights: Any,
+    value_arrays: Any,
+    eligibility_masks: Any,
+    quantiles: Any,
+    draws: Any,
+    mean_block_groups: Any,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Generate coherent weighted-quantile replicates for aligned requests.
+
+    Exactly one whole-group plan and one composed row-weight vector are created
+    per replicate. Every aligned request then applies its eligibility mask to
+    that shared vector. Any failed request aborts without retry and identifies
+    both its replicate and request positions.
+    """
+    if isinstance(draws, (bool, np.bool_)) or not isinstance(draws, Integral):
+        raise SpineError("draws must be a non-bool integer >= 999")
+    draw_count = int(draws)
+    if draw_count < _MIN_BOOTSTRAP_DRAWS:
+        raise SpineError("draws must be a non-bool integer >= 999")
+    if not isinstance(rng, np.random.Generator):
+        raise SpineError(
+            "rng must be an explicitly supplied numpy.random.Generator"
+        )
+    mean = _validated_mean_block_groups(mean_block_groups)
+
+    labels = _as_opaque_group_labels(group_ids)
+    _ordered_contiguous_group_labels(labels)
+    weights = _validated_concentration_weights(baseline_weights)
+    if weights.size != len(labels):
+        raise SpineError(
+            "group_ids and baseline_weights must have equal length; "
+            f"got {len(labels)} and {weights.size}"
+        )
+
+    try:
+        values_sequence = tuple(value_arrays)
+        masks_sequence = tuple(eligibility_masks)
+        quantile_sequence = tuple(quantiles)
+    except TypeError as exc:
+        raise SpineError(
+            "value_arrays, eligibility_masks, and quantiles must be "
+            "finite request sequences"
+        ) from exc
+
+    request_count = len(values_sequence)
+    if request_count == 0:
+        raise SpineError("at least one aligned quantile request is required")
+    if (
+        len(masks_sequence) != request_count
+        or len(quantile_sequence) != request_count
+    ):
+        raise SpineError(
+            "value_arrays, eligibility_masks, and quantiles must have "
+            "equal request counts"
+        )
+
+    values_by_request: list[np.ndarray] = []
+    masks_by_request: list[np.ndarray] = []
+    for request_index, (values, mask) in enumerate(
+        zip(values_sequence, masks_sequence)
+    ):
+        try:
+            value_array = np.asarray(values)
+            mask_array = np.asarray(mask)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise SpineError(
+                f"request {request_index} arrays cannot be converted"
+            ) from exc
+        if value_array.ndim != 1 or value_array.size != len(labels):
+            raise SpineError(
+                f"request {request_index} values must be a one-dimensional "
+                f"array of row length {len(labels)}"
+            )
+        if (
+            mask_array.ndim != 1
+            or mask_array.size != len(labels)
+            or mask_array.dtype.kind != "b"
+        ):
+            raise SpineError(
+                f"request {request_index} eligibility mask must be a "
+                f"one-dimensional bool array of row length {len(labels)}"
+            )
+        values_by_request.append(value_array)
+        masks_by_request.append(mask_array)
+
+    replicates = np.empty(
+        (request_count, draw_count),
+        dtype=np.float64,
+    )
+    for replicate_index in range(draw_count):
+        try:
+            plan = stationary_group_resample(labels, mean, rng)
+            composed_weights = apply_group_multiplicities(
+                labels,
+                weights,
+                plan,
+            )
+        except SpineError as exc:
+            raise SpineError(
+                f"bootstrap replicate {replicate_index} failed: {exc}"
+            ) from exc
+
+        for request_index, (values, mask, quantile) in enumerate(
+            zip(values_by_request, masks_by_request, quantile_sequence)
+        ):
+            try:
+                statistic = weighted_quantiles(
+                    values[mask],
+                    composed_weights[mask],
+                    [quantile],
+                )[0]
+            except SpineError as exc:
+                raise SpineError(
+                    f"bootstrap replicate {replicate_index}, request "
+                    f"{request_index} failed: {exc}"
+                ) from exc
+            if not np.isfinite(statistic):
+                raise SpineError(
+                    f"bootstrap replicate {replicate_index}, request "
+                    f"{request_index} produced a non-finite statistic"
+                )
+            replicates[request_index, replicate_index] = statistic
+    return replicates

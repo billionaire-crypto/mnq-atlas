@@ -86,14 +86,22 @@ def test_one_global_plan_and_composition_precede_every_request_mask(
     group_ids = np.array(["a", "b", "c", "d"])
     baseline, _ = anchor_equal_weights(group_ids.size)
     seen_group_vectors = []
+    recorded_compositions = []
     plan_calls = 0
     composition_calls = 0
-    phase4_multi_calls = 0
-    phase4_scalar_calls = 0
+    phase4_calls = 0
     original_apply = bootstrap_module.apply_group_multiplicities
     original_phase4 = bootstrap_module.weighted_quantiles
     original_phase4_scalar = weights_module.weighted_quantile
     plan = _all_ones_plan(("a", "b", "c", "d"))
+    request_values = (
+        np.array([0.0, 1.0, 2.0, 3.0]),
+        np.array([10.0, 11.0, 12.0, 13.0]),
+    )
+    request_masks = (
+        np.ones(4, dtype=bool),
+        np.array([True, False, True, False]),
+    )
 
     def plan_spy(supplied_group_ids, mean_block_groups, rng):
         nonlocal plan_calls
@@ -104,20 +112,38 @@ def test_one_global_plan_and_composition_precede_every_request_mask(
     def composition_spy(supplied_group_ids, supplied_weights, supplied_plan):
         nonlocal composition_calls
         composition_calls += 1
-        return original_apply(
+        composed = original_apply(
             supplied_group_ids,
             supplied_weights,
             supplied_plan,
         )
+        recorded_compositions.append(composed.copy())
+        return composed
+
+    def assert_untampered_phase4_inputs(values, weights):
+        nonlocal phase4_calls
+        replicate_index, request_index = divmod(phase4_calls, 2)
+        expected_values = request_values[request_index][
+            request_masks[request_index]
+        ]
+        expected_weights = recorded_compositions[replicate_index][
+            request_masks[request_index]
+        ]
+        supplied_values = np.asarray(values)
+        supplied_weights = np.asarray(weights)
+
+        assert supplied_values.dtype == expected_values.dtype
+        assert supplied_values.tobytes() == expected_values.tobytes()
+        assert supplied_weights.dtype == expected_weights.dtype
+        assert supplied_weights.tobytes() == expected_weights.tobytes()
+        phase4_calls += 1
 
     def phase4_spy(values, weights, quantiles):
-        nonlocal phase4_multi_calls
-        phase4_multi_calls += 1
+        assert_untampered_phase4_inputs(values, weights)
         return original_phase4(values, weights, quantiles)
 
     def phase4_scalar_spy(values, weights, quantile):
-        nonlocal phase4_scalar_calls
-        phase4_scalar_calls += 1
+        assert_untampered_phase4_inputs(values, weights)
         return original_phase4_scalar(values, weights, quantile)
 
     monkeypatch.setattr(
@@ -145,14 +171,8 @@ def test_one_global_plan_and_composition_precede_every_request_mask(
     replicates = bootstrap_weighted_quantile_replicates(
         group_ids,
         baseline,
-        (
-            np.array([0.0, 1.0, 2.0, 3.0]),
-            np.array([10.0, 11.0, 12.0, 13.0]),
-        ),
-        (
-            np.ones(4, dtype=bool),
-            np.array([True, False, True, False]),
-        ),
+        request_values,
+        request_masks,
         (0.5, 0.5),
         1_000,
         5,
@@ -162,7 +182,8 @@ def test_one_global_plan_and_composition_precede_every_request_mask(
     assert replicates.shape == (2, 1_000)
     assert plan_calls == 1_000
     assert composition_calls == 1_000
-    assert phase4_multi_calls + phase4_scalar_calls == 2_000
+    assert len(recorded_compositions) == 1_000
+    assert phase4_calls == 2_000
     assert set(seen_group_vectors) == {("a", "b", "c", "d")}
 
 

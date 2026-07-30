@@ -18,14 +18,19 @@ import numpy as np
 from mnq_lab import SpineError
 from mnq_lab.core.weights import (
     _as_opaque_group_labels,
+    _as_real_float64_vector,
     _validated_concentration_weights,
+    weighted_quantiles,
 )
 
 __all__ = [
     "StationaryGroupResamplePlan",
     "apply_group_multiplicities",
+    "percentile_interval",
     "stationary_group_resample",
 ]
+
+_MIN_BOOTSTRAP_DRAWS = 999
 
 
 def _validated_mean_block_groups(mean_block_groups: Any) -> float:
@@ -270,3 +275,94 @@ def apply_group_multiplicities(
             "composed bootstrap weights must remain finite binary64 values"
         )
     return composed
+
+
+def percentile_interval(
+    replicate_statistics: Any,
+    confidence_level: Any,
+) -> tuple[float, float]:
+    """Return closed equal-replicate percentile endpoints.
+
+    At least 999 finite replicate statistics are required. Endpoint selection
+    uses the Phase 4 discrete weighted inverse CDF with literal float64 unit
+    weights. There is no interpolation, normalization, finite filtering, or
+    default confidence level.
+    """
+    if isinstance(confidence_level, (bool, np.bool_)) or not isinstance(
+        confidence_level, Real
+    ):
+        raise SpineError(
+            "confidence_level must be a finite non-bool real scalar "
+            "strictly between 0 and 1"
+        )
+    try:
+        level = float(confidence_level)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise SpineError(
+            "confidence_level must be a finite non-bool real scalar "
+            "strictly between 0 and 1"
+        ) from exc
+    if not np.isfinite(level) or not 0.0 < level < 1.0:
+        raise SpineError(
+            "confidence_level must be a finite non-bool real scalar "
+            "strictly between 0 and 1"
+        )
+
+    try:
+        shape_view = np.asarray(replicate_statistics)
+    except (TypeError, ValueError, OverflowError):
+        shape_view = None
+    if (
+        shape_view is not None
+        and shape_view.ndim == 1
+        and shape_view.size < _MIN_BOOTSTRAP_DRAWS
+    ):
+        raise SpineError(
+            "replicate_statistics must contain at least "
+            f"{_MIN_BOOTSTRAP_DRAWS} draws; got {shape_view.size}"
+        )
+
+    try:
+        statistics = _as_real_float64_vector(
+            replicate_statistics, "replicate_statistics"
+        )
+    except SpineError as exc:
+        try:
+            object_view = np.asarray(replicate_statistics, dtype=object)
+        except (TypeError, ValueError, OverflowError):
+            object_view = np.empty(0, dtype=object)
+        invalid_index = 0
+        if object_view.ndim == 1:
+            for index, value in enumerate(object_view):
+                if isinstance(value, (bool, np.bool_)) or not isinstance(
+                    value, Real
+                ):
+                    invalid_index = index
+                    break
+                try:
+                    finite = np.isfinite(float(value))
+                except (TypeError, ValueError, OverflowError):
+                    finite = False
+                if not finite:
+                    invalid_index = index
+                    break
+        raise SpineError(
+            f"replicate statistic at index {invalid_index} is invalid: {exc}"
+        ) from exc
+
+    draw_count = int(statistics.size)
+    if draw_count < _MIN_BOOTSTRAP_DRAWS:
+        raise SpineError(
+            "replicate_statistics must contain at least "
+            f"{_MIN_BOOTSTRAP_DRAWS} draws; got {draw_count}"
+        )
+
+    tail_probability = (1.0 - level) / 2.0
+    probabilities = (tail_probability, 1.0 - tail_probability)
+    replicate_weights = np.ones(draw_count, dtype=np.float64)
+    endpoints = weighted_quantiles(
+        statistics,
+        replicate_weights,
+        probabilities,
+    )
+    return float(endpoints[0]), float(endpoints[1])

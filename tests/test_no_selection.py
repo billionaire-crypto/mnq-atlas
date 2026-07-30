@@ -28,6 +28,7 @@ SELECTION_VERBS = {"sort_values", "nlargest", "nsmallest", "idxmax", "idxmin",
 # §11 forbidden names. Listed knowing full well that `score` defeats the whole list.
 FORBIDDEN_NAMES = {"pnl", "profit", "expectancy", "sharpe", "equity_curve", "drawdown"}
 FORBIDDEN_CORE_IMPORT_ROOTS = {
+    "constants",
     "spine",
     "conditioners",
     "outcomes",
@@ -36,7 +37,12 @@ FORBIDDEN_CORE_IMPORT_ROOTS = {
     "nulls",
     "ledger",
 }
+FORBIDDEN_CORE_TOP_LEVEL_IMPORTS = {"yaml"}
 LOCKED_TIER_PATTERN = re.compile(r"\blocked(?:[_-]confirmation)?\b", re.IGNORECASE)
+CORE_STORE_PATH_PATTERN = re.compile(
+    r"(?:\bdata[\\/]|bars_\d+m\b)",
+    re.IGNORECASE,
+)
 
 
 def _modules(root):
@@ -59,6 +65,8 @@ def _forbidden_core_imports(path):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 parts = alias.name.split(".")
+                if parts[0] in FORBIDDEN_CORE_TOP_LEVEL_IMPORTS:
+                    offenders.append(f"{path.name} imports {alias.name}")
                 if (
                     len(parts) > 1
                     and parts[0] == "mnq_lab"
@@ -68,7 +76,9 @@ def _forbidden_core_imports(path):
         elif isinstance(node, ast.ImportFrom):
             module = node.module or ""
             parts = module.split(".")
-            if (
+            if parts[0] in FORBIDDEN_CORE_TOP_LEVEL_IMPORTS:
+                offenders.append(f"{path.name} imports {module}")
+            elif (
                 len(parts) > 1
                 and parts[0] == "mnq_lab"
                 and parts[1] in FORBIDDEN_CORE_IMPORT_ROOTS
@@ -90,6 +100,16 @@ def _locked_tier_references(path):
             path.read_text(encoding="utf-8").splitlines(), start=1
         )
         if LOCKED_TIER_PATTERN.search(line)
+    ]
+
+
+def _core_store_path_references(path):
+    return [
+        (line_number, line.strip())
+        for line_number, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), start=1
+        )
+        if CORE_STORE_PATH_PATTERN.search(line)
     ]
 
 
@@ -115,14 +135,17 @@ def test_core_imports_nothing_market_aware():
     [
         "from mnq_lab.ledger import freeze\n",
         "from mnq_lab import ledger\n",
+        "from mnq_lab.constants import load_constants\n",
+        "import yaml\n",
+        "from yaml import safe_load\n",
     ],
 )
-def test_core_import_guard_detects_a_planted_ledger_import(tmp_path, source):
+def test_core_import_guard_detects_a_planted_forbidden_import(tmp_path, source):
     leaky = tmp_path / "leaky.py"
     leaky.write_text(source, encoding="utf-8")
 
     assert _forbidden_core_imports(leaky), (
-        "the core import guard did not detect its planted ledger mutation"
+        "the core import guard did not detect its planted import mutation"
     )
 
 
@@ -149,6 +172,33 @@ def test_locked_tier_guard_detects_a_planted_reference(tmp_path, source):
 
     assert _locked_tier_references(leaky), (
         "the locked-tier guard did not detect its planted source mutation"
+    )
+
+
+def test_core_does_not_name_market_store_paths():
+    offenders = []
+    for path in _modules(CORE_ROOT):
+        for line_number, line in _core_store_path_references(path):
+            offenders.append(
+                f"{path.relative_to(PACKAGE_ROOT)}:{line_number} {line}"
+            )
+    assert not offenders, offenders
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "_STORE = 'data/exploration/bars_5m'\n",
+        r"_STORE = 'C:\repo\data\exploration\bars_5m'" "\n",
+        "import numpy as np\nnp.load('bars_5m')\n",
+    ],
+)
+def test_core_store_path_guard_detects_a_planted_reference(tmp_path, source):
+    leaky = tmp_path / "leaky.py"
+    leaky.write_text(source, encoding="utf-8")
+
+    assert _core_store_path_references(leaky), (
+        "the core store-path guard did not detect its planted mutation"
     )
 
 

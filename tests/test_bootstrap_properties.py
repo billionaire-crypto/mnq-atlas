@@ -20,6 +20,14 @@ def _generator(seed=0):
     return np.random.Generator(np.random.PCG64(seed))
 
 
+class _DuckRNG:
+    def integers(self, high):
+        return 0
+
+    def random(self):
+        return 0.5
+
+
 def test_bootstrap_constants_load_exactly_and_drive_the_primary_plan():
     bootstrap = load_bootstrap_constants()
     assert bootstrap == {
@@ -67,6 +75,12 @@ def test_bootstrap_constants_load_exactly_and_drive_the_primary_plan():
             "non-bool",
         ),
         (
+            "zero_primary",
+            "  mean_block_sessions_primary: 5\n",
+            "  mean_block_sessions_primary: 0\n",
+            ">= 1",
+        ),
+        (
             "empty_sensitivity",
             "  block_sensitivity: [1, 5, 10, 20]\n",
             "  block_sensitivity: []\n",
@@ -77,6 +91,24 @@ def test_bootstrap_constants_load_exactly_and_drive_the_primary_plan():
             "  block_sensitivity: [1, 5, 10, 20]\n",
             "  block_sensitivity: [1, false, 10, 20]\n",
             "non-bool",
+        ),
+        (
+            "true_sensitivity",
+            "  block_sensitivity: [1, 5, 10, 20]\n",
+            "  block_sensitivity: [1, true, 10, 20]\n",
+            "non-bool",
+        ),
+        (
+            "zero_sensitivity",
+            "  block_sensitivity: [1, 5, 10, 20]\n",
+            "  block_sensitivity: [1, 0, 10, 20]\n",
+            ">= 1",
+        ),
+        (
+            "nonfinite_sensitivity",
+            "  block_sensitivity: [1, 5, 10, 20]\n",
+            "  block_sensitivity: [1, .nan, 10, 20]\n",
+            "finite",
         ),
         (
             "primary_absent",
@@ -318,6 +350,25 @@ def test_restart_metadata_distinguishes_restart_from_same_continuation_target():
     assert plan.restart_count == 1
 
 
+def test_production_records_restarts_that_land_on_continuation_targets():
+    plan = stationary_group_resample(
+        ["a", "b", "c", "d"],
+        1,
+        _generator(1),
+    )
+
+    assert plan.selected_positions == (1, 2, 3, 3)
+    assert plan.block_start_flags == (True, True, True, True)
+    assert plan.multiplicities == (0, 1, 1, 2)
+    assert plan.restart_count == 3
+    assert plan.selected_positions[1] == (
+        plan.selected_positions[0] + 1
+    ) % plan.group_count
+    assert plan.selected_positions[2] == (
+        plan.selected_positions[1] + 1
+    ) % plan.group_count
+
+
 def test_noncontiguous_group_reappearance_fails_closed():
     with pytest.raises(SpineError, match="contiguous"):
         stationary_group_resample(
@@ -364,6 +415,7 @@ def test_invalid_mean_block_lengths_fail_closed(mean_block_groups):
         None,
         20260729,
         np.random.RandomState(0),
+        _DuckRNG(),
         object(),
     ],
 )
@@ -375,6 +427,25 @@ def test_invalid_rng_inputs_fail_closed(rng):
 @pytest.mark.parametrize(
     "mutation",
     [
+        {
+            "group_count": 0,
+        },
+        {
+            "selected_positions": [0, 1, 1],
+        },
+        {
+            "selected_positions": (0, 1),
+        },
+        {
+            "ordered_group_labels": ("a", "a", "c"),
+        },
+        {
+            "restart_probability": 0.25,
+        },
+        {
+            "selected_positions": (0, 1, -1),
+            "multiplicities": (1, 1, 1),
+        },
         {
             "selected_positions": (0, 1, 3),
             "multiplicities": (1, 1, 1),
@@ -396,6 +467,20 @@ def test_invalid_rng_inputs_fail_closed(rng):
         {
             "selected_positions": (0, 1, 1),
             "multiplicities": (True, 2, 0),
+        },
+        {
+            "selected_positions": (0, 1, 1),
+            "multiplicities": (2, 2, -1),
+        },
+        {
+            "selected_positions": (0, 1, 1),
+            "multiplicities": (1, 2, 0),
+            "block_start_flags": (True, False, np.bool_(True)),
+        },
+        {
+            "selected_positions": (0, 1, 1),
+            "multiplicities": (1, 2, 0),
+            "restart_count": True,
         },
     ],
 )

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 
 import numpy as np
+import pytest
 
 from mnq_lab import SpineError
 from mnq_lab.constants import load_bootstrap_constants
@@ -32,6 +33,13 @@ def _loaded_primary_mean_block_groups() -> int:
     return load_bootstrap_constants()["mean_block_sessions_primary"]
 
 
+@pytest.mark.skip(
+    reason=(
+        "one-shot executed 2026-07-30: 267/300 FAILED [277,292]; permanently "
+        "recorded in docs/PHASE5_ACCEPTANCE_RECORD.md and D15; must never "
+        "re-execute"
+    )
+)
 def test_preregistered_synthetic_median_coverage_once():
     outer_count = 300
     session_count = 80

@@ -504,3 +504,67 @@ threshold ledger, and its schema is not expanded.
 
 **Status:** `RESOLVED` before any Phase 5 production implementation or
 stochastic acceptance execution.
+
+---
+
+## D15 — v1 coverage gate assumed nominal 95% equals finite-sample coverage — `RESOLVED`
+
+**Registered failure:** On 2026-07-30, the preregistered Phase 5 v1 coverage
+fixture executed exactly once and returned 267 covering intervals out of 300
+against the inclusive acceptance region [277, 292]. The exact command,
+evidence line, failure, environment, and commits are preserved permanently in
+`docs/PHASE5_ACCEPTANCE_RECORD.md`. The v1 fixture will never execute again.
+The AR(1) fixture was not executed and its registered entropy remained
+unconsumed.
+
+**Forensic verdict:** independent read-only audit classified the result as a
+preregistered acceptance-design defect, not an implementation defect. The
+fixture correctly executed the registered procedure, and the production path
+remained supported by its prior independent randomized reproductions and
+mutation audits.
+
+**Exact evidence:** under the gate's assumed model,
+
+```text
+P[C <= 267 | C ~ Binomial(300, 0.95)] = 2.272e-05
+```
+
+The exact central 95% bounds for the procedure's true coverage from 267/300
+were [0.849, 0.923]. The result therefore rejects the gate's `p = 0.95` risk
+model rather than representing an ordinary draw from its declared 3–8%
+false-failure risk.
+
+**Identified mechanism:** the v1 calibration treated nominal 95% percentile
+coverage as finite-sample 95% coverage for the whole-session stationary block
+bootstrap. With 80 independent groups and mean block length 5, distinct
+positions selected within a stationary block narrow the bootstrap median
+distribution relative to iid multinomial resampling. The forensic derivation
+gave the variance factor
+
+```text
+1 - 8/79 = 0.899
+```
+
+and, through an explicitly labelled normal-approximation layer, moved the
+idealized discrete endpoints from 31/49 to 32/48, corresponding to
+approximately 0.925 coverage. The exact registered procedure's true coverage
+was not claimed to be known from that approximation; the exact rejection of
+`p = 0.95` does not depend on it.
+
+**Audit responsibility:** the incorrect 3–8% risk band originated in the
+independent Mode A audit's iid idealization. It was inferred and unmeasured,
+and the effect of within-block distinct sampling was omitted when the gate was
+ratified.
+
+**User ruling (2026-07-30):** the original 267/300 result is permanent and is
+never erased, reinterpreted, or overwritten. Under the pre-agreed Amendment
+P5-2 failure clause, the user authorized a calibration-first recovery with a
+new versioned coverage-only preregistration, new seed schedules, independent
+static audits before execution, and mechanically derived exact-binomial
+bounds. The v1 preregistration remains byte-pinned and unmodified. No
+production change is authorized. The AR(1) one-shot is re-authorized unchanged
+only after a v2 coverage pass.
+
+**Status:** `RESOLVED` as an acceptance-design discrepancy. Phase 5 remains
+open and Stage E2b remains blocked until the separately preregistered v2
+calibration and coverage gate complete under the ruled sequence.

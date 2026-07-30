@@ -188,6 +188,7 @@ def test_core_does_not_name_market_store_paths():
 @pytest.mark.parametrize(
     "source",
     [
+        "_STORE = 'data/exploration/session_flags'\n",
         "_STORE = 'data/exploration/bars_5m'\n",
         r"_STORE = 'C:\repo\data\exploration\bars_5m'" "\n",
         "import numpy as np\nnp.load('bars_5m')\n",

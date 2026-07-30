@@ -437,6 +437,10 @@ def test_invalid_rng_inputs_fail_closed(rng):
             "selected_positions": (0, 1),
         },
         {
+            "block_start_flags": (True, False),
+            "restart_count": 1,
+        },
+        {
             "ordered_group_labels": ("a", "a", "c"),
         },
         {

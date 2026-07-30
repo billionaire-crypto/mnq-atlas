@@ -568,3 +568,62 @@ only after a v2 coverage pass.
 **Status:** `RESOLVED` as an acceptance-design discrepancy. Phase 5 remains
 open and Stage E2b remains blocked until the separately preregistered v2
 calibration and coverage gate complete under the ruled sequence.
+
+---
+
+## D16 — v2 calibration script-path launch could not resolve `mnq_lab` — `RESOLVED`
+
+**Registered failure:** On 2026-07-30, the v2 calibration launch used:
+
+```text
+python tools/phase5_coverage_calibration.py
+```
+
+It failed in 0.1359 seconds with this exact traceback:
+
+```text
+Traceback (most recent call last):
+  File "C:\mnq-atlas\tools\phase5_coverage_calibration.py", line 14, in <module>
+    from mnq_lab.constants import load_bootstrap_constants
+ModuleNotFoundError: No module named 'mnq_lab'
+```
+
+The complete command, traceback, runtime, environment fingerprint, commits,
+and runner hash are permanently preserved in
+`docs/PHASE5_ACCEPTANCE_RECORD.md` at commit `af5f1c3`.
+
+**Root cause:** the script-path launch placed `C:\mnq-atlas\tools`, rather
+than the repository root, on `sys.path[0]`. The local `mnq_lab` package is not
+installed in site-packages and resolves only from `C:\mnq-atlas`, so the
+top-level import failed before `main()`.
+
+**Entropy status:** the v2 calibration entropy remains unspent. Because the
+import failed before `main()`, the entropy was never passed to
+`SeedSequence`, no Generator was constructed, no replication ran, no evidence
+line was emitted, and no `K`, partial result, or stochastic information was
+observed.
+
+**User ruling (2026-07-30):** the event is permanently classified as a
+deterministic launch defect, not a statistical result, implementation defect,
+or acceptance outcome. The failed launch and its record may never be erased,
+reinterpreted, or overwritten. Under Amendment P5-2, the user corrected the
+one authorized launch command to:
+
+```text
+python -m tools.phase5_coverage_calibration
+```
+
+run from `C:\mnq-atlas`, exactly once and only after the amendment commit
+receives a fresh independent static audit returning CLOSED. The runner and
+every statistical parameter remain unchanged.
+
+**Resolution:** `docs/PHASE5_PREREGISTRATION_V2_AMENDMENT_1.md` records the
+single-line command amendment, and
+`test_phase5_preregistration_v2_amendment_1_bytes_are_pinned` in
+`tests/test_spec_consistency.py` pins its bytes. The deterministic preflight
+guard separately proves the corrected module resolution and the recorded
+script-path failure mode without importing or executing the runner.
+
+**Status:** `RESOLVED` as a deterministic launch discrepancy. The calibration
+remains blocked until the amendment commit passes independent static audit;
+the v2 coverage and AR(1) one-shots remain blocked.

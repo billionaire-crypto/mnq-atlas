@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -232,14 +233,24 @@ def test_joint_fixture_kills_resampling_inside_a_filtered_cell():
     assert not np.array_equal(correct, defective)
 
 
-def test_plan_application_rejects_a_different_same_count_grouping():
+@pytest.mark.parametrize(
+    "different_group_ids",
+    [
+        ["a", "a", "b", "different"],
+        ["b", "b", "a", "c"],
+    ],
+    ids=["different-label", "reordered-same-labels"],
+)
+def test_plan_application_rejects_a_different_same_count_grouping(
+    different_group_ids,
+):
     plan = stationary_group_resample(
         ["a", "a", "b", "c"], 5, _generator(0)
     )
 
     with pytest.raises(SpineError, match="exactly match"):
         apply_group_multiplicities(
-            ["a", "a", "b", "different"],
+            different_group_ids,
             np.full(4, 0.25),
             plan,
         )
@@ -269,7 +280,18 @@ def test_invalid_composition_inputs_fail_closed(
         apply_group_multiplicities(group_ids, baseline_weights, plan)
 
 
-@pytest.mark.parametrize("plan", [None, {}, object()])
+@pytest.mark.parametrize(
+    "plan",
+    [
+        None,
+        {},
+        object(),
+        SimpleNamespace(
+            ordered_group_labels=("a",),
+            multiplicities=(1,),
+        ),
+    ],
+)
 def test_non_plan_inputs_fail_closed(plan):
     with pytest.raises(SpineError, match="StationaryGroupResamplePlan"):
         apply_group_multiplicities(["a"], [1.0], plan)

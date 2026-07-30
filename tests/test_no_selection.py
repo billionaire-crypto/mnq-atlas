@@ -37,7 +37,7 @@ FORBIDDEN_CORE_IMPORT_ROOTS = {
     "nulls",
     "ledger",
 }
-FORBIDDEN_CORE_TOP_LEVEL_IMPORTS = {"yaml"}
+FORBIDDEN_CORE_TOP_LEVEL_IMPORTS = {"lora_statistics", "yaml"}
 LOCKED_TIER_PATTERN = re.compile(r"\blocked(?:[_-]confirmation)?\b", re.IGNORECASE)
 CORE_STORE_PATH_PATTERN = re.compile(
     r"(?:\bdata[\\/]|bars_\d+m\b)",
@@ -136,6 +136,7 @@ def test_core_imports_nothing_market_aware():
         "from mnq_lab.ledger import freeze\n",
         "from mnq_lab import ledger\n",
         "from mnq_lab.constants import load_constants\n",
+        "from lora_statistics import stationary_session_resample\n",
         "import yaml\n",
         "from yaml import safe_load\n",
     ],

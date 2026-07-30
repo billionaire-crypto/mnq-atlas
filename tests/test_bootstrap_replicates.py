@@ -24,20 +24,6 @@ def _generator(seed=0):
     return np.random.Generator(np.random.PCG64(seed))
 
 
-def _all_ones_plan(labels):
-    group_count = len(labels)
-    return StationaryGroupResamplePlan(
-        ordered_group_labels=tuple(labels),
-        group_count=group_count,
-        mean_block_groups=5.0,
-        restart_probability=0.2,
-        selected_positions=tuple(range(group_count)),
-        multiplicities=(1,) * group_count,
-        block_start_flags=(True,) + (False,) * (group_count - 1),
-        restart_count=0,
-    )
-
-
 def test_one_plan_per_replicate_serves_two_aligned_value_and_mask_paths():
     group_ids = np.repeat(np.array(["a", "b", "c", "d"]), 2)
     first_values = np.array([0, 1, 10, 11, 20, 21, 30, 31], dtype=np.float64)
@@ -84,7 +70,7 @@ def test_one_global_plan_and_composition_precede_every_request_mask(
     monkeypatch,
 ):
     group_ids = np.array(["a", "b", "c", "d"])
-    baseline, _ = anchor_equal_weights(group_ids.size)
+    baseline = np.array([0.1, 0.2, 0.3, 0.8], dtype=np.float64)
     seen_group_vectors = []
     recorded_compositions = []
     plan_calls = 0
@@ -93,7 +79,16 @@ def test_one_global_plan_and_composition_precede_every_request_mask(
     original_apply = bootstrap_module.apply_group_multiplicities
     original_phase4 = bootstrap_module.weighted_quantiles
     original_phase4_scalar = weights_module.weighted_quantile
-    plan = _all_ones_plan(("a", "b", "c", "d"))
+    plan = StationaryGroupResamplePlan(
+        ordered_group_labels=("a", "b", "c", "d"),
+        group_count=4,
+        mean_block_groups=5.0,
+        restart_probability=0.2,
+        selected_positions=(3, 0, 2, 0),
+        multiplicities=(2, 0, 1, 1),
+        block_start_flags=(True, False, True, True),
+        restart_count=2,
+    )
     request_values = (
         np.array([0.0, 1.0, 2.0, 3.0]),
         np.array([10.0, 11.0, 12.0, 13.0]),
@@ -185,6 +180,11 @@ def test_one_global_plan_and_composition_precede_every_request_mask(
     assert len(recorded_compositions) == 1_000
     assert phase4_calls == 2_000
     assert set(seen_group_vectors) == {("a", "b", "c", "d")}
+    assert recorded_compositions[0].tobytes() == np.array(
+        [0.2, 0.0, 0.3, 0.8],
+        dtype=np.float64,
+    ).tobytes()
+    assert float(np.sum(recorded_compositions[0])) != 1.0
 
 
 def test_zero_mass_request_fails_at_the_exact_later_replicate_without_retry():

@@ -8,6 +8,7 @@ never supplies a default for a missing key.
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
+import math
 from numbers import Real
 from pathlib import Path
 from typing import Any
@@ -145,6 +146,87 @@ def load_completion_thresholds(path: Path | None = None) -> dict[int, float]:
             )
         loaded[int(horizon)] = float(exact)
     return loaded
+
+
+def load_bootstrap_constants(path: Path | None = None) -> dict[str, Any]:
+    """Load the complete Phase 5 bootstrap mapping with no defaults."""
+    constants = load_constants(path)
+    bootstrap = constants.get("bootstrap")
+    if not isinstance(bootstrap, dict):
+        raise SpineError("bootstrap must be a mapping")
+
+    expected_keys = [
+        "scheme",
+        "mean_block_sessions_primary",
+        "block_sensitivity",
+        "truncate_partial_session",
+    ]
+    actual_keys = list(bootstrap)
+    if actual_keys != expected_keys:
+        raise SpineError(
+            "bootstrap must contain exactly the keys "
+            f"{expected_keys} in frozen order; found {actual_keys}. No default "
+            "is permitted."
+        )
+
+    scheme = constants.get("bootstrap", "scheme")
+    if scheme != "whole_session_stationary":
+        raise SpineError(
+            "bootstrap.scheme is incompatible with whole-group stationary "
+            f"resampling: {scheme!r}"
+        )
+
+    primary = constants.get("bootstrap", "mean_block_sessions_primary")
+    if isinstance(primary, bool) or not isinstance(primary, Real):
+        raise SpineError(
+            "bootstrap.mean_block_sessions_primary must be a finite non-bool "
+            f"real value >= 1; got {primary!r}"
+        )
+    primary_float = float(primary)
+    if not math.isfinite(primary_float) or primary_float < 1.0:
+        raise SpineError(
+            "bootstrap.mean_block_sessions_primary must be a finite non-bool "
+            f"real value >= 1; got {primary!r}"
+        )
+
+    sensitivity = constants.get("bootstrap", "block_sensitivity")
+    if not isinstance(sensitivity, list) or not sensitivity:
+        raise SpineError(
+            "bootstrap.block_sensitivity must be a non-empty list"
+        )
+    loaded_sensitivity: list[Real] = []
+    for index, value in enumerate(sensitivity):
+        if isinstance(value, bool) or not isinstance(value, Real):
+            raise SpineError(
+                "bootstrap.block_sensitivity must contain finite non-bool "
+                f"real values >= 1; index {index} is {value!r}"
+            )
+        numeric_value = float(value)
+        if not math.isfinite(numeric_value) or numeric_value < 1.0:
+            raise SpineError(
+                "bootstrap.block_sensitivity must contain finite non-bool "
+                f"real values >= 1; index {index} is {value!r}"
+            )
+        loaded_sensitivity.append(value)
+    if primary not in loaded_sensitivity:
+        raise SpineError(
+            "bootstrap.mean_block_sessions_primary must occur in "
+            "bootstrap.block_sensitivity"
+        )
+
+    truncate = constants.get("bootstrap", "truncate_partial_session")
+    if truncate is not False:
+        raise SpineError(
+            "bootstrap.truncate_partial_session must be false; whole groups "
+            "may never be truncated by rows"
+        )
+
+    return {
+        "scheme": scheme,
+        "mean_block_sessions_primary": primary,
+        "block_sensitivity": list(loaded_sensitivity),
+        "truncate_partial_session": truncate,
+    }
 
 
 # --- Spine-relevant constants, resolved once and named -----------------------------

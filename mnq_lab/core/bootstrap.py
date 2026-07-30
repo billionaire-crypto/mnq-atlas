@@ -2,8 +2,9 @@
 
 Frozen spec §7.3 requires one coherent resample of ordered whole groups, with
 the selected occurrence count equal to the original group count. This module
-creates only that immutable plan. Weight composition and interval construction
-are separate Phase 5 units.
+creates that immutable plan and composes its integer group multiplicities with
+unchanged row-aligned baseline weights. Interval construction remains a
+separate Phase 5 unit.
 """
 
 from __future__ import annotations
@@ -15,10 +16,14 @@ from typing import Any, Hashable
 import numpy as np
 
 from mnq_lab import SpineError
-from mnq_lab.core.weights import _as_opaque_group_labels
+from mnq_lab.core.weights import (
+    _as_opaque_group_labels,
+    _validated_concentration_weights,
+)
 
 __all__ = [
     "StationaryGroupResamplePlan",
+    "apply_group_multiplicities",
     "stationary_group_resample",
 ]
 
@@ -217,3 +222,51 @@ def stationary_group_resample(
         block_start_flags=flags,
         restart_count=sum(flags[1:]),
     )
+
+
+def apply_group_multiplicities(
+    group_ids: Any,
+    baseline_weights: Any,
+    plan: StationaryGroupResamplePlan,
+) -> np.ndarray:
+    """Compose one whole-group plan with unchanged row baseline weights.
+
+    The returned float64 array remains aligned to the caller's rows. A group's
+    integer plan multiplicity multiplies every baseline weight in that group.
+    Nothing is normalized, expanded, filtered, or redrawn.
+    """
+    if not isinstance(plan, StationaryGroupResamplePlan):
+        raise SpineError("plan must be a StationaryGroupResamplePlan")
+
+    labels = _as_opaque_group_labels(group_ids)
+    ordered_labels = _ordered_contiguous_group_labels(labels)
+    if ordered_labels != plan.ordered_group_labels:
+        raise SpineError(
+            "group_ids ordered labels must exactly match the plan"
+        )
+
+    weights = _validated_concentration_weights(baseline_weights)
+    if weights.size != len(labels):
+        raise SpineError(
+            "group_ids and baseline_weights must have equal length; "
+            f"got {len(labels)} and {weights.size}"
+        )
+
+    if all(multiplicity == 1 for multiplicity in plan.multiplicities):
+        return weights.copy()
+
+    multiplicity_by_label = dict(
+        zip(plan.ordered_group_labels, plan.multiplicities)
+    )
+    row_multiplicities = np.fromiter(
+        (multiplicity_by_label[label] for label in labels),
+        dtype=np.float64,
+        count=len(labels),
+    )
+    with np.errstate(over="ignore", invalid="ignore"):
+        composed = np.multiply(weights, row_multiplicities, dtype=np.float64)
+    if not bool(np.isfinite(composed).all()):
+        raise SpineError(
+            "composed bootstrap weights must remain finite binary64 values"
+        )
+    return composed

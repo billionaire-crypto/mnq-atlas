@@ -299,3 +299,77 @@ must never be rerun. The AR(1) fixture was **NOT EXECUTED OR COLLECTED**; its
 registered entropy `157484425038737148717780864763684278439` remains
 **UNCONSUMED**. The sequence condition requiring a v2 coverage pass before
 AR(1) is now satisfied, but AR(1) is held for the separate post-result review.
+
+## AR(1) session-width discriminator — `PASSED`
+
+**Execution date:** 2026-07-31
+
+**Command:**
+
+```text
+python -m pytest tests/test_bootstrap_acceptance.py::test_preregistered_ar1_session_width_discriminator_once -q -s
+```
+
+This was the first and only execution of the unchanged preregistered AR(1)
+fixture, after the v2 coverage gate passed and its independent post-result
+audit returned `VERDICT: CLOSED` at commit `e9d9df3`.
+
+**Complete pytest output:**
+
+```text
+PHASE5_AR1_RESULT={"directional_count": 24, "minimum_directional_count": 20, "minimum_median_ratio": 1.5, "ratios": [1.5041097369205838, 1.9393590645713366, 2.984345248466931, 1.9993516202930928, 2.127241610990348, 2.0731434011298218, 2.3986324920736486, 2.5762037989460382, 2.35696637500994, 2.5105212092082407, 2.0360519488759135, 3.5121144854132367, 2.567376206956976, 3.3148881912366814, 2.1741594649651996, 2.356012041610303, 3.092233407548194, 1.895436087365999, 2.115782408445095, 2.0328580074428078, 2.095817278032364, 2.1683133477836822, 2.076912559424286, 2.843033436817611], "row_widths": [0.11705976445401076, 0.09323562624948317, 0.11286064881422897, 0.10015108693726177, 0.10727383542435245, 0.11025943746828223, 0.12136475144747755, 0.11877298143184495, 0.1100904544025062, 0.10573777871866358, 0.09541159918920589, 0.0992289549808176, 0.09011222003218862, 0.12171083384985465, 0.11092129640293377, 0.08733097330488815, 0.09183725090846931, 0.10523311234196443, 0.11034016406049418, 0.12094864623696494, 0.13582328990589884, 0.10219620423534015, 0.1030735402230386, 0.10139564565263834], "session_widths": [0.17607073151690764, 0.18081735690792045, 0.33681514102763915, 0.20023723794212872, 0.22819736648521294, 0.22858362519965555, 0.291109436214362, 0.30598340597686624, 0.2594794992362721, 0.26545693608777265, 0.19426297247455016, 0.34850345016054746, 0.23135196966671284, 0.40345780587445296, 0.2411605864406488, 0.2057528247118644, 0.28398221531655454, 0.19946263871879968, 0.2334557780641393, 0.2458714239921816, 0.28466079774398156, 0.22159339373631534, 0.2140747302335532, 0.28827121093816105], "weighted_lower_median_ratio": 2.1683133477836822}
+.
+1 passed in 565.84s (0:09:25)
+```
+
+**Process result:**
+
+```text
+PHASE5_AR1_EXIT_CODE=0
+```
+
+**Wrapper wall-clock runtime:** 566.9311 seconds (0:09:26.9311)
+
+**Environment fingerprint:**
+
+```text
+OS: Windows-10-10.0.19045-SP0
+Python: 3.13.2 (tags/v3.13.2:4f8bb39, Feb  4 2025, 15:23:48) [MSC v.1942 64 bit (AMD64)]
+NumPy: 2.2.3
+pytest: 9.1.1
+```
+
+**Commits:**
+
+```text
+V1 preregistration:            49091f49dc90c411609543d43abe32effc05c1da
+Bootstrap production:          d6eb390836079fe7498ce540f30bd0fbef440916
+Mutation-guard tip:            35b89b0eea9a7707df54def9ee23cf34d659eca4
+Acceptance fixture:            857ed632539a72e0f02f190578515785edea3e2f
+V2 preregistration:            b89b2ce717aecdfebf944f8e2c918426836ebfd8
+Derived gate and v2 fixture:   588f3eb5177560b3209a1fd6876bc3386cfa507e
+Derivation guard correction:   2c709aa8b3cd19d0245e76d2c8da2972dcab3703
+V2 coverage-pass evidence:     e9d9df3144a90f7afcade75febd52056e5387835
+Acceptance fixture SHA-256:
+bb239fc97f7823544a3c39748e808a42f0e529c28f9074736f7ce8f7a41da71c
+```
+
+Both preregistered conditions passed:
+
+```text
+weighted_lower_median_ratio = 2.1683133477836822 >= 1.50
+directional_count = 24 >= 20
+```
+
+All 24 paired session-bootstrap widths exceeded their i.i.d. row-bootstrap
+counterparts. The AR(1) session-width discriminator therefore **PASSED**.
+
+This result verifies preservation of within-session dependence against the
+test-only i.i.d. row-bootstrap negative oracle. It does not validate that
+stationary session blocks capture dependence between chronological sessions,
+and it does not identify an empirically correct block length for MNQ.
+
+The AR(1) entropy `157484425038737148717780864763684278439` is now **SPENT**
+by this completed execution and must never be used again. The fixture must
+never be rerun. All registered Phase 5 stochastic executions are now complete;
+Phase 5 closeout documentation remains a separate, subsequently audited task.

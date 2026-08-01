@@ -28,10 +28,13 @@ from mnq_lab import SpineError
 __all__ = [
     "DependencyCase",
     "DependencyInputs",
+    "DeterministicWitness",
     "LocalityReport",
     "OutputComparison",
     "OutputKind",
+    "WitnessReport",
     "run_dependency_locality",
+    "run_deterministic_witness",
 ]
 
 _TEST_SEED = 0
@@ -87,9 +90,10 @@ class OutputComparison:
 def _immutable_copy(array: np.ndarray) -> np.ndarray:
     """Return an owned-by-immutable-bytes C-order copy."""
 
+    original_shape = array.shape
     contiguous = np.ascontiguousarray(array)
     frozen = np.frombuffer(contiguous.tobytes(order="C"), dtype=contiguous.dtype)
-    return frozen.reshape(contiguous.shape)
+    return frozen.reshape(original_shape)
 
 
 def _require_readonly_array(value: Any, name: str) -> np.ndarray:
@@ -206,7 +210,60 @@ class LocalityReport:
     forbidden_region_count: int
     forbidden_region_sizes: tuple[int, ...]
     changed_value_counts: tuple[int, ...]
+    mutation_trial_count: int
     test_seed: int = _TEST_SEED
+
+
+@dataclass(frozen=True)
+class DeterministicWitness:
+    """Hand-built in-window change with independently written expectations."""
+
+    name: str
+    changed_inputs: Mapping[str, np.ndarray]
+    expected_baseline: np.ndarray
+    expected_changed: np.ndarray
+    affected_output_index: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or not self.name:
+            raise SpineError("witness name must be a non-empty string")
+        if not isinstance(self.changed_inputs, Mapping):
+            raise SpineError("witness changed_inputs must be a mapping")
+        frozen_inputs: dict[str, np.ndarray] = {}
+        for name, raw in self.changed_inputs.items():
+            if not isinstance(name, str) or not name:
+                raise SpineError("witness input names must be non-empty strings")
+            array = _require_readonly_array(raw, f"witness input {name!r}")
+            frozen_inputs[name] = _immutable_copy(array)
+        expected_baseline = _require_readonly_array(
+            self.expected_baseline, "witness expected_baseline"
+        )
+        expected_changed = _require_readonly_array(
+            self.expected_changed, "witness expected_changed"
+        )
+        if not isinstance(self.affected_output_index, tuple):
+            raise SpineError(
+                "witness affected_output_index must be an immutable tuple"
+            )
+        object.__setattr__(
+            self, "changed_inputs", MappingProxyType(frozen_inputs)
+        )
+        object.__setattr__(
+            self, "expected_baseline", _immutable_copy(expected_baseline)
+        )
+        object.__setattr__(
+            self, "expected_changed", _immutable_copy(expected_changed)
+        )
+
+
+@dataclass(frozen=True)
+class WitnessReport:
+    """Diagnostic facts from one executed witness; never admission proof."""
+
+    case_name: str
+    witness_name: str
+    changed_input_count: int
+    affected_output_index: tuple[int, ...]
 
 
 def _validate_output(raw: Any, policy: OutputComparison, context: str) -> np.ndarray:
@@ -343,7 +400,11 @@ def _mutate_scalar(value: np.generic, dtype: np.dtype, rng: np.random.Generator)
     value_wide = np.longdouble(value)
     magnitude = (np.abs(value_wide) + np.longdouble(1.0)) * factor
     candidate_wide = value_wide + np.longdouble(direction) * magnitude
-    candidate = np.asarray(candidate_wide, dtype=dtype)[()]
+    float_limit = np.longdouble(np.finfo(dtype).max)
+    if -float_limit <= candidate_wide <= float_limit:
+        candidate = np.asarray(candidate_wide, dtype=dtype)[()]
+    else:
+        candidate = np.asarray(np.nan, dtype=dtype)[()]
     if not np.isfinite(candidate) or candidate == value:
         candidate = np.asarray(-value_wide, dtype=dtype)[()]
     if not np.isfinite(candidate) or candidate == value:
@@ -361,22 +422,23 @@ def _element_changed(left: np.generic, right: np.generic) -> bool:
     return left.tobytes() != right.tobytes()
 
 
-def _mutated_region_inputs(
+def _mutated_region_input(
     case: DependencyCase,
     region: np.ndarray,
+    input_name: str,
     rng: np.random.Generator,
 ) -> tuple[dict[str, np.ndarray], int]:
     mutated = {name: np.array(array, copy=True) for name, array in case.inputs.items()}
+    array = mutated[input_name]
+    baseline = np.array(array, copy=True)
     changed = 0
-    for array in mutated.values():
-        baseline = np.array(array, copy=True)
-        for index in region:
-            array[index] = _mutate_scalar(array[index], array.dtype, rng)
-            changed += int(_element_changed(baseline[index], array[index]))
-        outside = np.ones(array.size, dtype=np.bool_)
-        outside[region] = False
-        if not np.array_equal(array[outside], baseline[outside]):
-            raise SpineError("out-of-window mutation changed values outside its region")
+    for index in region:
+        array[index] = _mutate_scalar(array[index], array.dtype, rng)
+        changed += int(_element_changed(baseline[index], array[index]))
+    outside = np.ones(array.size, dtype=np.bool_)
+    outside[region] = False
+    if not np.array_equal(array[outside], baseline[outside]):
+        raise SpineError("out-of-window mutation changed values outside its region")
     if changed == 0:
         raise SpineError("deterministic out-of-window mutation was a no-op")
     return mutated, changed
@@ -400,29 +462,196 @@ def run_dependency_locality(case: DependencyCase) -> LocalityReport:
     rng = np.random.Generator(np.random.PCG64(_TEST_SEED))
     region_sizes: list[int] = []
     changed_counts: list[int] = []
+    trial_count = 0
     for region_index, region in enumerate(regions):
-        mutated, changed = _mutated_region_inputs(case, region, rng)
-        output = _invoke_stably(
-            case, mutated, f"out-of-window region {region_index}"
-        )
-        try:
-            _compare_outputs(
-                output,
-                baseline,
-                case.comparison,
-                f"out-of-window region {region_index}",
+        region_changed = 0
+        for input_name in case.inputs:
+            mutated, changed = _mutated_region_input(
+                case, region, input_name, rng
             )
-        except SpineError as exc:
-            raise SpineError(
-                f"case {case.name!r}: out-of-window region {region_index} "
-                f"changed output: {exc}"
-            ) from exc
+            context = f"out-of-window region {region_index} input {input_name!r}"
+            output = _invoke_stably(case, mutated, context)
+            try:
+                _compare_outputs(
+                    output,
+                    baseline,
+                    case.comparison,
+                    context,
+                )
+            except SpineError as exc:
+                raise SpineError(
+                    f"case {case.name!r}: {context} changed output: {exc}"
+                ) from exc
+            region_changed += changed
+            trial_count += 1
         region_sizes.append(int(region.size))
-        changed_counts.append(changed)
+        changed_counts.append(region_changed)
 
     return LocalityReport(
         case_name=case.name,
         forbidden_region_count=len(regions),
         forbidden_region_sizes=tuple(region_sizes),
         changed_value_counts=tuple(changed_counts),
+        mutation_trial_count=trial_count,
+    )
+
+
+def _validated_witness_inputs(
+    case: DependencyCase, witness: DeterministicWitness
+) -> tuple[Mapping[str, np.ndarray], int]:
+    if not isinstance(witness.changed_inputs, Mapping) or set(
+        witness.changed_inputs
+    ) != set(case.inputs):
+        raise SpineError(
+            "witness changed_inputs must have exactly the same names as "
+            "the dependency case inputs"
+        )
+
+    validated: dict[str, np.ndarray] = {}
+    changed_count = 0
+    for name, baseline in case.inputs.items():
+        raw = _require_readonly_array(
+            witness.changed_inputs[name], f"witness input {name!r}"
+        )
+        if raw.shape != baseline.shape:
+            raise SpineError(
+                f"witness input {name!r} shape {raw.shape} does not match "
+                f"baseline shape {baseline.shape}"
+            )
+        if raw.dtype != baseline.dtype:
+            raise SpineError(
+                f"witness input {name!r} dtype {raw.dtype} does not match "
+                f"baseline dtype {baseline.dtype}"
+            )
+        if raw.dtype.kind == "f" and not np.isfinite(raw).all():
+            raise SpineError(f"witness input {name!r} contains non-finite values")
+        changed = np.asarray(
+            [
+                _element_changed(baseline[index], raw[index])
+                for index in range(baseline.size)
+            ],
+            dtype=np.bool_,
+        )
+        forbidden_change = changed & ~case.allowed_dependency_mask
+        if np.any(forbidden_change):
+            index = int(np.flatnonzero(forbidden_change)[0])
+            raise SpineError(
+                f"witness changed out-of-window input {name!r} at index {index}"
+            )
+        changed_count += int(np.count_nonzero(changed))
+        validated[name] = _immutable_copy(raw)
+
+    if changed_count == 0:
+        raise SpineError("witness must change at least one in-window input value")
+    return MappingProxyType(validated), changed_count
+
+
+def _validated_affected_index(
+    raw_index: Any, output_shape: tuple[int, ...]
+) -> tuple[int, ...]:
+    if not isinstance(raw_index, tuple):
+        raise SpineError("witness affected_output_index must be an immutable tuple")
+    if len(raw_index) != len(output_shape):
+        raise SpineError(
+            "witness affected output index rank must match expected output rank"
+        )
+    index: list[int] = []
+    for axis, value in enumerate(raw_index):
+        if isinstance(value, (bool, np.bool_)) or not isinstance(
+            value, (int, np.integer)
+        ):
+            raise SpineError(
+                "witness affected output index components must be integers"
+            )
+        position = int(value)
+        if position < 0 or position >= output_shape[axis]:
+            raise SpineError("witness affected output index is out of bounds")
+        index.append(position)
+    return tuple(index)
+
+
+def _validated_witness_expectations(
+    case: DependencyCase, witness: DeterministicWitness
+) -> tuple[np.ndarray, np.ndarray, tuple[int, ...]]:
+    raw_baseline = _require_readonly_array(
+        witness.expected_baseline, "witness expected_baseline"
+    )
+    raw_changed = _require_readonly_array(
+        witness.expected_changed, "witness expected_changed"
+    )
+    expected_baseline = _validate_output(
+        raw_baseline, case.comparison, "witness expected_baseline"
+    )
+    expected_changed = _validate_output(
+        raw_changed, case.comparison, "witness expected_changed"
+    )
+    if expected_baseline.shape != expected_changed.shape:
+        raise SpineError("witness expected outputs must have the same shape")
+    if expected_baseline.dtype != expected_changed.dtype:
+        raise SpineError("witness expected outputs must have the same dtype")
+    index = _validated_affected_index(
+        witness.affected_output_index, expected_baseline.shape
+    )
+
+    baseline_value = expected_baseline[index]
+    changed_value = expected_changed[index]
+    if case.comparison.kind is not OutputKind.FLOAT:
+        if not _element_changed(baseline_value, changed_value):
+            raise SpineError(
+                "witness is vacuous at the required affected output element"
+            )
+        return expected_baseline, expected_changed, index
+
+    baseline_wide = np.longdouble(baseline_value)
+    changed_wide = np.longdouble(changed_value)
+    baseline_band = np.longdouble(case.comparison.atol) + np.longdouble(
+        case.comparison.rtol
+    ) * np.abs(baseline_wide)
+    changed_band = np.longdouble(case.comparison.atol) + np.longdouble(
+        case.comparison.rtol
+    ) * np.abs(changed_wide)
+    separation = np.abs(changed_wide - baseline_wide)
+    if not separation > baseline_band + changed_band:
+        raise SpineError(
+            "floating witness must have disjoint baseline and changed "
+            "comparison bands at the required affected output element"
+        )
+    return expected_baseline, expected_changed, index
+
+
+def run_deterministic_witness(
+    case: DependencyCase, witness: DeterministicWitness
+) -> WitnessReport:
+    """Execute one independently specified, non-vacuous in-window witness."""
+
+    if not isinstance(case, DependencyCase):
+        raise SpineError("case must be a DependencyCase")
+    if not isinstance(witness, DeterministicWitness):
+        raise SpineError("witness must be a DeterministicWitness")
+    if not isinstance(witness.name, str) or not witness.name:
+        raise SpineError("witness name must be a non-empty string")
+
+    changed_inputs, changed_count = _validated_witness_inputs(case, witness)
+    expected_baseline, expected_changed, index = _validated_witness_expectations(
+        case, witness
+    )
+    baseline_output = _invoke_stably(case, case.inputs, "witness baseline")
+    changed_output = _invoke_stably(case, changed_inputs, "witness changed")
+    _compare_outputs(
+        baseline_output,
+        expected_baseline,
+        case.comparison,
+        "witness baseline",
+    )
+    _compare_outputs(
+        changed_output,
+        expected_changed,
+        case.comparison,
+        "witness changed",
+    )
+    return WitnessReport(
+        case_name=case.name,
+        witness_name=witness.name,
+        changed_input_count=changed_count,
+        affected_output_index=index,
     )

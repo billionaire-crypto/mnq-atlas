@@ -717,3 +717,50 @@ amended contract is `RATIFIED`.
 **Status:** `RESOLVED` by explicit user ruling and recorded design decisions,
 pending independent re-audit of the documentation correction. No Phase 6
 production implementation is authorized by this entry alone.
+
+---
+
+## D18 — Phase 6 Stage D admission-gate audit — `OPEN; CORRECTED PENDING RE-AUDIT`
+
+**Audited implementation:** the independent Stage D review of
+`ed59c541d7212c036d3867ff82dfff4bd3bb101d..4a3db01d475a737952dab474588c3b8cf7e17a14`
+returned `VERDICT: OPEN` and `NEXT: STAGE E NOT AUTHORIZED`. That `OPEN`
+history is permanent and is not replaced by this correction or a later
+re-audit.
+
+**Verified finding D-1:** the negative-control recognizer inferred the failure
+family from exception-message substrings. Caller-controlled case or input names
+containing `comparison failed` could therefore make an out-of-window shape
+mismatch count as the required locality-comparison failure. The auditor
+executed both vectors and admitted a causal entry whose recorded negative
+control had failed through the wrong mechanism.
+
+**D-1 correction:** Stage C comparison failures now carry a structured
+`DependencyCheck` and `DependencyFailure` on `DependencyCheckError`. Shape,
+dtype, exact-comparison, and floating-comparison failures are distinct;
+locality, witness-baseline, and witness-changed checks are distinct. Registry
+negative controls inspect only those enum identities. They do not parse case
+names, input names, exception prose, or another caller-supplied string. A
+structured exception raised directly by the conditioner is still wrapped as a
+callable failure and cannot satisfy a negative control.
+
+**Verified finding D-2:** `ConditionerRegistry._register_causal` was reachable
+by ordinary attribute access and inserted directly without repeating the
+validators used by the module-level wrapper. Passing empty locality, witness,
+and negative-control tuples produced a stored causal descriptor with zero
+executed evidence and confirmation eligibility equal to true.
+
+**D-2 correction:** both insertion methods are name-mangled, and the causal
+insertion method itself validates the identifier, callable, immutable metadata,
+complete nonempty suite, exact callable linkage, witness linkage, and both
+required negative-control families before executing or inserting. Calling the
+name-mangled method directly cannot bypass these checks. The descriptive
+insertion method likewise performs its own identifier, callable, and metadata
+validation so the shared lifecycle has one validation choke point per
+classification.
+
+**Scope and governance:** this correction changes only the two verified
+admission-gate mechanisms, their negative tests, and this permanent audit
+record. It does not amend the ratified preregistration, implement a real
+conditioner, or authorize Stage E. Stage E remains blocked until this correction
+receives a focused independent `CLOSED` re-audit.

@@ -16,7 +16,10 @@ import pytest
 from mnq_lab import SpineError
 from mnq_lab.core.causality import conditioner_input_mask
 from mnq_lab.core.dependency import (
+    DependencyCheck,
+    DependencyCheckError,
     DependencyCase,
+    DependencyFailure,
     DeterministicWitness,
     OutputComparison,
     OutputKind,
@@ -164,6 +167,34 @@ def test_planted_one_row_future_read_is_caught_exactly():
     )
     with pytest.raises(SpineError, match="region 0.*changed output"):
         run_dependency_locality(case)
+
+
+def test_locality_comparison_failure_has_machine_readable_identity():
+    case = _case(
+        lambda call: np.asarray(call.values["x"][2], dtype=np.int64),
+        name="structured_locality_failure",
+    )
+
+    with pytest.raises(DependencyCheckError) as caught:
+        run_dependency_locality(case)
+
+    assert caught.value.check is DependencyCheck.LOCALITY
+    assert caught.value.failure is DependencyFailure.EXACT_COMPARISON_MISMATCH
+
+
+def test_shape_failure_cannot_claim_output_comparison_identity():
+    def changes_shape(call):
+        if int(call.values["x"][2]) == 11:
+            return np.asarray([7], dtype=np.int64)
+        return np.asarray([7, 7], dtype=np.int64)
+
+    with pytest.raises(DependencyCheckError) as caught:
+        run_dependency_locality(
+            _case(changes_shape, name="comparison failed in caller name")
+        )
+
+    assert caught.value.check is DependencyCheck.LOCALITY
+    assert caught.value.failure is DependencyFailure.SHAPE_MISMATCH
 
 
 def test_boolean_output_is_exact_and_future_read_is_caught():

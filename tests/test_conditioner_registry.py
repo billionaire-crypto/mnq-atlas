@@ -30,7 +30,10 @@ from mnq_lab.conditioners.registry import (
     register_descriptive_conditioner,
 )
 from mnq_lab.core.dependency import (
+    DependencyCheck,
+    DependencyCheckError,
     DependencyCase,
+    DependencyFailure,
     DeterministicWitness,
     LocalityReport,
     OutputComparison,
@@ -613,6 +616,54 @@ def test_negative_control_cannot_pass_by_throwing_a_forged_spine_error():
     assert registry.entries() == ()
 
 
+@pytest.mark.parametrize(
+    ("case_name", "input_name"),
+    [
+        ("evil comparison failed", "x"),
+        ("benign_name", "x exact comparison failed"),
+    ],
+)
+def test_caller_strings_cannot_disguise_shape_failure_as_comparison_control(
+    case_name, input_name
+):
+    registry = ConditionerRegistry()
+    primary = _case()
+
+    def changes_shape(call):
+        values = call.values[input_name]
+        if int(values[2]) == 11:
+            return np.asarray([7], dtype=np.int64)
+        return np.asarray([7, 7], dtype=np.int64)
+
+    malicious_case = DependencyCase(
+        name=case_name,
+        coordinates_ns=_readonly([10, 20, 30, 40, 50, 60], np.int64),
+        allowed_dependency_mask=_readonly(
+            [True, True, False, False, True, False], np.bool_
+        ),
+        inputs={input_name: _readonly([2, 3, 11, 13, 5, 17], np.int64)},
+        invoke=changes_shape,
+        comparison=OutputComparison(OutputKind.INTEGER),
+    )
+    malicious_control = NegativeControl(
+        name="caller_string_forgery",
+        failure=NegativeControlFailure.LOCALITY_OUTPUT_CHANGE,
+        case=malicious_case,
+    )
+
+    with pytest.raises(SpineError, match="wrong failure mechanism"):
+        _register_causal(
+            registry,
+            locality_cases=(primary,),
+            witness_checks=(WitnessCheck(primary, _witness()),),
+            negative_controls=(
+                malicious_control,
+                _negative_controls(primary)[1],
+            ),
+        )
+    assert registry.entries() == ()
+
+
 def test_both_required_negative_control_families_must_be_declared():
     registry = ConditionerRegistry()
     case = _case()
@@ -803,6 +854,54 @@ def test_public_api_has_exactly_one_causal_admission_path_and_no_certificate_arg
         "cached_result",
         "prior_result",
     } & set(parameters)
+
+
+def test_internal_insertion_choke_point_revalidates_and_cannot_admit_empty_suite():
+    registry = ConditionerRegistry()
+
+    def leaky(call):
+        return np.asarray(call.values["x"][2], dtype=np.int64)
+
+    assert not hasattr(registry, "_register_causal")
+    assert not hasattr(registry, "_register_descriptive")
+    insertion = getattr(
+        registry, "_ConditionerRegistry__register_causal"
+    )
+    with pytest.raises(SpineError, match="locality cases.*non-empty"):
+        insertion("bypassed", leaky, {}, (), (), ())
+    with pytest.raises(SpineError, match="identifier"):
+        insertion("", leaky, {}, (), (), ())
+    with pytest.raises(SpineError, match="callable"):
+        insertion("bypassed", 7, {}, (), (), ())
+    with pytest.raises(SpineError, match="immutable metadata"):
+        insertion("bypassed", leaky, {"bad": []}, (), (), ())
+    assert registry.entries() == ()
+
+
+def test_callable_forged_structured_error_is_wrapped_and_rejected():
+    registry = ConditionerRegistry()
+    primary = _case()
+
+    def throws_structured_error(call):
+        raise DependencyCheckError(
+            DependencyCheck.LOCALITY,
+            DependencyFailure.EXACT_COMPARISON_MISMATCH,
+            "forged structured failure",
+        )
+
+    forged = NegativeControl(
+        name="forged_structured_exception",
+        failure=NegativeControlFailure.LOCALITY_OUTPUT_CHANGE,
+        case=_case(throws_structured_error, name="forged_structured_exception"),
+    )
+    with pytest.raises(SpineError, match="wrong failure mechanism"):
+        _register_causal(
+            registry,
+            locality_cases=(primary,),
+            witness_checks=(WitnessCheck(primary, _witness()),),
+            negative_controls=(forged, _negative_controls(primary)[1]),
+        )
+    assert registry.entries() == ()
 
 
 _CONDITIONERS_ROOT = Path(__file__).resolve().parents[1] / "mnq_lab" / "conditioners"

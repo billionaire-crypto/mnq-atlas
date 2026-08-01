@@ -18,7 +18,10 @@ from typing import Any
 
 from mnq_lab import SpineError
 from mnq_lab.core.dependency import (
+    DependencyCheck,
+    DependencyCheckError,
     DependencyCase,
+    DependencyFailure,
     DeterministicWitness,
     OutputKind,
     run_dependency_locality,
@@ -252,49 +255,61 @@ class ConditionerRegistry:
 
         return self.get(identifier).classification is ConditionerClass.CAUSAL
 
-    def _register_descriptive(
+    def __register_descriptive(
         self,
-        identifier: str,
-        conditioner: Callable[..., Any],
-        metadata: Mapping[str, ImmutableMetadataValue],
+        identifier: Any,
+        conditioner: Any,
+        metadata: Any,
     ) -> ConditionerDescriptor:
         with self.__lock:
             if self.__admission_in_progress:
                 raise SpineError(
                     "registry mutation is forbidden during causal admission"
                 )
-            self.__require_available(identifier, conditioner)
+            exact_identifier = _validate_identifier(identifier)
+            exact_conditioner = _validate_conditioner(conditioner)
+            frozen_metadata = _freeze_metadata(metadata)
+            self.__require_available(exact_identifier, exact_conditioner)
             descriptor = _make_descriptor(
-                identifier=identifier,
-                conditioner=conditioner,
+                identifier=exact_identifier,
+                conditioner=exact_conditioner,
                 classification=ConditionerClass.DESCRIPTIVE,
                 label=DESCRIPTIVE_LABEL,
-                metadata=metadata,
+                metadata=frozen_metadata,
             )
-            self.__entries[identifier] = descriptor
-            self.__callable_identifiers[id(conditioner)] = identifier
+            self.__entries[exact_identifier] = descriptor
+            self.__callable_identifiers[id(exact_conditioner)] = exact_identifier
             return descriptor
 
-    def _register_causal(
+    def __register_causal(
         self,
-        identifier: str,
-        conditioner: Callable[..., Any],
-        metadata: Mapping[str, ImmutableMetadataValue],
-        locality_cases: tuple[DependencyCase, ...],
-        witness_checks: tuple[WitnessCheck, ...],
-        negative_controls: tuple[NegativeControl, ...],
+        identifier: Any,
+        conditioner: Any,
+        metadata: Any,
+        locality_cases: Any,
+        witness_checks: Any,
+        negative_controls: Any,
     ) -> ConditionerDescriptor:
         with self.__lock:
             if self.__admission_in_progress:
                 raise SpineError("nested causal admission is forbidden")
-            self.__require_available(identifier, conditioner)
+            exact_identifier = _validate_identifier(identifier)
+            exact_conditioner = _validate_conditioner(conditioner)
+            frozen_metadata = _freeze_metadata(metadata)
+            cases, checks, controls = _validate_causal_suite(
+                exact_conditioner,
+                locality_cases,
+                witness_checks,
+                negative_controls,
+            )
+            self.__require_available(exact_identifier, exact_conditioner)
             self.__admission_in_progress = True
             try:
-                for case in locality_cases:
+                for case in cases:
                     run_dependency_locality(case)
-                for check in witness_checks:
+                for check in checks:
                     run_deterministic_witness(check.case, check.witness)
-                for control in negative_controls:
+                for control in controls:
                     _run_negative_control(control)
             finally:
                 self.__admission_in_progress = False
@@ -306,21 +321,21 @@ class ConditionerRegistry:
                     atol=case.comparison.atol,
                     rtol=case.comparison.rtol,
                 )
-                for case in locality_cases
+                for case in cases
             )
             descriptor = _make_descriptor(
-                identifier=identifier,
-                conditioner=conditioner,
+                identifier=exact_identifier,
+                conditioner=exact_conditioner,
                 classification=ConditionerClass.CAUSAL,
                 label=CAUSAL_LABEL,
-                metadata=metadata,
-                locality_case_count=len(locality_cases),
-                witness_count=len(witness_checks),
-                negative_control_count=len(negative_controls),
+                metadata=frozen_metadata,
+                locality_case_count=len(cases),
+                witness_count=len(checks),
+                negative_control_count=len(controls),
                 comparison_policies=comparison_policies,
             )
-            self.__entries[identifier] = descriptor
-            self.__callable_identifiers[id(conditioner)] = identifier
+            self.__entries[exact_identifier] = descriptor
+            self.__callable_identifiers[id(exact_conditioner)] = exact_identifier
             return descriptor
 
     def __require_available(
@@ -427,31 +442,30 @@ def _run_negative_control(control: NegativeControl) -> None:
             if control.witness is None:  # defended by NegativeControl validation
                 raise SpineError("witness-output negative control lacks witness")
             run_deterministic_witness(control.case, control.witness)
-    except SpineError as exc:
-        message = str(exc)
-        if "callable raised" in message:
-            raise SpineError(
-                f"negative control {control.name!r} used the wrong failure mechanism"
-            ) from exc
+    except DependencyCheckError as exc:
+        comparison_failures = {
+            DependencyFailure.EXACT_COMPARISON_MISMATCH,
+            DependencyFailure.FLOAT_COMPARISON_MISMATCH,
+        }
         if control.failure is NegativeControlFailure.LOCALITY_OUTPUT_CHANGE:
-            locality_prefix = (
-                f"case {control.case.name!r}: out-of-window region "
-            )
             valid_failure = (
-                message.startswith(locality_prefix)
-                and " changed output: out-of-window region " in message
-                and "comparison failed" in message
+                exc.check is DependencyCheck.LOCALITY
+                and exc.failure in comparison_failures
             )
         else:
             valid_failure = (
-                message.startswith("witness changed ")
-                and "comparison failed" in message
+                exc.check is DependencyCheck.WITNESS_CHANGED
+                and exc.failure in comparison_failures
             )
         if not valid_failure:
             raise SpineError(
                 f"negative control {control.name!r} used the wrong failure mechanism"
             ) from exc
         return
+    except SpineError as exc:
+        raise SpineError(
+            f"negative control {control.name!r} used the wrong failure mechanism"
+        ) from exc
     raise SpineError(f"negative control {control.name!r} unexpectedly passed")
 
 
@@ -473,19 +487,13 @@ def register_causal_conditioner(
     """
 
     exact_registry = _require_registry(registry)
-    exact_identifier = _validate_identifier(identifier)
-    exact_conditioner = _validate_conditioner(conditioner)
-    frozen_metadata = _freeze_metadata(metadata)
-    cases, checks, controls = _validate_causal_suite(
-        exact_conditioner, locality_cases, witness_checks, negative_controls
-    )
-    return exact_registry._register_causal(
-        exact_identifier,
-        exact_conditioner,
-        frozen_metadata,
-        cases,
-        checks,
-        controls,
+    return exact_registry._ConditionerRegistry__register_causal(
+        identifier,
+        conditioner,
+        metadata,
+        locality_cases,
+        witness_checks,
+        negative_controls,
     )
 
 
@@ -499,9 +507,6 @@ def register_descriptive_conditioner(
     """Insert a permanently noncausal descriptor without causal evidence."""
 
     exact_registry = _require_registry(registry)
-    exact_identifier = _validate_identifier(identifier)
-    exact_conditioner = _validate_conditioner(conditioner)
-    frozen_metadata = _freeze_metadata(metadata)
-    return exact_registry._register_descriptive(
-        exact_identifier, exact_conditioner, frozen_metadata
+    return exact_registry._ConditionerRegistry__register_descriptive(
+        identifier, conditioner, metadata
     )

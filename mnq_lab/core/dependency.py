@@ -26,7 +26,10 @@ import numpy as np
 from mnq_lab import SpineError
 
 __all__ = [
+    "DependencyCheck",
+    "DependencyCheckError",
     "DependencyCase",
+    "DependencyFailure",
     "DependencyInputs",
     "DeterministicWitness",
     "LocalityReport",
@@ -48,6 +51,43 @@ class OutputKind(Enum):
     INTEGER = "integer"
     BOOLEAN = "boolean"
     FLOAT = "float"
+
+
+class DependencyCheck(Enum):
+    """The executed check whose output comparison failed."""
+
+    LOCALITY = "locality"
+    WITNESS_BASELINE = "witness_baseline"
+    WITNESS_CHANGED = "witness_changed"
+
+
+class DependencyFailure(Enum):
+    """Machine-readable output failure families; never inferred from prose."""
+
+    SHAPE_MISMATCH = "shape_mismatch"
+    DTYPE_MISMATCH = "dtype_mismatch"
+    EXACT_COMPARISON_MISMATCH = "exact_comparison_mismatch"
+    FLOAT_COMPARISON_MISMATCH = "float_comparison_mismatch"
+
+
+class DependencyCheckError(SpineError):
+    """A structured harness failure safe for negative-control dispatch."""
+
+    def __init__(
+        self,
+        check: DependencyCheck,
+        failure: DependencyFailure,
+        message: str,
+    ) -> None:
+        if not isinstance(check, DependencyCheck):
+            raise TypeError("check must be a DependencyCheck")
+        if not isinstance(failure, DependencyFailure):
+            raise TypeError("failure must be a DependencyFailure")
+        if not isinstance(message, str) or not message:
+            raise TypeError("message must be a non-empty string")
+        self.check = check
+        self.failure = failure
+        super().__init__(message)
 
 
 def _finite_nonnegative_tolerance(value: Any, name: str) -> float:
@@ -299,20 +339,29 @@ def _compare_outputs(
     expected: np.ndarray,
     policy: OutputComparison,
     context: str,
+    check: DependencyCheck,
 ) -> None:
     if actual.shape != expected.shape:
-        raise SpineError(
+        raise DependencyCheckError(
+            check,
+            DependencyFailure.SHAPE_MISMATCH,
             f"{context} output shape {actual.shape} does not match "
-            f"expected shape {expected.shape}"
+            f"expected shape {expected.shape}",
         )
     if actual.dtype != expected.dtype:
-        raise SpineError(
+        raise DependencyCheckError(
+            check,
+            DependencyFailure.DTYPE_MISMATCH,
             f"{context} output dtype {actual.dtype} does not match "
-            f"expected dtype {expected.dtype}"
+            f"expected dtype {expected.dtype}",
         )
     if policy.kind is not OutputKind.FLOAT:
         if not _bit_identical(actual, expected):
-            raise SpineError(f"{context} exact comparison failed")
+            raise DependencyCheckError(
+                check,
+                DependencyFailure.EXACT_COMPARISON_MISMATCH,
+                f"{context} exact comparison failed",
+            )
         return
 
     actual_wide = actual.astype(np.longdouble)
@@ -324,10 +373,12 @@ def _compare_outputs(
     mismatch = difference > allowed
     if np.any(mismatch):
         flat_index = int(np.flatnonzero(mismatch)[0])
-        raise SpineError(
+        raise DependencyCheckError(
+            check,
+            DependencyFailure.FLOAT_COMPARISON_MISMATCH,
             f"{context} floating comparison failed at flat index {flat_index}: "
             f"difference {difference.flat[flat_index]!r} exceeds "
-            f"atol + rtol * abs(expected) = {allowed.flat[flat_index]!r}"
+            f"atol + rtol * abs(expected) = {allowed.flat[flat_index]!r}",
         )
 
 
@@ -477,10 +528,13 @@ def run_dependency_locality(case: DependencyCase) -> LocalityReport:
                     baseline,
                     case.comparison,
                     context,
+                    DependencyCheck.LOCALITY,
                 )
-            except SpineError as exc:
-                raise SpineError(
-                    f"case {case.name!r}: {context} changed output: {exc}"
+            except DependencyCheckError as exc:
+                raise DependencyCheckError(
+                    exc.check,
+                    exc.failure,
+                    f"case {case.name!r}: {context} changed output: {exc}",
                 ) from exc
             region_changed += changed
             trial_count += 1
@@ -642,12 +696,14 @@ def run_deterministic_witness(
         expected_baseline,
         case.comparison,
         "witness baseline",
+        DependencyCheck.WITNESS_BASELINE,
     )
     _compare_outputs(
         changed_output,
         expected_changed,
         case.comparison,
         "witness changed",
+        DependencyCheck.WITNESS_CHANGED,
     )
     return WitnessReport(
         case_name=case.name,

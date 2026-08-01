@@ -182,9 +182,11 @@ The acceptance fixture remained SHA-256
 
 ## Audit status
 
-The implementation stages, v1 forensic review, calibration amendment and
-result, exact v2 derivation and guard correction, v2 result, and AR(1) result
-each received an independent `CLOSED` verdict. This document was prepared from
-clean parent commit `b3009a23db89cdd8c61775fb7183df79e8d29e60` and is the
-artifact submitted for the final independent Phase 5 closeout audit. Phase 6
-and S01A remain out of scope until that audit returns `CLOSED`.
+Independent audits of the implementation and stochastic evidence ultimately
+returned `CLOSED`. The v2 derivation audit at `588f3eb` first returned `OPEN`
+for two guard-hygiene defects: a tautological partition assertion and
+unguarded permanent-record tail formulas. Both were corrected at `2c709aa`,
+whose re-audit returned `CLOSED`. This document was prepared from clean parent
+commit `b3009a23db89cdd8c61775fb7183df79e8d29e60` and is the artifact submitted
+for the final independent Phase 5 closeout audit. Phase 6 and S01A remain out
+of scope until that audit returns `CLOSED`.

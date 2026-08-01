@@ -453,7 +453,9 @@ Phase 6 executable contract?
 BOUNDARY
 1. Phase 6 provides only a market-free dependency-locality harness, synthetic
    witness fixtures, and causal/descriptive registry mechanics. Actual market
-   conditioners and state assignments remain Phase 7.
+   conditioners and state assignments remain Phase 7. The generic declaration,
+   comparison, and harness primitives belong in `core/`; registry mechanics
+   belong in `conditioners/`; deterministic witness callables remain test-only.
 2. A dependency case supplies immutable baseline inputs, immutable dependency
    coordinates, a declared allowed-dependency mask for the requested output,
    and an explicit callable invocation. Shapes align and inputs are never
@@ -462,14 +464,25 @@ BOUNDARY
    values only and cannot alter coordinates or mask membership.
 
 LOCALITY
-4. A fixed, recorded test-only Generator mutates every declared out-of-window
-   region through a non-no-op mutation whose changed indices are verified.
+4. A fixed ordinary test-only `Generator(PCG64(0))` mutates every declared
+   out-of-window region through a non-no-op mutation whose changed indices are
+   verified. Seed 0 is an ordinary deterministic software-test seed, not
+   scientific entropy, a one-shot seed, or a registered Phase 5 entropy.
 5. The baseline and out-of-window-mutated calls must compare bit-identically
    for ticks, integer categories, and boolean masks. Floating estimators use
-   only the callable's declared finite nonnegative absolute/relative tolerances.
+   only function-specific finite nonnegative absolute and relative tolerances
+   fixed in immutable registration metadata. Floating comparison is elementwise
+   `abs(actual - expected) <= atol + rtol * abs(expected)` after exact shape and
+   dtype agreement. Undeclared, negative, NaN, infinite, or categorical-output
+   tolerances fail closed and no tolerance may repair a wrong time boundary.
 6. Missing outputs, changed shapes or dtypes, non-finite values not explicitly
    allowed by the contract, input mutation, or a no-op adversarial mutation fail
-   closed.
+   closed. The harness makes supplied arrays read-only, preserves exact pre-call
+   snapshots, and repeats identical invocations on fresh inputs to detect direct
+   caller-array mutation and nondeterministic output. Planted hidden-RNG,
+   module-global, corpus-length, and undeclared-companion dependencies must be
+   killed where declared adversarial controls expose them; this is empirical
+   coverage of those cases, not a general proof that no hidden dependency exists.
 
 WITNESS
 7. Every causal admission carries at least one deterministic hand-built witness
@@ -477,18 +490,31 @@ WITNESS
    independently of the implementation under test.
 8. The witness must produce the exact expected response. “Different from
    baseline” alone is not enough, and random in-window mutation is not a
-   substitute for a witness.
+   substitute for a witness. For floating output, the independently specified
+   expected changed response must differ from the independently specified
+   baseline response, at least at one required affected output element, by
+   strictly more than `atol + rtol * abs(expected_changed)`. A floating witness
+   that does not clear that separation is vacuous and fails before admission.
 9. Every test includes a negative mutation proving the locality comparison or
    witness assertion can fail.
 
 REGISTRIES
-10. Causal and descriptive entries use unique immutable identifiers and expose
-    immutable metadata. Conflicting duplicate registration fails closed; no
-    silent overwrite, downgrade, or reclassification is allowed.
-11. register_causal_conditioner admits a callable only through evidence created
-    by executing the complete declared locality and witness suite in the same
-    call or through another non-forgeable mechanism ratified before coding. A
-    caller-supplied passed=True flag is forbidden.
+10. Causal and descriptive entries share one identifier namespace and expose
+    immutable metadata. Every duplicate identifier fails closed, including an
+    otherwise identical repeat; no overwrite, unregister, downgrade, or
+    reclassification exists. The same callable object cannot be registered under
+    an alias or in the other registry; a distinct wrapper is a distinct callable
+    requiring its own identity and, for causal admission, its own executed suite.
+    Retrieval cannot mutate stored state, and iteration preserves insertion order
+    rather than sorting by any measured output.
+11. `register_causal_conditioner` has exactly one admission path: it executes
+    the complete declared locality cases, deterministic witnesses, and required
+    negative controls inside the registration call, validates all evidence, and
+    only then atomically inserts the immutable entry. No caller-supplied boolean,
+    string, token, dataclass, protocol or duck-typed object, serialized or cached
+    result, prior-run result, alternate constructor, or other certificate can
+    cause admission. Failure leaves the registry unchanged. No alternate causal
+    admission mechanism exists in Phase 6.
 12. register_descriptive_conditioner does not require causal-locality evidence,
     but every returned descriptor is permanently labelled
     NONCAUSAL — NOT ELIGIBLE FOR CONFIRMATION.
@@ -504,6 +530,13 @@ SCOPE
 16. No Phase 7 conditioner, Phase 8 contrast, Phase 9 prevalence result, Phase
     10 null, Phase 11 vintage, Phase 12 S01A output, or trading strategy is
     implemented.
+
+The design-latitude resolutions in items 1–6 and 10–11 are recorded in
+`docs/DISCREPANCIES.md` D17 and must be incorporated unchanged into the audited
+`docs/PHASE6_PREREGISTRATION.md` before production implementation. Phase 6 can
+test a declared window but cannot prove that a future real conditioner declared
+the semantically correct, minimally sufficient window; over-wide declaration
+review remains an explicit Phase 7 obligation.
 
 For every item, return RATIFIED, AMEND, or UNRESOLVED with exact frozen-text
 basis. Identify every ambiguity requiring a user ruling. Do not implement or

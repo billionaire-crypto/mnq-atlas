@@ -627,3 +627,82 @@ script-path failure mode without importing or executing the runner.
 **Status:** `RESOLVED` as a deterministic launch discrepancy. The calibration
 remains blocked until the amendment commit passes independent static audit;
 the v2 coverage and AR(1) one-shots remain blocked.
+
+---
+
+## D17 — Phase 6 dependency and registry design latitude — `RESOLVED`
+
+**Frozen text:** frozen spec §13 test 6 requires out-of-window mutation,
+deterministic per-function witnesses, exact comparison for tick/integer/mask
+output, and declared floating tolerance. Section 11 requires separate causal
+and descriptive registries and says causal admission must pass the declared
+adversarial suite, while explicitly describing that result as empirical evidence
+rather than proof. The frozen text does not uniquely specify the executable
+window representation, mutation seed, purity coverage, registry lifecycle,
+module placement, or non-forgeable admission mechanism.
+
+**Initial independent audit:** the first review of the Phase 6 handoff at
+`8e68095203ec0fa1b8be0b23a0e2f7655118dfc1` returned `OPEN`. It verified the
+Phase 5 correction, protected hashes, safe `614 passed, 5 xfailed` baseline, and
+Phase 6 scope, but found three contract defects: an unspecified alternate
+causal-admission mechanism, a floating witness that could be insensitive within
+its own tolerance, and unrecorded design-latitude resolutions. This `OPEN`
+history is permanent and is not replaced by a later correction or re-audit.
+
+**User ruling (2026-07-31):** follow the prior phases' single-path, fail-closed
+admission discipline. `register_causal_conditioner` must execute the complete
+declared locality cases, deterministic witnesses, and required negative controls
+inside the registration call; validate them before insertion; and atomically
+insert only after every check succeeds. Phase 6 has no alternate causal-admission
+path. Caller-supplied booleans, tokens, evidence objects, cached or serialized
+results, prior-run results, and duck-typed certificates cannot cause admission.
+
+**Recorded executable resolutions:** prior to production implementation, the
+Phase 6 preregistration must preserve all of the following:
+
+1. Window membership uses immutable event-time dependency coordinates plus an
+   explicit immutable boolean allowed-dependency mask. Positional offsets alone
+   are insufficient on gapped or irregular coordinates.
+2. Coordinates and the mask determine membership and are never adversarially
+   mutated. Locality mutations change aligned values only, exercise every
+   forbidden region, and verify at least one actual changed value in each region.
+3. Deterministic test mutation uses `Generator(PCG64(0))`. Seed 0 is an ordinary
+   software-test seed, not scientific entropy, a one-shot seed, or registered
+   Phase 5 entropy.
+4. The harness makes supplied arrays read-only, retains exact snapshots, and
+   repeats calls on fresh identical inputs to detect direct mutation and
+   nondeterministic output. Hidden RNG, module globals, corpus-length dependence,
+   and undeclared companion inputs are tested through planted controls where the
+   contract claims coverage. Passing those controls is empirical evidence only;
+   it cannot prove the absence of every possible hidden dependency.
+5. Integer, tick, category, and boolean outputs compare exactly. Floating output
+   first requires exact shape and dtype, then compares elementwise by
+   `abs(actual - expected) <= atol + rtol * abs(expected)` using function-specific
+   finite nonnegative tolerances fixed in immutable metadata. A floating witness
+   must have an independently specified expected change exceeding that bound at
+   a required affected element; otherwise it is rejected as vacuous.
+6. Identifiers are unique across causal and descriptive registries. Every
+   duplicate identifier fails; overwrite, unregister, downgrade, and
+   reclassification do not exist. The same callable object cannot enter through
+   an alias or the other registry. A distinct wrapper is independently admitted.
+   Metadata and retrieval are immutable, and iteration is insertion-ordered,
+   never sorted by a measured output.
+7. Generic market-free declarations, comparisons, and harness mechanics belong
+   in `core/`; registry mechanics belong in `conditioners/`; synthetic witness
+   callables remain in tests. No actual conditioner or market-data access enters
+   Phase 6.
+8. Phase 6 verifies locality relative to a declared window. It cannot generically
+   prove that a future real conditioner's declared window is semantically correct
+   or minimally sufficient. Review and mutations for an over-wide real-conditioner
+   declaration remain a Phase 7 obligation and must not be claimed closed by the
+   Phase 6 gate.
+
+**Governance:** these resolutions amend only the proposed Phase 6 executable
+contract. They do not modify the frozen specification, YAML, any Phase 5 record,
+or any scientific result. `docs/PHASE6_PREREGISTRATION.md` remains absent until
+this correction receives a focused independent `CLOSED` audit and the complete
+amended contract is `RATIFIED`.
+
+**Status:** `RESOLVED` by explicit user ruling and recorded design decisions,
+pending independent re-audit of the documentation correction. No Phase 6
+production implementation is authorized by this entry alone.

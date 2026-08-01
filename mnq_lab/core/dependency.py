@@ -3,9 +3,9 @@
 Phase 6 supplies empirical admission infrastructure, not proof of causality.
 Membership is declared by immutable event-time coordinates plus an immutable
 boolean mask.  The locality runner mutates values only, exercises every
-forbidden region with the ordinary test generator ``Generator(PCG64(0))``, and
-fails closed if the declared output changes under the registered comparison
-policy.
+forbidden region with the ordinary test generator ``Generator(PCG64(0))`` plus
+deterministic zero and dtype-extreme landmarks, and fails closed if the declared
+output changes under the registered comparison policy.
 
 This module knows nothing about markets, stores, studies, confirmation, or
 conditioner semantics.  Whether a future real callable declared the correct
@@ -495,6 +495,87 @@ def _mutated_region_input(
     return mutated, changed
 
 
+def _landmark_targets(dtype: np.dtype) -> tuple[tuple[str, np.generic], ...]:
+    if dtype.kind == "b":
+        return (
+            ("false", np.asarray(False, dtype=dtype)[()]),
+            ("true", np.asarray(True, dtype=dtype)[()]),
+        )
+    if dtype.kind in "iu":
+        info = np.iinfo(dtype)
+        candidates = (
+            ("zero", 0),
+            ("minimum", int(info.min)),
+            ("maximum", int(info.max)),
+        )
+    else:
+        limit = np.finfo(dtype).max
+        candidates = (
+            ("zero", 0.0),
+            ("minimum", -limit),
+            ("maximum", limit),
+        )
+
+    targets: list[tuple[str, np.generic]] = []
+    seen: set[bytes] = set()
+    for name, value in candidates:
+        target = np.asarray(value, dtype=dtype)[()]
+        signature = target.tobytes()
+        if signature not in seen:
+            targets.append((name, target))
+            seen.add(signature)
+    return tuple(targets)
+
+
+def _landmark_region_input(
+    case: DependencyCase,
+    region: np.ndarray,
+    input_name: str,
+    target: np.generic,
+) -> tuple[dict[str, np.ndarray], int] | None:
+    mutated = {
+        name: np.array(array, copy=True) for name, array in case.inputs.items()
+    }
+    array = mutated[input_name]
+    baseline = np.array(array, copy=True)
+    array[region] = target
+    changed = sum(
+        int(_element_changed(baseline[index], array[index])) for index in region
+    )
+    if changed == 0:
+        return None
+    outside = np.ones(array.size, dtype=np.bool_)
+    outside[region] = False
+    if not np.array_equal(array[outside], baseline[outside]):
+        raise SpineError("landmark mutation changed values outside its region")
+    return mutated, changed
+
+
+def _region_mutation_trials(
+    case: DependencyCase,
+    region: np.ndarray,
+    input_name: str,
+    rng: np.random.Generator,
+) -> tuple[tuple[str, dict[str, np.ndarray], int], ...]:
+    random_mutated, random_changed = _mutated_region_input(
+        case, region, input_name, rng
+    )
+    trials = [("pcg64", random_mutated, random_changed)]
+    seen = {random_mutated[input_name].tobytes(order="C")}
+    dtype = case.inputs[input_name].dtype
+    for name, target in _landmark_targets(dtype):
+        result = _landmark_region_input(case, region, input_name, target)
+        if result is None:
+            continue
+        mutated, changed = result
+        signature = mutated[input_name].tobytes(order="C")
+        if signature in seen:
+            continue
+        trials.append((name, mutated, changed))
+        seen.add(signature)
+    return tuple(trials)
+
+
 def run_dependency_locality(case: DependencyCase) -> LocalityReport:
     """Execute every declared forbidden-region locality comparison.
 
@@ -517,27 +598,29 @@ def run_dependency_locality(case: DependencyCase) -> LocalityReport:
     for region_index, region in enumerate(regions):
         region_changed = 0
         for input_name in case.inputs:
-            mutated, changed = _mutated_region_input(
-                case, region, input_name, rng
-            )
-            context = f"out-of-window region {region_index} input {input_name!r}"
-            output = _invoke_stably(case, mutated, context)
-            try:
-                _compare_outputs(
-                    output,
-                    baseline,
-                    case.comparison,
-                    context,
-                    DependencyCheck.LOCALITY,
+            trials = _region_mutation_trials(case, region, input_name, rng)
+            for probe_name, mutated, changed in trials:
+                context = (
+                    f"out-of-window region {region_index} input {input_name!r} "
+                    f"probe {probe_name!r}"
                 )
-            except DependencyCheckError as exc:
-                raise DependencyCheckError(
-                    exc.check,
-                    exc.failure,
-                    f"case {case.name!r}: {context} changed output: {exc}",
-                ) from exc
-            region_changed += changed
-            trial_count += 1
+                output = _invoke_stably(case, mutated, context)
+                try:
+                    _compare_outputs(
+                        output,
+                        baseline,
+                        case.comparison,
+                        context,
+                        DependencyCheck.LOCALITY,
+                    )
+                except DependencyCheckError as exc:
+                    raise DependencyCheckError(
+                        exc.check,
+                        exc.failure,
+                        f"case {case.name!r}: {context} changed output: {exc}",
+                    ) from exc
+                region_changed += changed
+                trial_count += 1
         region_sizes.append(int(region.size))
         changed_counts.append(region_changed)
 

@@ -74,8 +74,8 @@ def test_locality_mutates_every_forbidden_region_non_vacuously():
     assert report.case_name == "synthetic"
     assert report.forbidden_region_count == 2
     assert report.forbidden_region_sizes == (2, 1)
-    assert report.changed_value_counts == (2, 1)
-    assert report.mutation_trial_count == 2
+    assert report.changed_value_counts == (8, 4)
+    assert report.mutation_trial_count == 8
     assert report.test_seed == 0
 
     with pytest.raises(FrozenInstanceError):
@@ -98,8 +98,8 @@ def test_each_named_input_is_mutated_in_a_separate_trial():
         name="two_inputs",
     )
     report = run_dependency_locality(causal)
-    assert report.mutation_trial_count == 4
-    assert report.changed_value_counts == (4, 2)
+    assert report.mutation_trial_count == 16
+    assert report.changed_value_counts == (16, 8)
 
     companion_future_read = _case(
         lambda call: np.asarray(call.values["companion"][2], dtype=np.int64),
@@ -129,7 +129,8 @@ def test_mutation_schedule_changes_dtype_boundaries_without_noop(values, dtype):
     )
     report = run_dependency_locality(case)
     assert report.forbidden_region_sizes == (1, 1)
-    assert report.changed_value_counts == (1, 1)
+    assert all(count >= 1 for count in report.changed_value_counts)
+    assert sum(report.changed_value_counts) == report.mutation_trial_count
 
 
 def test_event_time_boundary_is_inclusive_and_positional_future_read_is_caught():
@@ -222,7 +223,9 @@ def test_tick_output_is_bit_exact_and_future_read_is_caught():
 def test_float_locality_uses_the_declared_formula_and_can_fail():
     inputs = {"x": _readonly([2.0, 3.0, 11.0, 13.0, 5.0, 17.0], np.float64)}
     within = _case(
-        lambda call: np.asarray(1.0 + 1e-8 * call.values["x"][2], dtype=np.float64),
+        lambda call: np.asarray(
+            1.0 + 1e-8 * np.tanh(call.values["x"][2]), dtype=np.float64
+        ),
         inputs=inputs,
         comparison=OutputComparison(OutputKind.FLOAT, atol=1e-6, rtol=0.0),
         name="float_within_tolerance",

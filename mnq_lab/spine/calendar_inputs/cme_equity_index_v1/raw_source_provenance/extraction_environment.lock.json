@@ -1,0 +1,58 @@
+{
+  "dependencies": [
+    {
+      "name": "exchange_calendars",
+      "version": "4.13.2"
+    },
+    {
+      "name": "korean_lunar_calendar",
+      "version": "0.4.0"
+    },
+    {
+      "name": "numpy",
+      "version": "2.5.1"
+    },
+    {
+      "name": "pandas",
+      "version": "3.0.5"
+    },
+    {
+      "name": "pandas_market_calendars",
+      "version": "5.4.0"
+    },
+    {
+      "name": "pip",
+      "version": "24.3.1"
+    },
+    {
+      "name": "pyluach",
+      "version": "2.3.0"
+    },
+    {
+      "name": "python-dateutil",
+      "version": "2.9.0.post0"
+    },
+    {
+      "name": "PyYAML",
+      "version": "6.0.3"
+    },
+    {
+      "name": "six",
+      "version": "1.17.0"
+    },
+    {
+      "name": "toolz",
+      "version": "1.1.0"
+    },
+    {
+      "name": "tzdata",
+      "version": "2026.3"
+    }
+  ],
+  "environment_role": "external one-time extraction environment; not the MNQ Atlas runtime",
+  "numpy": "2.5.1",
+  "pandas": "3.0.5",
+  "pandas_market_calendars": "5.4.0",
+  "platform": "Windows-10-10.0.19045-SP0",
+  "python": "3.13.2"
+}

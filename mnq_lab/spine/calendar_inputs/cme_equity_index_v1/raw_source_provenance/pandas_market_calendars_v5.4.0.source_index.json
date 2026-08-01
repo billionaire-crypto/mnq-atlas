@@ -1,0 +1,388 @@
+{
+  "complete_package_python_file_count": 47,
+  "files": [
+    {
+      "bytes": 1398,
+      "original_path": "pandas_market_calendars/__init__.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "3fa6864ce2b11914956c3311862651dd77d6b3b8652194cbdc6dfb0967858857",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/__init__.py.txt"
+    },
+    {
+      "bytes": 2841,
+      "original_path": "pandas_market_calendars/calendar_registry.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "fd3697680d7f51270424e41081cdd93d25b4cc86656af59892bc7ff1951c8a55",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/calendar_registry.py.txt"
+    },
+    {
+      "bytes": 56593,
+      "original_path": "pandas_market_calendars/calendar_utils.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "a91ac11f6bc46c1029bc9fb2e7ca7fdfca14b7036e680a53a20550ef25b4c224",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/calendar_utils.py.txt"
+    },
+    {
+      "bytes": 0,
+      "original_path": "pandas_market_calendars/calendars/__init__.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/calendars/__init__.py.txt"
+    },
+    {
+      "bytes": 2711,
+      "original_path": "pandas_market_calendars/calendars/asx.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "a7fef65954e8eba81657d0656691c34a93f5a2654fd885796526c800db43a03b",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/calendars/asx.py.txt"
+    },
+    {
+      "bytes": 6216,
+      "original_path": "pandas_market_calendars/calendars/bmf.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "0cb4d61b35a9e602315c4dde0cc86d75979464c3d3f74f40a3d5297e4c36dc0c",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/calendars/bmf.py.txt"
+    },
+    {
+      "bytes": 20154,
+      "original_path": "pandas_market_calendars/calendars/bse.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "e98ee6d90664129531d1440e509dcfae608286812ef2165f6bc2cde447ff85ee",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/calendars/bse.py.txt"
+    },
+    {
+      "bytes": 3715,
+      "original_path": "pandas_market_calendars/calendars/cboe.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "0bab5c46899faa06b5140c44fd0923032aa3544f3525cad7c777b5b901192d47",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/calendars/cboe.py.txt"
+    },
+    {
+      "bytes": 13988,
+      "original_path": "pandas_market_calendars/calendars/cme.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "84b9e0f5cb3a1d0bd75394152e5327e5f03c7bf0d6c846ac38c67a8fcbbca8df",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/calendars/cme.py.txt"
+    },
+    {
+      "bytes": 4837,
+      "original_path": "pandas_market_calendars/calendars/cme_globex_agriculture.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "35298f67f82be6e95fa530504f116f2fc2b1a96862ceb2de2c7f4850096bb205",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/calendars/cme_globex_agriculture.py.txt"
+    },
+    {
+      "bytes": 3260,
+      "original_path": "pandas_market_calendars/calendars/cme_globex_base.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "b8822857160e2ba23a0c4d1333d1a556032c52fbc3aca5a29450223640e27461",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/calendars/cme_globex_base.py.txt"
+    },
+    {
+      "bytes": 5628,
+      "original_path": "pandas_market_calendars/calendars/cme_globex_crypto.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "3c22c7f0b11c5f736f9f7ac2169f16f37d8c1868e184c3e5b0211f13d3e7369f",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/calendars/cme_globex_crypto.py.txt"
+    },
+    {
+      "bytes": 7079,
+      "original_path": "pandas_market_calendars/calendars/cme_globex_energy_and_metals.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "5e414d9909a1705dc2995bc5475fcebb604054b80831ad7de1fcedc307bfcbfe",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/calendars/cme_globex_energy_and_metals.py.txt"
+    },
+    {
+      "bytes": 3832,
+      "original_path": "pandas_market_calendars/calendars/cme_globex_equities.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "f268ff384f5e60ead4905fc64e9f126934f50c4646f9482a58c955e9d3b826e3",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/calendars/cme_globex_equities.py.txt"
+    },
+    {
+      "bytes": 4415,
+      "original_path": "pandas_market_calendars/calendars/cme_globex_fixed_income.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "003b56952292276feb1b02c07c7d35f7160e8d7b5922e9f5b8e863b92010fff0",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/calendars/cme_globex_fixed_income.py.txt"
+    },
+    {
+      "bytes": 3326,
+      "original_path": "pandas_market_calendars/calendars/cme_globex_fx.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "8587b305f9e95130662b1b727154ca5bd9fcf62fe082959ea2d0d231662e3630",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/calendars/cme_globex_fx.py.txt"
+    },
+    {
+      "bytes": 269,
+      "original_path": "pandas_market_calendars/calendars/cme_market_times.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "8ca2bbbeb9c41fa4be8b20b098cdc77e2a741b67502c5c6af5f7efad672cb405",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/calendars/cme_market_times.py.txt"
+    },
+    {
+      "bytes": 4370,
+      "original_path": "pandas_market_calendars/calendars/eurex.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "526cce0ed35d0bb6748f62abcd41d86bcbcbb3acfe7ae713d496ee1d01f951f2",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/calendars/eurex.py.txt"
+    },
+    {
+      "bytes": 2281,
+      "original_path": "pandas_market_calendars/calendars/eurex_fixed_income.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "1d269bdb7cd09145029da7af88a3df1a68207e55c8cf9a442a52cf5ec4aad4da",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/calendars/eurex_fixed_income.py.txt"
+    },
+    {
+      "bytes": 911,
+      "original_path": "pandas_market_calendars/calendars/forex.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "d77b592571029c19f6e2e233749de30bfaa879a9e6b1816018f47024dddfae41",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/calendars/forex.py.txt"
+    },
+    {
+      "bytes": 14606,
+      "original_path": "pandas_market_calendars/calendars/hkex.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "ce976ba0f5fd71f9dcdcbeb69e2fdeddaad29938b6c69335ee8b0dbb599df363",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/calendars/hkex.py.txt"
+    },
+    {
+      "bytes": 2314,
+      "original_path": "pandas_market_calendars/calendars/ice.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "f0a98aa86dfe3d26cf3f278b98126811aa2f669f8c7c5249eb07115cb866a5fa",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/calendars/ice.py.txt"
+    },
+    {
+      "bytes": 4742,
+      "original_path": "pandas_market_calendars/calendars/iex.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "1344f60bc19c66d19d2ae6454aa7155f66a6805b161bce6997526596186cef95",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/calendars/iex.py.txt"
+    },
+    {
+      "bytes": 4089,
+      "original_path": "pandas_market_calendars/calendars/jpx.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "8c7fee1ecd2bfa53c3a7b65214a9471d74489702bf3c43940caabc6180c627f7",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/calendars/jpx.py.txt"
+    },
+    {
+      "bytes": 3397,
+      "original_path": "pandas_market_calendars/calendars/lse.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "bec0d561ca4218a02fb8f8e7d5c34946c62f7d106d60c2fa06da37b4c6bd362d",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/calendars/lse.py.txt"
+    },
+    {
+      "bytes": 8893,
+      "original_path": "pandas_market_calendars/calendars/mirror.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "10ad56506ef5994df274cc1bd74e8f92ea648d21fbf0395a42ae29a134b927e8",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/calendars/mirror.py.txt"
+    },
+    {
+      "bytes": 68256,
+      "original_path": "pandas_market_calendars/calendars/nyse.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "504ccc5b200bc1852decf9c4ff07135292f18672783bf738e8045457775f9178",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/calendars/nyse.py.txt"
+    },
+    {
+      "bytes": 3196,
+      "original_path": "pandas_market_calendars/calendars/ose.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "66633e51afe03098ebb1cfd4fca09789dc5fca49fc8850e3ca1edc70f2606aaa",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/calendars/ose.py.txt"
+    },
+    {
+      "bytes": 12324,
+      "original_path": "pandas_market_calendars/calendars/sifma.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "4b082a879ac95a8b5ce8f592f64cd6d557206967bd53a4b817167832d5714723",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/calendars/sifma.py.txt"
+    },
+    {
+      "bytes": 2880,
+      "original_path": "pandas_market_calendars/calendars/six.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "75bbf2548297aa1ad29221dc03ec5784ad07e20e90de0362dedaf98c6d2c6be6",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/calendars/six.py.txt"
+    },
+    {
+      "bytes": 10849,
+      "original_path": "pandas_market_calendars/calendars/sse.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "16d8a6864503a0cde4d98fd4ca65e38dac870c819a5fc78d45ef9e176c4e9f04",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/calendars/sse.py.txt"
+    },
+    {
+      "bytes": 9034,
+      "original_path": "pandas_market_calendars/calendars/tase.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "2a18f48faf74fdfb4b8f2688996d9f3b48172031dbe3dd20bf94612570938f6e",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/calendars/tase.py.txt"
+    },
+    {
+      "bytes": 4375,
+      "original_path": "pandas_market_calendars/calendars/tsx.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "1d7bfc4638b6e33fd502d7c07435389e099ae882d3b1ad067c901f032dc8db26",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/calendars/tsx.py.txt"
+    },
+    {
+      "bytes": 4216,
+      "original_path": "pandas_market_calendars/class_registry.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "58c7d3601d1cc9d31add973e1ed6d23ce4b817d5ebfdd6d5222be97e338f006d",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/class_registry.py.txt"
+    },
+    {
+      "bytes": 0,
+      "original_path": "pandas_market_calendars/holidays/__init__.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/holidays/__init__.py.txt"
+    },
+    {
+      "bytes": 9545,
+      "original_path": "pandas_market_calendars/holidays/cme.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "6bf04e41330c02ad1fa0b3976804e2a19314c45cd9802e9b618a8ac24378fbb9",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/holidays/cme.py.txt"
+    },
+    {
+      "bytes": 5316,
+      "original_path": "pandas_market_calendars/holidays/cme_globex.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "cf3e738e37d6412760ad67887d58342d684b4b30905203c09c4d3f22acc263cd",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/holidays/cme_globex.py.txt"
+    },
+    {
+      "bytes": 49664,
+      "original_path": "pandas_market_calendars/holidays/cn.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "c4d08663453e906dc144487bb8e32e8fcf13710c73deb72c395ed2f62b329e8a",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/holidays/cn.py.txt"
+    },
+    {
+      "bytes": 9611,
+      "original_path": "pandas_market_calendars/holidays/jp.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "978945a6927b127bcc3fce3843bdb003290e1302dcb04960e27e6c723f1cb32a",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/holidays/jp.py.txt"
+    },
+    {
+      "bytes": 8682,
+      "original_path": "pandas_market_calendars/holidays/jpx_equinox.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "ef8c47aecc06b2ea3f71127ade7a54e86fc29fd67cfed6a24cbe3297b46887a1",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/holidays/jpx_equinox.py.txt"
+    },
+    {
+      "bytes": 41384,
+      "original_path": "pandas_market_calendars/holidays/nyse.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "d7bbb1270e3fa51a49fd54f5f8278e8f238cce79c5c755770e508e385ea2a110",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/holidays/nyse.py.txt"
+    },
+    {
+      "bytes": 1408,
+      "original_path": "pandas_market_calendars/holidays/oz.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "7b118c96754f74e5b8466b77ec479b0055f175c25afd38558447ca96ee4be6fd",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/holidays/oz.py.txt"
+    },
+    {
+      "bytes": 9587,
+      "original_path": "pandas_market_calendars/holidays/sifma.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "53f0c1728d1d1498c202ae13f5a83e3a6507c83fc29ccc7034dc33277cc66423",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/holidays/sifma.py.txt"
+    },
+    {
+      "bytes": 4883,
+      "original_path": "pandas_market_calendars/holidays/uk.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "dc5518931b7881986b1150c50b683e2d1745e153d7628714a98738c73496c3ba",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/holidays/uk.py.txt"
+    },
+    {
+      "bytes": 11999,
+      "original_path": "pandas_market_calendars/holidays/us.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "11ff3cf474bab9d3b42ad0e074ae701a084a79707b2ec1678d1d4628b177b52f",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/holidays/us.py.txt"
+    },
+    {
+      "bytes": 47943,
+      "original_path": "pandas_market_calendars/market_calendar.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "e66b913aae57c01490337166f9b879ae655f908b9b861f86400c5633772c7921",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/market_calendar.py.txt"
+    },
+    {
+      "bytes": 22101,
+      "original_path": "pandas_market_calendars/sources.py",
+      "retrieval_date": "2026-08-01",
+      "retrieval_method": "pinned shallow Git tag checkout",
+      "sha256": "18baa2b0c6b54d29fc8181dbe0616e06e3418ed2439caefd869ca0787f53340f",
+      "stored_path": "raw_source_provenance/pandas_market_calendars/sources.py.txt"
+    }
+  ],
+  "hash_material": "UTF-8 original_path + NUL + decimal bytes + NUL + lowercase sha256 + LF, in original_path order",
+  "package": "pandas_market_calendars",
+  "release": "5.4.0",
+  "source_commit": "275890784073a3a3a347e4f05f4dc986456e6a75",
+  "stored_files_are_inert": true,
+  "stored_suffix": ".py.txt",
+  "tree_sha256": "253ca03bc5ba4956a930d47d167843469c4440a0514961599cc3ee0d376890ee"
+}

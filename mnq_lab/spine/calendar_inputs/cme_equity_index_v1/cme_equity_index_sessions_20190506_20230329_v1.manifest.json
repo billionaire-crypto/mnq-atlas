@@ -1,0 +1,145 @@
+{
+  "artifact": {
+    "bytes": 447577,
+    "columns": [
+      "trade_date",
+      "market",
+      "session_class",
+      "scheduled_rth_status",
+      "scheduled_rth_open_ct",
+      "scheduled_rth_close_ct",
+      "raw_exchange_open_ct",
+      "raw_exchange_close_ct",
+      "holiday_adjacent",
+      "source_event_id",
+      "source_label",
+      "source_as_of",
+      "calendar_version",
+      "schema_version"
+    ],
+    "dtypes_and_encodings": {
+      "all_other_columns": "UTF-8 strings; missing time is an empty string",
+      "holiday_adjacent": "JSON boolean",
+      "trade_date": "int32 YYYYMMDD"
+    },
+    "format": "canonical sorted-key UTF-8 JSON with LF and one terminal newline; rows are arrays interpreted by columns",
+    "path": "cme_equity_index_sessions_20190506_20230329_v1.json",
+    "rows": 1018,
+    "sha256": "b86e112c16112bf11a6a548ca8b3f21d28a08f90442b4dde84098f9d3f6eb069"
+  },
+  "calendar_version": "mnq-cme-equity-index-calendar-v1",
+  "coverage": {
+    "declared_start_inclusive": "2019-05-05",
+    "end_inclusive": "2023-03-29",
+    "first_weekday": "2019-05-06",
+    "weekday_rows": 1018
+  },
+  "environment": {
+    "extraction_environment_differs_from_lab": true,
+    "lab_environment": {
+      "numpy": "2.2.3",
+      "pandas": "3.0.1",
+      "pandas_market_calendars": "deliberately absent"
+    },
+    "numpy": "2.5.1",
+    "pandas": "3.0.5",
+    "pandas_market_calendars": "5.4.0",
+    "platform": "Windows-10-10.0.19045-SP0",
+    "python": "3.13.2",
+    "raw_byte_identity_claimed_only_for_matching_environment": true,
+    "semantic_determinism_required_across_environments": true
+  },
+  "external_derived_csv_not_committed": {
+    "bytes": 310911,
+    "sha256": "e06247ed02688e9af71ef9d4e147331b491f7619ec16bc81c709624418b0cef5"
+  },
+  "extraction": {
+    "machine_bound_store_path_in_extractor": true,
+    "method": "one-time static extraction from pinned Python source",
+    "retrieval_date": "2026-08-01",
+    "runtime_import_forbidden": true,
+    "script": {
+      "bytes": 39158,
+      "path": "build_phase7_calendar_v1.py",
+      "sha256": "937abff993d3e5a5d43282ae12b895ca0e1a99328082e1438687f6972a306db6"
+    }
+  },
+  "field_semantics": {
+    "holiday_adjacent": "true for the immediately preceding and immediately following scheduled trading session around each full holiday or scheduled early close",
+    "source_as_of": "pinned release and upstream commit, not an event publication date",
+    "source_event_id": "deterministic extracted-row identifier; pandas-market-calendars exposes no upstream notice identifier"
+  },
+  "governance": {
+    "discrepancies_path": "docs/DISCREPANCIES.md",
+    "discrepancies_sha256_after_d19": "68325d575bd5a480fa23c11cc22dc5b1b1ecfbd0f7714cca007721e8f63df1c7",
+    "ledger_entry_id": "phase7-cme-equity-index-calendar-v1",
+    "ledger_relative_path": "mnq_lab/ledger/calendar_entries/2026-08-01-phase7-cme-equity-index-calendar-v1.json",
+    "phase7_production_authorized": false
+  },
+  "licensing": {
+    "license": "MIT",
+    "storage": "local-only on a non-pushed branch",
+    "user_asserted_cme_license_authorization": "recorded separately under U8; not needed for permissively licensed Route B source"
+  },
+  "market": "CME_GLOBEX_EQUITY_INDEX_FUTURES",
+  "program_id": "mnq-atlas-001",
+  "schema_version": "cme-equity-index-session-calendar-v1",
+  "source": {
+    "calendar": "CME Globex Equity",
+    "calendar_name": "CME Globex Equities",
+    "commit": "275890784073a3a3a347e4f05f4dc986456e6a75",
+    "name": "pandas-market-calendars",
+    "release": "5.4.0",
+    "upstream": "https://github.com/rsheftel/pandas_market_calendars"
+  },
+  "source_provenance": {
+    "dependency_lock": {
+      "bytes": 1064,
+      "path": "raw_source_provenance/extraction_environment.lock.json",
+      "sha256": "68707c623e0a89df75474eba00de587ac5462dd666c9ce138e327166875d3676"
+    },
+    "evidence_files": [
+      {
+        "bytes": 41,
+        "original_path": ".git/HEAD",
+        "retrieval_date": "2026-08-01",
+        "retrieval_method": "pinned shallow Git tag checkout",
+        "sha256": "609008fbde0b8f26a174dba7e3036fcb83f8fd00bc001f862492a64d164fb9da",
+        "stored_path": "raw_source_provenance/git_HEAD.txt"
+      },
+      {
+        "bytes": 104,
+        "original_path": ".git/packed-refs",
+        "retrieval_date": "2026-08-01",
+        "retrieval_method": "pinned shallow Git tag checkout",
+        "sha256": "ed72055e7668eb79833b31271bb3f15e9008ed5643219835235ed12e45a78483",
+        "stored_path": "raw_source_provenance/git_packed_refs.txt"
+      },
+      {
+        "bytes": 1086,
+        "original_path": "LICENSE",
+        "retrieval_date": "2026-08-01",
+        "retrieval_method": "pinned shallow Git tag checkout",
+        "sha256": "46ae59b046f5d196d91944073f990e3c283deed534cd2d09d507a191a6d36a42",
+        "stored_path": "raw_source_provenance/LICENSE.txt"
+      },
+      {
+        "bytes": 4341,
+        "original_path": "pyproject.toml",
+        "retrieval_date": "2026-08-01",
+        "retrieval_method": "pinned shallow Git tag checkout",
+        "sha256": "6cbf9ffd578bc470306114fb7e81fa8497fadfdfd2394be9aa86d8f36e375e97",
+        "stored_path": "raw_source_provenance/pyproject.toml.txt"
+      }
+    ],
+    "package_file_count": 47,
+    "source_index": {
+      "bytes": 18370,
+      "path": "raw_source_provenance/pandas_market_calendars_v5.4.0.source_index.json",
+      "sha256": "bc6934832e2a9934bf485504ad844ed64948d83292c88a012cef9cef493a92a6"
+    },
+    "tree_sha256": "253ca03bc5ba4956a930d47d167843469c4440a0514961599cc3ee0d376890ee"
+  },
+  "source_retention_limit": "complete pinned pandas_market_calendars Python package source is retained as inert .py.txt provenance; external interpreter dependencies are version-locked but not vendored, so the bundle is not claimed to be hermetic",
+  "timezone": "America/Chicago"
+}

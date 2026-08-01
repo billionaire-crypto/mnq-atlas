@@ -764,3 +764,153 @@ admission-gate mechanisms, their negative tests, and this permanent audit
 record. It does not amend the ratified preregistration, implement a real
 conditioner, or authorize Stage E. Stage E remains blocked until this correction
 receives a focused independent `CLOSED` re-audit.
+
+---
+
+## D19 — Phase 7 versioned CME equity-index calendar acquisition — `OPEN; COMMITTED ARTIFACT AUDIT PENDING`
+
+**Frozen-input basis.** Frozen spec §4.3 requires full exchange holidays and
+scheduled early closes to be excluded from the seasonal reference using a
+versioned CME calendar table. D11b deferred that input only until the seasonal
+profile in Phase 7. Phase 7 is now that phase. Observed shortening is never a
+calendar oracle: it may corroborate, falsify, or create a §16.6 data-quality
+discrepancy, but it may not generate or amend a holiday classification.
+
+**Authorization and licence record.** On 2026-08-01 the user stated that they
+hold a CME data licence and authorized local-only use of CME data obtained
+through a licensed channel. The licence document was not inspected by the
+independent auditor, and no legal determination is claimed. Automated retrieval
+from cmegroup.com remained unauthorized and did not occur. The user subsequently
+authorized permissively licensed third-party calendars, with accuracy of the
+dates rather than source identity as the binding scientific criterion. No
+calendar branch may be pushed.
+
+**Failed acquisition routes, preserved.** The licensed Databento material
+available locally contained OHLCV-1m data but no session-calendar or status
+extract for this period. The initial two-library Route B compared
+`pandas-market-calendars` 5.4.0 with `exchange-calendars` 4.13.2 and stopped as
+required when their extracts disagreed. The latter self-describes CMES as a
+generic conservative CME calendar and is ineligible for the product-specific
+CME equity-index requirement. Its nine falsified dates remain permanent
+evidence rather than being discarded:
+
+| trade date | pandas-market-calendars | exchange-calendars |
+|---|---:|---:|
+| 2019-07-03 | 12:15 CT | regular |
+| 2019-11-29 | 12:15 CT | 12:00 CT |
+| 2019-12-24 | 12:15 CT | 12:00 CT |
+| 2020-11-27 | 12:15 CT | 12:00 CT |
+| 2020-12-24 | 12:15 CT | 12:00 CT |
+| 2021-04-02 | 08:15 CT | full holiday |
+| 2021-11-26 | 12:15 CT | 12:00 CT |
+| 2022-06-20 | 12:00 CT | regular |
+| 2022-11-25 | 12:15 CT | 12:00 CT |
+
+The exploration store independently falsifies all nine generic-calendar claims:
+the observed final bar ends at the product-specific time on every date, including
+183 five-minute bars through 08:15 CT on 2021-04-02. This evidence rejected an
+ineligible candidate; it did not author the accepted classifications.
+
+**U10 source and acceptance ruling.** The user ratified
+`pandas-market-calendars` calendar `CME Globex Equity`, release 5.4.0, upstream
+commit `275890784073a3a3a347e4f05f4dc986456e6a75`, as the single source candidate.
+Its source defines a 17:00 CT prior-calendar-day raw open, a 16:00 CT regular raw
+close, and product-specific early closes. The study RTH projection remains the
+separate frozen interval `[08:30, min(raw exchange close, 15:00))` CT. A total
+mapping has no default branch: full closures have no RTH, an early close at or
+before 08:30 has no scheduled RTH, one strictly between 08:30 and 15:00 shortens
+RTH, one at or after 15:00 but before 16:00 leaves RTH full, and an alleged early
+close at or after 16:00 fails closed. `unscheduled_closure` may be populated only
+by an external authority and is never inferred from bars.
+
+**A4 ordering violation.** The first candidate extract existed before known-date
+expectations were preregistered. A4 is therefore permanently
+`ORDERING-VIOLATED`; no later document may backfill those expectations or claim
+they were preregistered. Acceptance substitutes an exhaustive observational
+battery that the external library did not derive from this Databento extract.
+That battery is corroboration, not proof, and its comparisons are strongly
+correlated within approximately eight to ten holiday-rule families.
+
+**Measured acceptance support.** Across the 1,018 Monday-through-Friday dates
+from the first in-range weekday, 2019-05-06, through 2023-03-29, the candidate
+contains 976 regular sessions, 33 scheduled early closes, and nine full
+closures. The exploration spine contains 1,009 sessions. The complete disjoint
+reconciliation is:
+
+- 974 candidate-regular sessions with observed final bar end exactly 16:00 CT;
+- 32 timed early closes matching to the minute: 25 at 12:00 and seven at 12:15;
+- one no-scheduled-RTH structural match, 2021-04-02 at 08:15;
+- nine candidate full closures matching the nine absent weekdays; and
+- two explicitly retained §16.6 data-quality discrepancies.
+
+The two discrepancies remain calendar class `regular` and carry
+`unresolved_truncated_session`: 2020-02-28 ended at 10:00 CT and 2020-06-30
+ended at 09:15 CT. They are not holidays and are not silently reconciled. Under
+the frozen seasonal rule they remain regular reference candidates while their
+truncation is counted and disclosed.
+
+**Audit corrections without asymmetry.** The permanent history records errors
+by both roles. The initial acceptance design incorrectly required a full closure
+to correspond to a session anomaly flag even though a full closure has no
+session row. The auditor also conflated the study's 15:00 RTH boundary with the
+source's 16:00 Globex close, initially counted 41 rather than 42 anomalous
+comparisons, and called correlated checks independent. Codex's initial extractor
+retained only a five-file source subset while describing it too strongly for
+regeneration and used an extraction environment different from the laboratory
+environment. Each error is retained rather than overwritten by its correction.
+
+**F-1 source-retention ruling.** Accuracy takes priority over implementation
+effort. The committed provenance retains all 47 Python source files in the
+pinned `pandas_market_calendars` package, plus licence, project metadata, tag and
+commit evidence, and an exact extraction dependency lock. Every Python source
+file is stored with inert `.py.txt` suffix; the provenance tree has no
+`__init__.py`, importable module, or pytest-collectable test. A canonical sorted
+per-file index records original path, stored path, byte count, and SHA-256. The
+tree hash is SHA-256 over, in original-path order, UTF-8
+`original_path + NUL + decimal_bytes + NUL + lowercase_sha256 + LF`. External
+interpreter dependencies are version-locked but not vendored, so the retained
+tree is not described as a hermetic regeneration environment.
+
+**F-2 determinism ruling.** The one-time extraction used pandas 3.0.5 and numpy
+2.5.1, while the MNQ Atlas laboratory records pandas 3.0.1 and numpy 2.2.3.
+`pandas_market_calendars` is deliberately absent from the runtime. Raw-byte
+re-extraction is claimed only for the recorded matching extraction environment.
+Across environments the requirement is semantic identity of the canonical
+table. The repository acceptance path validates the committed static table
+against the exploration spine without importing either calendar library.
+
+**Canonical representation and placement.** The versioned reference input is
+canonical sorted-key UTF-8 JSON under
+`mnq_lab/spine/calendar_inputs/cme_equity_index_v1/`, not a generated market
+store. The externally derived CSV is not committed. The global `data/` and CSV
+ignore rules remain unchanged. Calendar material remains market-aware and may
+not enter `core/`. Retained source is inert provenance only and cannot be a
+runtime dependency.
+
+**Ledger and branch governance.** U11 authorizes only local branch
+`phase-7-calendar-input` from
+`4100abadad1d8212b8c98ad7382e1019a1afbe96`. The Phase 3 threshold ledger remains
+unchanged and keeps its exact one-entry invariant. Calendar authorization uses a
+separate immutable `mnq_lab/ledger/calendar_entries/` namespace. Commit order is
+ledger/provenance authorization first, artifact second, acceptance tests third.
+The post-D19 hash of this file is recorded in the calendar ledger entry rather
+than circularly inside this file.
+
+**A5 dependent-code boundary.** Calendar-import isolation cannot be tested
+against nonexistent EWMA and MAD modules without a vacuous pass. U11 therefore
+registers `a5_calendar_import_isolation` as an explicit pending xfail. It becomes
+a real passing test, with a matched negative import mutation, before any EWMA,
+MAD, seasonal-profile, `vol_rel`, threshold, or assignment computation is
+committed. A5 does not block acceptance of the calendar reference input itself.
+
+**Known limits.** Single-source acceptance is corroboration, not proof that
+every exchange classification is correct. Holiday-adjacent flags lack an
+independent time signature, and an alleged full closure can coincide with vendor
+absence. A future Databento GLBX.MDP3 status stream is preferred independent
+corroboration but is not a blocker. No seasonal profile, conditioner assignment,
+state-validity result, market effect, confirmation result, or trading result has
+been computed.
+
+**Status.** `OPEN; COMMITTED ARTIFACT AUDIT PENDING`. This entry authorizes only
+the bounded calendar reference-input commits. Phase 7 production, Phase 7b,
+Phase 8, and every later phase remain unauthorized.

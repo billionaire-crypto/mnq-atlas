@@ -1,0 +1,86 @@
+{
+  "acceptance_record": {
+    "bytes": 24039,
+    "path": "mnq_lab/spine/calendar_inputs/cme_equity_index_v1/cme_equity_index_sessions_20190506_20230329_v1.acceptance.json",
+    "sha256": "f63e58854e4c5427271140be4452ebb7169a39f665927641f0b63bea3d0df64d"
+  },
+  "append_only_amendment_policy": "A correction creates a new calendar version and ledger entry; existing bytes are never edited.",
+  "audit": {
+    "a4": "ORDERING-VIOLATED; no preregistered known-date claim",
+    "candidate_bundle": "sound after F-1 and F-2 amendments",
+    "committed_artifact_audit": "pending",
+    "independent_auditor": "Claude Code",
+    "u10": "ratified as amended with A-5"
+  },
+  "base_commit": "4100abadad1d8212b8c98ad7382e1019a1afbe96",
+  "branch": "phase-7-calendar-input",
+  "calendar_version": "mnq-cme-equity-index-calendar-v1",
+  "canonical_table": {
+    "bytes": 447577,
+    "path": "mnq_lab/spine/calendar_inputs/cme_equity_index_v1/cme_equity_index_sessions_20190506_20230329_v1.json",
+    "sha256": "b86e112c16112bf11a6a548ca8b3f21d28a08f90442b4dde84098f9d3f6eb069"
+  },
+  "commit_order": [
+    "D19 and calendar ledger/provenance authorization",
+    "calendar artifact, manifest, acceptance record, inert source provenance, extractor",
+    "calendar acceptance tests and pending A5 xfail"
+  ],
+  "discrepancies": {
+    "bytes": 49015,
+    "path": "docs/DISCREPANCIES.md",
+    "sha256": "68325d575bd5a480fa23c11cc22dc5b1b1ecfbd0f7714cca007721e8f63df1c7"
+  },
+  "entry_date": "2026-08-01",
+  "entry_id": "phase7-cme-equity-index-calendar-v1",
+  "entry_type": "calendar_input_provenance_authorization",
+  "external_derived_csv_not_committed": {
+    "bytes": 310911,
+    "sha256": "e06247ed02688e9af71ef9d4e147331b491f7619ec16bc81c709624418b0cef5"
+  },
+  "extractor": {
+    "bytes": 39158,
+    "path": "tools/build_phase7_calendar_v1.py",
+    "sha256": "937abff993d3e5a5d43282ae12b895ca0e1a99328082e1438687f6972a306db6"
+  },
+  "ledger_format": "immutable_calendar_entry_v1",
+  "licensing": {
+    "cme_license": "user-asserted; licence document not inspected by auditor",
+    "pandas_market_calendars": "MIT",
+    "storage": "local-only non-pushed branch"
+  },
+  "local_only_no_push": true,
+  "manifest": {
+    "bytes": 5844,
+    "path": "mnq_lab/spine/calendar_inputs/cme_equity_index_v1/cme_equity_index_sessions_20190506_20230329_v1.manifest.json",
+    "sha256": "bdd923a534152ef88bd9db874e60e08c757b85dae729b397ae78351a3e3d7a1d"
+  },
+  "no_affected_result_has_run": true,
+  "no_affected_result_has_run_statement": "No seasonal profile, conditioner assignment, state-validity panel, Phase 7 result, or later dependent result has run.",
+  "phase": 7,
+  "phase3_ledger_unchanged": true,
+  "phase7_production_authorized": false,
+  "program_id": "mnq-atlas-001",
+  "schema_version": "cme-equity-index-session-calendar-v1",
+  "scope": "calendar_reference_input_only",
+  "source": {
+    "calendar": "CME Globex Equity",
+    "commit": "275890784073a3a3a347e4f05f4dc986456e6a75",
+    "name": "pandas-market-calendars",
+    "release": "5.4.0",
+    "timezone": "America/Chicago"
+  },
+  "source_provenance": {
+    "complete_python_file_count": 47,
+    "dependency_lock_sha256": "68707c623e0a89df75474eba00de587ac5462dd666c9ce138e327166875d3676",
+    "inert_suffix": ".py.txt",
+    "source_index_sha256": "bc6934832e2a9934bf485504ad844ed64948d83292c88a012cef9cef493a92a6",
+    "tree_sha256": "253ca03bc5ba4956a930d47d167843469c4440a0514961599cc3ee0d376890ee"
+  },
+  "u11_authorization": {
+    "a5": "deferred mandatory dependent-code gate with explicit pending xfail",
+    "canonical_format": "sorted-key UTF-8 JSON",
+    "f1": "complete inert source provenance plus dependency lock",
+    "f2": "semantic cross-environment determinism; byte identity only in matching extraction environment",
+    "permitted_paths_exhaustive": true
+  }
+}

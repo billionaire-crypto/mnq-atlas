@@ -40,6 +40,12 @@ PHASE5_PREREGISTRATION_V2_AMENDMENT_1_PATH = (
 PHASE5_PREREGISTRATION_V2_AMENDMENT_1_SHA256 = (
     "8c2af57b3da0939c5ba057d788500624c2a5dacc4577e4bafb3f6ae2a48df886"
 )
+PHASE6_PREREGISTRATION_PATH = (
+    SPEC_PATH.parent / "docs" / "PHASE6_PREREGISTRATION.md"
+)
+PHASE6_PREREGISTRATION_SHA256 = (
+    "e800e446ecd23fdb416c499603d086c50b1754c99106279284e3277a33b4ccb9"
+)
 
 
 @pytest.fixture(scope="module")
@@ -75,6 +81,14 @@ def test_phase5_preregistration_v2_amendment_1_bytes_are_pinned():
             PHASE5_PREREGISTRATION_V2_AMENDMENT_1_PATH.read_bytes()
         ).hexdigest()
         == PHASE5_PREREGISTRATION_V2_AMENDMENT_1_SHA256
+    )
+
+
+def test_phase6_preregistration_bytes_are_pinned():
+    assert PHASE6_PREREGISTRATION_PATH.is_file()
+    assert (
+        hashlib.sha256(PHASE6_PREREGISTRATION_PATH.read_bytes()).hexdigest()
+        == PHASE6_PREREGISTRATION_SHA256
     )
 
 

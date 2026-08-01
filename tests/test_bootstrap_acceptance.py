@@ -1,8 +1,9 @@
 """One-shot preregistered Phase 5 stochastic acceptance fixtures.
 
 These tests must first execute only under the exact commands and seed schedules
-recorded in ``docs/PHASE5_PREREGISTRATION.md``. They contain no module-scope RNG
-construction, so collection alone does not consume either registered stream.
+recorded in ``docs/PHASE5_PREREGISTRATION.md`` and
+``docs/PHASE5_PREREGISTRATION_V2.md``. They contain no module-scope RNG
+construction, so collection alone does not consume any registered stream.
 """
 
 from __future__ import annotations
@@ -24,6 +25,11 @@ from mnq_lab.core.weights import (
 )
 
 COVERAGE_ROOT_ENTROPY = 34269753221940478235660674215598997415
+V2_COVERAGE_ROOT_ENTROPY = 329373099305365003560734362733578893222
+V2_CALIBRATION_COVERED = 2771
+V2_CALIBRATION_REPLICATIONS = 3000
+V2_LOWER_COVERAGE_COUNT = 268
+V2_UPPER_COVERAGE_COUNT = 286
 AR1_ROOT_ENTROPY = 157484425038737148717780864763684278439
 BOOTSTRAP_DRAWS = 999
 CONFIDENCE_LEVEL = 0.95
@@ -91,6 +97,60 @@ def test_preregistered_synthetic_median_coverage_once():
         "outer_replications": outer_count,
     }
     print("PHASE5_COVERAGE_RESULT=" + json.dumps(evidence, sort_keys=True))
+    assert lower_coverage_count <= coverage_count <= upper_coverage_count
+
+
+def test_preregistered_synthetic_median_coverage_v2_once():
+    outer_count = 300
+    session_count = 80
+    rows_per_session = 4
+    lower_coverage_count = V2_LOWER_COVERAGE_COUNT
+    upper_coverage_count = V2_UPPER_COVERAGE_COUNT
+    mean_block_groups = _loaded_primary_mean_block_groups()
+    group_ids = np.repeat(
+        np.arange(session_count, dtype=np.int64),
+        rows_per_session,
+    )
+    baseline_weights, _ = session_equal_weights(group_ids)
+    eligibility = np.ones(group_ids.size, dtype=bool)
+    outer_sequences = np.random.SeedSequence(
+        V2_COVERAGE_ROOT_ENTROPY
+    ).spawn(outer_count)
+    coverage_count = 0
+
+    for outer_sequence in outer_sequences:
+        data_sequence, bootstrap_sequence = outer_sequence.spawn(2)
+        data_rng = np.random.Generator(np.random.PCG64(data_sequence))
+        bootstrap_rng = np.random.Generator(
+            np.random.PCG64(bootstrap_sequence)
+        )
+        session_values = data_rng.standard_normal(session_count)
+        values = np.repeat(session_values, rows_per_session)
+        replicates = bootstrap_weighted_quantile_replicates(
+            group_ids,
+            baseline_weights,
+            (values,),
+            (eligibility,),
+            (0.5,),
+            BOOTSTRAP_DRAWS,
+            mean_block_groups,
+            bootstrap_rng,
+        )[0]
+        lower, upper = percentile_interval(
+            replicates,
+            CONFIDENCE_LEVEL,
+        )
+        coverage_count += int(lower <= 0.0 <= upper)
+
+    evidence = {
+        "acceptance_bounds_inclusive": [
+            lower_coverage_count,
+            upper_coverage_count,
+        ],
+        "coverage_count": coverage_count,
+        "outer_replications": outer_count,
+    }
+    print("PHASE5_COVERAGE_V2_RESULT=" + json.dumps(evidence, sort_keys=True))
     assert lower_coverage_count <= coverage_count <= upper_coverage_count
 
 

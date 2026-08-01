@@ -168,3 +168,63 @@ No v2 acceptance bound was derived, previewed, estimated, or added during this
 recording step. The exact-rational derivation and static v2 fixture remain the
 next separately audited stage. The v2 coverage and AR(1) one-shot fixtures
 remain **BLOCKED** and were not executed.
+
+## V2 exact gate derivation and static fixture — `NOT EXECUTED`
+
+The registered calibration result is `K = 2771`, and the exact calibration
+fraction is `K/3000 = 2771/3000`. For this derivation only,
+
+```text
+C ~ Binomial(300, 2771/3000)
+```
+
+was evaluated using integer powers, integer binomial coefficients, and exact
+`Fraction` arithmetic. No floating-point conversion, rounding, tolerance,
+continuity correction, interpolation, discretionary widening, or stochastic
+operation was used.
+
+The frozen smallest-quantile definitions give:
+
+```text
+L = smallest c with P[C <= c] >= 1/40  = 268
+U = smallest c with P[C <= c] >= 39/40 = 286
+```
+
+Therefore the mechanically derived inclusive v2 acceptance region is exactly:
+
+```text
+[L, U] = [268, 286]
+accept if and only if 268 <= coverage_count <= 286
+```
+
+With `q = 1 - 2771/3000 = 229/3000`, the exact lower and upper rejection-tail
+probabilities are recorded as these finite rational sums over the common
+denominator `3000^300`:
+
+```text
+P[C < 268] = P[C <= 267]
+           = sum(c=0..267) binom(300,c) * 2771^c * 229^(300-c) / 3000^300
+
+P[C > 286]
+           = sum(c=287..300) binom(300,c) * 2771^c * 229^(300-c) / 3000^300
+```
+
+The exact boundary certificates are:
+
+```text
+P[C <= 267] < 1/40  <= P[C <= 268]
+P[C <= 285] < 39/40 <= P[C <= 286]
+```
+
+The derivation was independently materialized by both direct binomial-PMF
+summation and the exact adjacent-PMF recurrence; all 301 cumulative fractions
+matched exactly, their final value was exactly 1, and the adjacent mutations
+267/269 and 285/287 failed the corresponding smallest-quantile definition.
+
+The static fixture
+`test_preregistered_synthetic_median_coverage_v2_once` uses the preregistered
+v2 coverage entropy `329373099305365003560734362733578893222`, 300 outer
+replications, and the literal inclusive bounds `[268, 286]`. It has **NOT BEEN
+EXECUTED OR COLLECTED**. Its registered entropy remains **UNCONSUMED**. The
+fixture and derivation remain blocked pending an independent static audit. The
+AR(1) one-shot also remains blocked and unexecuted.

@@ -228,3 +228,74 @@ replications, and the literal inclusive bounds `[268, 286]`. It has **NOT BEEN
 EXECUTED OR COLLECTED**. Its registered entropy remains **UNCONSUMED**. The
 fixture and derivation remain blocked pending an independent static audit. The
 AR(1) one-shot also remains blocked and unexecuted.
+
+## V2 coverage gate — `PASSED`
+
+**Execution date:** 2026-07-31
+
+**Command:**
+
+```text
+python -m pytest tests/test_bootstrap_acceptance.py::test_preregistered_synthetic_median_coverage_v2_once -q -s
+```
+
+This was the first and only execution of the v2 coverage fixture. The initial
+audit at `588f3eb` returned `VERDICT: OPEN` only for guard hygiene; the
+guard-correction re-audit then returned `VERDICT: CLOSED` at commit `2c709aa`.
+
+**Complete pytest output:**
+
+```text
+PHASE5_COVERAGE_V2_RESULT={"acceptance_bounds_inclusive": [268, 286], "coverage_count": 283, "outer_replications": 300}
+.
+1 passed in 590.26s (0:09:50)
+```
+
+**Process result:**
+
+```text
+PHASE5_V2_EXIT_CODE=0
+```
+
+**Wrapper wall-clock runtime:** 591.3985 seconds (0:09:51.3985)
+
+**Environment fingerprint:**
+
+```text
+OS: Windows-10-10.0.19045-SP0
+Python: 3.13.2 (tags/v3.13.2:4f8bb39, Feb  4 2025, 15:23:48) [MSC v.1942 64 bit (AMD64)]
+NumPy: 2.2.3
+pytest: 9.1.1
+```
+
+**Commits:**
+
+```text
+V1 preregistration:            49091f49dc90c411609543d43abe32effc05c1da
+Bootstrap production:          d6eb390836079fe7498ce540f30bd0fbef440916
+Mutation-guard tip:            35b89b0eea9a7707df54def9ee23cf34d659eca4
+Original acceptance fixtures:  857ed632539a72e0f02f190578515785edea3e2f
+V2 preregistration:            b89b2ce717aecdfebf944f8e2c918426836ebfd8
+V2 preregistration pin:        594d53cb2da2499c3fb14f798a2572de3ce0a826
+Calibration runner:            809f41dfa0e46f68350e7dc339302e85a6566319
+Launch-failure record:         af5f1c3736f6e325295edf7e9c4929d294fffe06
+Amendment 1 and preflight:     988b06141c29fa84ab5f0c18e43af8ec42fbc030
+Calibration evidence:          cb023c3f41ca96b84d3ec82a71904e1c0f575229
+Derived gate and v2 fixture:   588f3eb5177560b3209a1fd6876bc3386cfa507e
+Derivation guard correction:   2c709aa8b3cd19d0245e76d2c8da2972dcab3703
+V2 acceptance fixture SHA-256:
+bb239fc97f7823544a3c39748e808a42f0e529c28f9074736f7ce8f7a41da71c
+```
+
+The observed `coverage_count = 283` is inside the preregistered mechanically
+derived inclusive region `[268, 286]`; the v2 coverage gate therefore
+**PASSED**. This verifies consistency with the measured finite-sample coverage
+behavior. It does **not** establish nominal 95% coverage, and no such claim is
+made.
+
+The v2 coverage entropy `329373099305365003560734362733578893222` is now
+**SPENT** by this completed execution and must never be used again. The fixture
+must never be rerun. The AR(1) fixture was **NOT EXECUTED OR COLLECTED**; its
+registered entropy `157484425038737148717780864763684278439` remains
+**UNCONSUMED**. The sequence condition requiring a v2 coverage pass before
+AR(1) is now satisfied, but AR(1) is held for the separate post-result review.

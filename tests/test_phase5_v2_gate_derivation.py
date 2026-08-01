@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import copy
+import re
 from fractions import Fraction
 from math import comb
 from pathlib import Path
@@ -23,6 +24,13 @@ LOWER_QUANTILE = Fraction(1, 40)
 UPPER_QUANTILE = Fraction(39, 40)
 DERIVATION_RECORD_HEADING = (
     "## V2 exact gate derivation and static fixture — `NOT EXECUTED`"
+)
+TAIL_FORMULA_PATTERN = re.compile(
+    r"sum\(c=(?P<start>\d+)\.\.(?P<end>\d+)\) "
+    r"binom\((?P<trials>\d+),c\) \* "
+    r"(?P<success>\d+)\^c \* "
+    r"(?P<failure>\d+)\^\((?P<failure_trials>\d+)-c\) / "
+    r"(?P<denominator>\d+)\^(?P<denominator_trials>\d+)"
 )
 
 
@@ -57,6 +65,44 @@ def _recurrence_binomial_cdfs(
         cumulative += probability
         cdfs.append(cumulative)
     return tuple(cdfs)
+
+
+def _exact_binomial_range_probability(
+    trials: int,
+    success_numerator: int,
+    denominator: int,
+    first_count: int,
+    last_count: int,
+) -> Fraction:
+    if not 0 <= first_count <= last_count <= trials:
+        raise ValueError("binomial range must be within 0..trials")
+    if not 0 < success_numerator < denominator:
+        raise ValueError("success numerator must be strictly inside denominator")
+    failure_numerator = denominator - success_numerator
+    numerator = sum(
+        comb(trials, count)
+        * success_numerator**count
+        * failure_numerator ** (trials - count)
+        for count in range(first_count, last_count + 1)
+    )
+    return Fraction(numerator, denominator**trials)
+
+
+def _independent_partition_matches_cdfs(
+    cdfs: tuple[Fraction, ...],
+    lower_bound: int,
+    upper_bound: int,
+    lower_tail: Fraction,
+    central_probability: Fraction,
+    upper_tail: Fraction,
+) -> bool:
+    return (
+        lower_tail == cdfs[lower_bound - 1]
+        and central_probability
+        == cdfs[upper_bound] - cdfs[lower_bound - 1]
+        and upper_tail == 1 - cdfs[upper_bound]
+        and lower_tail + central_probability + upper_tail == 1
+    )
 
 
 def _derive_bounds(cdfs: tuple[Fraction, ...]) -> tuple[int, int]:
@@ -154,17 +200,76 @@ def _fixture_constants_match(assignments: dict[str, int]) -> bool:
     return all(assignments.get(name) == value for name, value in expected.items())
 
 
-def _record_contains_contract(record: str) -> bool:
+def _parsed_tail_formulas(record: str) -> tuple[dict[str, int], ...]:
+    return tuple(
+        {name: int(value) for name, value in match.groupdict().items()}
+        for match in TAIL_FORMULA_PATTERN.finditer(record)
+    )
+
+
+def _record_contains_exact_contract(record: str) -> bool:
     required = (
         "K = 2771",
         "K/3000 = 2771/3000",
         "[268, 286]",
+        "q = 1 - 2771/3000 = 229/3000",
         "P[C < 268]",
         "P[C > 286]",
         "sum(c=0..267)",
         "sum(c=287..300)",
+        "binom(300,c)",
+        "2771^c",
+        "229^(300-c)",
+        "3000^300",
     )
-    return all(token in record for token in required)
+    if not all(token in record for token in required):
+        return False
+
+    formulas = _parsed_tail_formulas(record)
+    if len(formulas) != 2:
+        return False
+
+    expected_ranges = (
+        (0, EXPECTED_LOWER_BOUND - 1),
+        (EXPECTED_UPPER_BOUND + 1, V2_OUTER_REPLICATIONS),
+    )
+    expected_values = tuple(
+        _exact_binomial_range_probability(
+            V2_OUTER_REPLICATIONS,
+            CALIBRATION_COVERED,
+            CALIBRATION_REPLICATIONS,
+            first_count,
+            last_count,
+        )
+        for first_count, last_count in expected_ranges
+    )
+    for formula, expected_range, expected_value in zip(
+        formulas,
+        expected_ranges,
+        expected_values,
+        strict=True,
+    ):
+        if (
+            (formula["start"], formula["end"]) != expected_range
+            or formula["trials"] != V2_OUTER_REPLICATIONS
+            or formula["success"] != CALIBRATION_COVERED
+            or formula["failure"]
+            != CALIBRATION_REPLICATIONS - CALIBRATION_COVERED
+            or formula["failure_trials"] != V2_OUTER_REPLICATIONS
+            or formula["denominator"] != CALIBRATION_REPLICATIONS
+            or formula["denominator_trials"] != V2_OUTER_REPLICATIONS
+        ):
+            return False
+        evaluated = _exact_binomial_range_probability(
+            formula["trials"],
+            formula["success"],
+            formula["denominator"],
+            formula["start"],
+            formula["end"],
+        )
+        if evaluated != expected_value:
+            return False
+    return True
 
 
 def test_v2_exact_binomial_bounds_are_mechanically_derived():
@@ -192,12 +297,50 @@ def test_v2_exact_binomial_bounds_are_mechanically_derived():
         UPPER_QUANTILE,
     )
 
-    lower_tail = direct_cdfs[EXPECTED_LOWER_BOUND - 1]
-    upper_tail = 1 - direct_cdfs[EXPECTED_UPPER_BOUND]
-    central_probability = (
-        direct_cdfs[EXPECTED_UPPER_BOUND] - lower_tail
+    lower_tail = _exact_binomial_range_probability(
+        V2_OUTER_REPLICATIONS,
+        CALIBRATION_COVERED,
+        CALIBRATION_REPLICATIONS,
+        0,
+        EXPECTED_LOWER_BOUND - 1,
     )
-    assert lower_tail + central_probability + upper_tail == 1
+    central_probability = _exact_binomial_range_probability(
+        V2_OUTER_REPLICATIONS,
+        CALIBRATION_COVERED,
+        CALIBRATION_REPLICATIONS,
+        EXPECTED_LOWER_BOUND,
+        EXPECTED_UPPER_BOUND,
+    )
+    upper_tail = _exact_binomial_range_probability(
+        V2_OUTER_REPLICATIONS,
+        CALIBRATION_COVERED,
+        CALIBRATION_REPLICATIONS,
+        EXPECTED_UPPER_BOUND + 1,
+        V2_OUTER_REPLICATIONS,
+    )
+    assert _independent_partition_matches_cdfs(
+        direct_cdfs,
+        EXPECTED_LOWER_BOUND,
+        EXPECTED_UPPER_BOUND,
+        lower_tail,
+        central_probability,
+        upper_tail,
+    )
+
+    # Required negative case: incrementing one lower-tail PMF numerator by one
+    # common-denominator unit breaks both the CDF equality and the partition.
+    mutated_lower_tail = lower_tail + Fraction(
+        1,
+        CALIBRATION_REPLICATIONS**V2_OUTER_REPLICATIONS,
+    )
+    assert not _independent_partition_matches_cdfs(
+        direct_cdfs,
+        EXPECTED_LOWER_BOUND,
+        EXPECTED_UPPER_BOUND,
+        mutated_lower_tail,
+        central_probability,
+        upper_tail,
+    )
 
     # Required negative cases: all adjacent bound mutations violate the
     # frozen smallest-quantile definition at at least one boundary.
@@ -277,7 +420,7 @@ def test_v2_derivation_record_contains_the_exact_contract():
     record = ACCEPTANCE_RECORD_PATH.read_text(encoding="utf-8")
     assert record.count(DERIVATION_RECORD_HEADING) == 1
     derivation_record = record.split(DERIVATION_RECORD_HEADING, 1)[1]
-    assert _record_contains_contract(derivation_record)
+    assert _record_contains_exact_contract(derivation_record)
 
     for old, new in (
         ("K = 2771", "K = 2770"),
@@ -285,7 +428,15 @@ def test_v2_derivation_record_contains_the_exact_contract():
         ("[268, 286]", "[267, 286]"),
         ("sum(c=0..267)", "sum(c=0..266)"),
         ("sum(c=287..300)", "sum(c=288..300)"),
+        ("229^(300-c)", "279^(300-c)"),
+        ("2771^c", "2770^c"),
+        ("3000^300", "3000^301"),
+        ("binom(300,c)", "binom(301,c)"),
+        (
+            "q = 1 - 2771/3000 = 229/3000",
+            "q = 1 - 2771/3000 = 228/3000",
+        ),
     ):
         mutated = derivation_record.replace(old, new)
         assert mutated != derivation_record
-        assert not _record_contains_contract(mutated)
+        assert not _record_contains_exact_contract(mutated)

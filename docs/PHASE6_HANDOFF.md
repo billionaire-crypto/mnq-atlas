@@ -490,11 +490,15 @@ WITNESS
    independently of the implementation under test.
 8. The witness must produce the exact expected response. “Different from
    baseline” alone is not enough, and random in-window mutation is not a
-   substitute for a witness. For floating output, the independently specified
-   expected changed response must differ from the independently specified
-   baseline response, at least at one required affected output element, by
-   strictly more than `atol + rtol * abs(expected_changed)`. A floating witness
-   that does not clear that separation is vacuous and fails before admission.
+   substitute for a witness. For floating output the witness must independently
+   specify both the baseline response and expected changed response, and the
+   harness must assert the callable against each. For at least one required
+   affected output element, the two independently specified responses must be
+   separated by strictly more than the sum of their comparison bands:
+   `abs(expected_changed - expected_baseline) > (atol + rtol *
+   abs(expected_changed)) + (atol + rtol * abs(expected_baseline))`. A floating
+   witness that does not clear that separation is vacuous and fails before
+   admission, so no constant or insensitive output can satisfy both comparisons.
 9. Every test includes a negative mutation proving the locality comparison or
    witness assertion can fail.
 

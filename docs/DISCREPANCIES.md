@@ -648,6 +648,12 @@ Phase 6 scope, but found three contract defects: an unspecified alternate
 causal-admission mechanism, a floating witness that could be insensitive within
 its own tolerance, and unrecorded design-latitude resolutions. This `OPEN`
 history is permanent and is not replaced by a later correction or re-audit.
+The focused correction re-audit at
+`a51c35c0a4bf59ffa4f5bbdc532145fc797d874a` returned `OPEN` / `AMEND`:
+the single admission path and recorded design decisions closed F1 and F3, but
+the floating-witness rule cleared only one tolerance band and did not require a
+baseline assertion, allowing a constant output to satisfy both comparisons.
+That second `OPEN` result is also permanent.
 
 **User ruling (2026-07-31):** follow the prior phases' single-path, fail-closed
 admission discipline. `register_causal_conditioner` must execute the complete
@@ -679,8 +685,13 @@ Phase 6 preregistration must preserve all of the following:
    first requires exact shape and dtype, then compares elementwise by
    `abs(actual - expected) <= atol + rtol * abs(expected)` using function-specific
    finite nonnegative tolerances fixed in immutable metadata. A floating witness
-   must have an independently specified expected change exceeding that bound at
-   a required affected element; otherwise it is rejected as vacuous.
+   independently specifies baseline and expected changed responses, and the
+   harness asserts the callable against both. At a required affected element the
+   expected responses must satisfy `abs(expected_changed - expected_baseline) >
+   (atol + rtol * abs(expected_changed)) + (atol + rtol *
+   abs(expected_baseline))`, making their comparison bands disjoint. Otherwise
+   the witness is vacuous and fails before admission, so no constant or
+   insensitive output can satisfy both comparisons.
 6. Identifiers are unique across causal and descriptive registries. Every
    duplicate identifier fails; overwrite, unregister, downgrade, and
    reclassification do not exist. The same callable object cannot enter through

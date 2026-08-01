@@ -5,18 +5,36 @@ Only synthetic callables appear here.  Real conditioners remain Phase 7.
 
 from __future__ import annotations
 
+import ast
 from dataclasses import FrozenInstanceError
 import inspect
 import math
+from pathlib import Path
+import re
 
 import pytest
+import numpy as np
 
 from mnq_lab import SpineError
+import mnq_lab.conditioners.registry as registry_module
 from mnq_lab.conditioners.registry import (
+    CAUSAL_LABEL,
     DESCRIPTIVE_LABEL,
     ConditionerClass,
+    ConditionerDescriptor,
     ConditionerRegistry,
+    NegativeControl,
+    NegativeControlFailure,
+    WitnessCheck,
+    register_causal_conditioner,
     register_descriptive_conditioner,
+)
+from mnq_lab.core.dependency import (
+    DependencyCase,
+    DeterministicWitness,
+    LocalityReport,
+    OutputComparison,
+    OutputKind,
 )
 
 
@@ -242,3 +260,630 @@ def test_registry_rejects_subclassing_and_duck_typed_substitutes():
             _first,
             metadata={},
         )
+
+
+def _readonly(values, dtype):
+    array = np.asarray(values, dtype=dtype)
+    array.setflags(write=False)
+    return array
+
+
+def _synthetic_sum(call):
+    return np.asarray(
+        call.values["x"][0] + call.values["x"][1] + call.values["x"][4],
+        dtype=np.int64,
+    )
+
+
+def _case(
+    invoke=_synthetic_sum,
+    *,
+    name="synthetic_sum",
+    coordinates=None,
+):
+    return DependencyCase(
+        name=name,
+        coordinates_ns=_readonly(
+            [10, 20, 30, 40, 50, 60]
+            if coordinates is None
+            else coordinates,
+            np.int64,
+        ),
+        allowed_dependency_mask=_readonly(
+            [True, True, False, False, True, False], np.bool_
+        ),
+        inputs={"x": _readonly([2, 3, 11, 13, 5, 17], np.int64)},
+        invoke=invoke,
+        comparison=OutputComparison(OutputKind.INTEGER),
+    )
+
+
+def _witness(*, expected_changed=15, name="sum_changes"):
+    return DeterministicWitness(
+        name=name,
+        changed_inputs={"x": _readonly([7, 3, 11, 13, 5, 17], np.int64)},
+        expected_baseline=_readonly(10, np.int64),
+        expected_changed=_readonly(expected_changed, np.int64),
+        affected_output_index=(),
+    )
+
+
+def _negative_controls(primary_case):
+    def future_read(call):
+        return np.asarray(call.values["x"][2], dtype=np.int64)
+
+    locality_negative = NegativeControl(
+        name="planted_future_read",
+        failure=NegativeControlFailure.LOCALITY_OUTPUT_CHANGE,
+        case=_case(future_read, name="planted_future_read"),
+    )
+    witness_negative = NegativeControl(
+        name="planted_wrong_expected_change",
+        failure=NegativeControlFailure.WITNESS_CHANGED_OUTPUT,
+        case=primary_case,
+        witness=_witness(
+            expected_changed=14, name="planted_wrong_expected_change"
+        ),
+    )
+    return locality_negative, witness_negative
+
+
+def _register_causal(
+    registry,
+    conditioner=_synthetic_sum,
+    *,
+    identifier="synthetic.causal.sum",
+    locality_cases=None,
+    witness_checks=None,
+    negative_controls=None,
+    metadata=None,
+):
+    case = _case(conditioner)
+    cases = (case,) if locality_cases is None else locality_cases
+    checks = (
+        (WitnessCheck(case, _witness()),)
+        if witness_checks is None
+        else witness_checks
+    )
+    controls = (
+        _negative_controls(case)
+        if negative_controls is None
+        else negative_controls
+    )
+    return register_causal_conditioner(
+        registry,
+        identifier,
+        conditioner,
+        metadata={"purpose": "synthetic admission"}
+        if metadata is None
+        else metadata,
+        locality_cases=cases,
+        witness_checks=checks,
+        negative_controls=controls,
+    )
+
+
+def test_causal_registration_executes_suite_then_exposes_empirical_admission():
+    registry = ConditionerRegistry()
+
+    descriptor = _register_causal(registry)
+
+    assert descriptor.identifier == "synthetic.causal.sum"
+    assert descriptor.conditioner is _synthetic_sum
+    assert descriptor.classification is ConditionerClass.CAUSAL
+    assert descriptor.label == CAUSAL_LABEL
+    assert "EMPIRICAL" in descriptor.label
+    assert "NOT PROOF" in descriptor.label
+    assert registry.is_confirmation_eligible(descriptor.identifier)
+    assert descriptor.locality_case_count == 1
+    assert descriptor.witness_count == 1
+    assert descriptor.negative_control_count == 2
+    assert len(descriptor.comparison_policies) == 1
+    policy = descriptor.comparison_policies[0]
+    assert policy.case_name == "synthetic_sum"
+    assert policy.kind is OutputKind.INTEGER
+    assert policy.atol == 0.0
+    assert policy.rtol == 0.0
+
+
+@pytest.mark.parametrize(
+    ("locality_cases", "witness_checks", "negative_controls", "message"),
+    [
+        ((), "default", "default", "locality case"),
+        ("default", (), "default", "witness"),
+        ("default", "default", (), "negative control"),
+    ],
+)
+def test_missing_executable_evidence_prevents_causal_admission(
+    locality_cases, witness_checks, negative_controls, message
+):
+    registry = ConditionerRegistry()
+    kwargs = {}
+    if locality_cases != "default":
+        kwargs["locality_cases"] = locality_cases
+    if witness_checks != "default":
+        kwargs["witness_checks"] = witness_checks
+    if negative_controls != "default":
+        kwargs["negative_controls"] = negative_controls
+
+    with pytest.raises(SpineError, match=message):
+        _register_causal(registry, **kwargs)
+    assert registry.entries() == ()
+
+
+@pytest.mark.parametrize(
+    "fake",
+    [
+        True,
+        "passed",
+        LocalityReport(
+            case_name="forged",
+            forbidden_region_count=1,
+            forbidden_region_sizes=(1,),
+            changed_value_counts=(1,),
+            mutation_trial_count=1,
+        ),
+        object(),
+    ],
+)
+def test_boolean_string_report_and_object_cannot_replace_executed_suite(fake):
+    registry = ConditionerRegistry()
+    with pytest.raises(SpineError, match="tuple.*DependencyCase"):
+        _register_causal(registry, locality_cases=fake)
+    assert registry.entries() == ()
+
+    # Negative mutation: the only public admission function has no passed,
+    # certificate, evidence, cached-result, or prior-result argument.
+    with pytest.raises(TypeError):
+        register_causal_conditioner(
+            registry,
+            "synthetic.forged",
+            _synthetic_sum,
+            metadata={},
+            locality_cases=(),
+            witness_checks=(),
+            negative_controls=(),
+            passed=True,
+        )
+
+
+def test_suite_must_execute_the_exact_callable_being_registered():
+    registry = ConditionerRegistry()
+    unrelated_case = _case(_synthetic_sum)
+
+    def alias(call):
+        return _synthetic_sum(call)
+
+    with pytest.raises(SpineError, match="exact conditioner callable"):
+        _register_causal(
+            registry,
+            alias,
+            locality_cases=(unrelated_case,),
+            witness_checks=(WitnessCheck(unrelated_case, _witness()),),
+            negative_controls=_negative_controls(unrelated_case),
+        )
+    assert registry.entries() == ()
+
+
+def test_witness_check_must_reference_a_declared_locality_case_object():
+    registry = ConditionerRegistry()
+    declared = _case()
+    equal_but_distinct = _case()
+
+    with pytest.raises(SpineError, match="declared locality case object"):
+        _register_causal(
+            registry,
+            locality_cases=(declared,),
+            witness_checks=(WitnessCheck(equal_but_distinct, _witness()),),
+            negative_controls=_negative_controls(declared),
+        )
+    assert registry.entries() == ()
+
+
+def test_failed_locality_case_leaves_registry_unchanged():
+    registry = ConditionerRegistry()
+
+    def future_read(call):
+        return np.asarray(call.values["x"][2], dtype=np.int64)
+
+    leaky = _case(future_read, name="registered_future_read")
+    with pytest.raises(SpineError, match="out-of-window.*comparison failed"):
+        _register_causal(
+            registry,
+            future_read,
+            locality_cases=(leaky,),
+            witness_checks=(WitnessCheck(leaky, _witness()),),
+            negative_controls=_negative_controls(leaky),
+        )
+    assert registry.entries() == ()
+
+
+def test_failed_witness_leaves_registry_unchanged():
+    registry = ConditionerRegistry()
+
+    def insensitive(call):
+        return np.asarray(10, dtype=np.int64)
+
+    case = _case(insensitive, name="registered_insensitive")
+    with pytest.raises(SpineError, match="witness changed.*comparison failed"):
+        _register_causal(
+            registry,
+            insensitive,
+            locality_cases=(case,),
+            witness_checks=(WitnessCheck(case, _witness()),),
+            negative_controls=_negative_controls(case),
+        )
+    assert registry.entries() == ()
+
+
+def test_every_declared_locality_case_executes_before_atomic_insertion():
+    registry = ConditionerRegistry()
+
+    def second_case_leaks(call):
+        if int(call.coordinates_ns[0]) == 100:
+            return np.asarray(call.values["x"][2], dtype=np.int64)
+        return _synthetic_sum(call)
+
+    safe = _case(second_case_leaks, name="first_safe_case")
+    leaky = _case(
+        second_case_leaks,
+        name="second_leaky_case",
+        coordinates=[100, 110, 120, 130, 140, 150],
+    )
+    with pytest.raises(SpineError, match="second_leaky_case.*out-of-window"):
+        _register_causal(
+            registry,
+            second_case_leaks,
+            locality_cases=(safe, leaky),
+            witness_checks=(WitnessCheck(safe, _witness()),),
+            negative_controls=_negative_controls(safe),
+        )
+    assert registry.entries() == ()
+
+
+def test_every_declared_witness_executes_before_atomic_insertion():
+    registry = ConditionerRegistry()
+
+    def second_case_is_insensitive(call):
+        if int(call.coordinates_ns[0]) == 100:
+            return np.asarray(10, dtype=np.int64)
+        return _synthetic_sum(call)
+
+    first = _case(second_case_is_insensitive, name="first_witness_case")
+    second = _case(
+        second_case_is_insensitive,
+        name="second_witness_case",
+        coordinates=[100, 110, 120, 130, 140, 150],
+    )
+    checks = (
+        WitnessCheck(first, _witness(name="first_witness")),
+        WitnessCheck(second, _witness(name="second_witness")),
+    )
+    with pytest.raises(SpineError, match="witness changed.*comparison failed"):
+        _register_causal(
+            registry,
+            second_case_is_insensitive,
+            locality_cases=(first, second),
+            witness_checks=checks,
+            negative_controls=_negative_controls(first),
+        )
+    assert registry.entries() == ()
+
+
+def test_negative_control_that_passes_prevents_admission_atomically():
+    registry = ConditionerRegistry()
+    case = _case()
+    passing_negative = NegativeControl(
+        name="insensitive_negative",
+        failure=NegativeControlFailure.LOCALITY_OUTPUT_CHANGE,
+        case=case,
+    )
+    controls = (passing_negative, _negative_controls(case)[1])
+
+    with pytest.raises(SpineError, match="negative control.*unexpectedly passed"):
+        _register_causal(
+            registry,
+            locality_cases=(case,),
+            witness_checks=(WitnessCheck(case, _witness()),),
+            negative_controls=controls,
+        )
+    assert registry.entries() == ()
+
+
+def test_negative_control_cannot_pass_by_throwing_a_forged_spine_error():
+    registry = ConditionerRegistry()
+    case = _case()
+
+    def throws_forged_message(call):
+        raise SpineError("out-of-window region exact comparison failed")
+
+    forged = NegativeControl(
+        name="forged_exception",
+        failure=NegativeControlFailure.LOCALITY_OUTPUT_CHANGE,
+        case=_case(throws_forged_message, name="forged_exception"),
+    )
+    controls = (forged, _negative_controls(case)[1])
+    with pytest.raises(SpineError, match="wrong failure mechanism"):
+        _register_causal(
+            registry,
+            locality_cases=(case,),
+            witness_checks=(WitnessCheck(case, _witness()),),
+            negative_controls=controls,
+        )
+    assert registry.entries() == ()
+
+
+def test_both_required_negative_control_families_must_be_declared():
+    registry = ConditionerRegistry()
+    case = _case()
+    locality, witness = _negative_controls(case)
+
+    with pytest.raises(SpineError, match="locality-output and witness-output"):
+        _register_causal(registry, negative_controls=(locality,))
+    with pytest.raises(SpineError, match="locality-output and witness-output"):
+        _register_causal(registry, negative_controls=(witness,))
+    assert registry.entries() == ()
+
+
+def test_every_declared_negative_control_executes_inside_registration():
+    registry = ConditionerRegistry()
+    primary = _case()
+    observed = []
+
+    def tracked_future_read(call):
+        observed.append("second_locality_control")
+        return np.asarray(call.values["x"][2], dtype=np.int64)
+
+    def tracked_witness_callable(call):
+        observed.append("second_witness_control")
+        return _synthetic_sum(call)
+
+    second_locality = NegativeControl(
+        name="second_locality_control",
+        failure=NegativeControlFailure.LOCALITY_OUTPUT_CHANGE,
+        case=_case(tracked_future_read, name="second_locality_control"),
+    )
+    tracked_witness_case = _case(
+        tracked_witness_callable, name="second_witness_control"
+    )
+    second_witness = NegativeControl(
+        name="second_witness_control",
+        failure=NegativeControlFailure.WITNESS_CHANGED_OUTPUT,
+        case=tracked_witness_case,
+        witness=_witness(
+            expected_changed=14, name="second_witness_control"
+        ),
+    )
+    controls = _negative_controls(primary) + (second_locality, second_witness)
+
+    descriptor = _register_causal(registry, negative_controls=controls)
+    assert descriptor.negative_control_count == 4
+    assert "second_locality_control" in observed
+    assert "second_witness_control" in observed
+
+
+def test_nested_registration_during_suite_execution_is_rejected_and_rolled_back():
+    registry = ConditionerRegistry()
+
+    def nested_registration(call):
+        register_descriptive_conditioner(
+            registry,
+            "synthetic.nested",
+            _first,
+            metadata={},
+        )
+        return np.asarray(10, dtype=np.int64)
+
+    case = _case(nested_registration, name="nested_registration")
+    with pytest.raises(SpineError, match="forbidden during causal admission"):
+        _register_causal(
+            registry,
+            nested_registration,
+            locality_cases=(case,),
+            witness_checks=(WitnessCheck(case, _witness()),),
+            negative_controls=_negative_controls(case),
+        )
+    assert registry.entries() == ()
+
+
+def test_shared_namespace_and_callable_identity_cross_classifications():
+    causal_registry = ConditionerRegistry()
+    causal = _register_causal(causal_registry)
+
+    with pytest.raises(SpineError, match="duplicate conditioner identifier"):
+        register_descriptive_conditioner(
+            causal_registry,
+            causal.identifier,
+            lambda call: _synthetic_sum(call),
+            metadata={},
+        )
+    with pytest.raises(SpineError, match="callable object.*already registered"):
+        register_descriptive_conditioner(
+            causal_registry,
+            "synthetic.causal.alias",
+            _synthetic_sum,
+            metadata={},
+        )
+
+    descriptive_registry = ConditionerRegistry()
+    descriptive = register_descriptive_conditioner(
+        descriptive_registry,
+        "synthetic.descriptive.original",
+        _synthetic_sum,
+        metadata={},
+    )
+    with pytest.raises(SpineError, match="callable object.*already registered"):
+        _register_causal(
+            descriptive_registry,
+            identifier="synthetic.descriptive.reclassified",
+        )
+    assert descriptive_registry.entries() == (descriptive,)
+    assert not descriptive_registry.is_confirmation_eligible(descriptive.identifier)
+
+
+def test_distinct_wrapper_requires_its_own_executed_suite():
+    registry = ConditionerRegistry()
+    _register_causal(registry)
+
+    def wrapper(call):
+        return _synthetic_sum(call)
+
+    original_case = _case(_synthetic_sum)
+    with pytest.raises(SpineError, match="exact conditioner callable"):
+        _register_causal(
+            registry,
+            wrapper,
+            identifier="synthetic.causal.wrapper",
+            locality_cases=(original_case,),
+            witness_checks=(WitnessCheck(original_case, _witness()),),
+            negative_controls=_negative_controls(original_case),
+        )
+
+    wrapper_descriptor = _register_causal(
+        registry,
+        wrapper,
+        identifier="synthetic.causal.wrapper",
+    )
+    assert registry.is_confirmation_eligible(wrapper_descriptor.identifier)
+
+
+def test_directly_constructed_descriptor_or_prior_report_cannot_create_eligibility():
+    registry = ConditionerRegistry()
+    with pytest.raises(TypeError):
+        ConditionerDescriptor(
+            identifier="synthetic.forged",
+            conditioner=_synthetic_sum,
+            classification=ConditionerClass.CAUSAL,
+            label=CAUSAL_LABEL,
+            metadata={},
+        )
+
+    forged = type(
+        "ForgedDescriptor", (), {"classification": ConditionerClass.CAUSAL}
+    )()
+    report = LocalityReport(
+        case_name="prior",
+        forbidden_region_count=1,
+        forbidden_region_sizes=(1,),
+        changed_value_counts=(1,),
+        mutation_trial_count=1,
+    )
+
+    for value in (forged, report, True, "causal"):
+        with pytest.raises(SpineError, match="unknown conditioner identifier"):
+            registry.is_confirmation_eligible(value)
+    assert registry.entries() == ()
+
+
+def test_public_api_has_exactly_one_causal_admission_path_and_no_certificate_arg():
+    registration_names = {
+        name
+        for name in registry_module.__all__
+        if name.startswith("register_")
+    }
+    assert registration_names == {
+        "register_causal_conditioner",
+        "register_descriptive_conditioner",
+    }
+    parameters = inspect.signature(register_causal_conditioner).parameters
+    assert tuple(parameters) == (
+        "registry",
+        "identifier",
+        "conditioner",
+        "metadata",
+        "locality_cases",
+        "witness_checks",
+        "negative_controls",
+    )
+    assert not {
+        "passed",
+        "evidence",
+        "certificate",
+        "token",
+        "cached_result",
+        "prior_result",
+    } & set(parameters)
+
+
+_CONDITIONERS_ROOT = Path(__file__).resolve().parents[1] / "mnq_lab" / "conditioners"
+_FORBIDDEN_IMPORT_ROOTS = {
+    "constants",
+    "ledger",
+    "nulls",
+    "outcomes",
+    "report",
+    "spine",
+    "studies",
+}
+_FORBIDDEN_SOURCE_PATTERN = re.compile(
+    r"(?:locked(?:[_-]confirmation)?|data[\\/]|bars_\d+m)", re.IGNORECASE
+)
+_FORBIDDEN_ORDERING_CALLS = {
+    "argmax",
+    "idxmax",
+    "nlargest",
+    "rank",
+    "sort",
+    "sorted",
+    "sort_values",
+}
+
+
+def _registry_scope_violations(path):
+    source = path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(path))
+    violations = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            modules = [node.module or ""]
+        else:
+            modules = []
+        for module in modules:
+            parts = module.split(".")
+            if (
+                len(parts) > 1
+                and parts[0] == "mnq_lab"
+                and parts[1] in _FORBIDDEN_IMPORT_ROOTS
+            ):
+                violations.append(f"forbidden import {module}")
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name):
+                name = node.func.id
+            elif isinstance(node.func, ast.Attribute):
+                name = node.func.attr
+            else:
+                name = ""
+            if name in _FORBIDDEN_ORDERING_CALLS:
+                violations.append(f"forbidden ordering call {name}")
+    if _FORBIDDEN_SOURCE_PATTERN.search(source):
+        violations.append("forbidden data-tier or store-path reference")
+    return violations
+
+
+def test_registry_package_is_market_free_and_never_orders_by_measurement():
+    paths = sorted(_CONDITIONERS_ROOT.rglob("*.py"))
+    assert paths
+    violations = {
+        path.name: _registry_scope_violations(path)
+        for path in paths
+        if _registry_scope_violations(path)
+    }
+    assert not violations
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from mnq_lab.spine.store import read_store\n",
+        "_PATH = 'data/exploration/bars_5m'\n",
+        "def order(values): return sorted(values)\n",
+    ],
+)
+def test_registry_scope_guard_kills_planted_market_and_ordering_mutations(
+    tmp_path, source
+):
+    planted = tmp_path / "planted_registry.py"
+    planted.write_text(source, encoding="utf-8")
+    assert _registry_scope_violations(planted)

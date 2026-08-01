@@ -17,14 +17,28 @@ from types import MappingProxyType
 from typing import Any
 
 from mnq_lab import SpineError
+from mnq_lab.core.dependency import (
+    DependencyCase,
+    DeterministicWitness,
+    OutputKind,
+    run_dependency_locality,
+    run_deterministic_witness,
+)
 
+CAUSAL_LABEL = "CAUSAL — EMPIRICAL ADMISSION EVIDENCE, NOT PROOF OF CAUSALITY"
 DESCRIPTIVE_LABEL = "NONCAUSAL — NOT ELIGIBLE FOR CONFIRMATION"
 
 __all__ = [
+    "CAUSAL_LABEL",
     "DESCRIPTIVE_LABEL",
     "ConditionerClass",
     "ConditionerDescriptor",
     "ConditionerRegistry",
+    "NegativeControl",
+    "NegativeControlFailure",
+    "RegisteredComparison",
+    "WitnessCheck",
+    "register_causal_conditioner",
     "register_descriptive_conditioner",
 ]
 
@@ -34,6 +48,13 @@ class ConditionerClass(Enum):
 
     CAUSAL = "causal"
     DESCRIPTIVE = "descriptive"
+
+
+class NegativeControlFailure(Enum):
+    """The two required executable failure families for causal admission."""
+
+    LOCALITY_OUTPUT_CHANGE = "locality_output_change"
+    WITNESS_CHANGED_OUTPUT = "witness_changed_output"
 
 
 ImmutableMetadataValue = (
@@ -94,6 +115,61 @@ def _validate_conditioner(conditioner: Any) -> Callable[..., Any]:
 
 
 @dataclass(frozen=True, slots=True)
+class WitnessCheck:
+    """One declared witness paired to its already-declared locality case."""
+
+    case: DependencyCase
+    witness: DeterministicWitness
+
+    def __post_init__(self) -> None:
+        if type(self.case) is not DependencyCase:
+            raise SpineError("witness check case must be a DependencyCase")
+        if type(self.witness) is not DeterministicWitness:
+            raise SpineError(
+                "witness check witness must be a DeterministicWitness"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class NegativeControl:
+    """An executable planted failure, never a caller-supplied pass result."""
+
+    name: str
+    failure: NegativeControlFailure
+    case: DependencyCase
+    witness: DeterministicWitness | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or not self.name:
+            raise SpineError("negative control name must be a non-empty string")
+        if not isinstance(self.failure, NegativeControlFailure):
+            raise SpineError(
+                "negative control failure must be a NegativeControlFailure"
+            )
+        if type(self.case) is not DependencyCase:
+            raise SpineError("negative control case must be a DependencyCase")
+        if self.failure is NegativeControlFailure.LOCALITY_OUTPUT_CHANGE:
+            if self.witness is not None:
+                raise SpineError(
+                    "locality-output negative control must not supply a witness"
+                )
+        elif type(self.witness) is not DeterministicWitness:
+            raise SpineError(
+                "witness-output negative control requires a DeterministicWitness"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class RegisteredComparison:
+    """Immutable comparison metadata executed for one locality case."""
+
+    case_name: str
+    kind: OutputKind
+    atol: float
+    rtol: float
+
+
+@dataclass(frozen=True, slots=True, init=False)
 class ConditionerDescriptor:
     """Immutable retrieval view of one stored registry entry."""
 
@@ -102,6 +178,37 @@ class ConditionerDescriptor:
     classification: ConditionerClass
     label: str
     metadata: Mapping[str, ImmutableMetadataValue]
+    locality_case_count: int = 0
+    witness_count: int = 0
+    negative_control_count: int = 0
+    comparison_policies: tuple[RegisteredComparison, ...] = ()
+
+
+def _make_descriptor(
+    *,
+    identifier: str,
+    conditioner: Callable[..., Any],
+    classification: ConditionerClass,
+    label: str,
+    metadata: Mapping[str, ImmutableMetadataValue],
+    locality_case_count: int = 0,
+    witness_count: int = 0,
+    negative_control_count: int = 0,
+    comparison_policies: tuple[RegisteredComparison, ...] = (),
+) -> ConditionerDescriptor:
+    descriptor = object.__new__(ConditionerDescriptor)
+    object.__setattr__(descriptor, "identifier", identifier)
+    object.__setattr__(descriptor, "conditioner", conditioner)
+    object.__setattr__(descriptor, "classification", classification)
+    object.__setattr__(descriptor, "label", label)
+    object.__setattr__(descriptor, "metadata", metadata)
+    object.__setattr__(descriptor, "locality_case_count", locality_case_count)
+    object.__setattr__(descriptor, "witness_count", witness_count)
+    object.__setattr__(
+        descriptor, "negative_control_count", negative_control_count
+    )
+    object.__setattr__(descriptor, "comparison_policies", comparison_policies)
+    return descriptor
 
 
 class ConditionerRegistry:
@@ -157,12 +264,60 @@ class ConditionerRegistry:
                     "registry mutation is forbidden during causal admission"
                 )
             self.__require_available(identifier, conditioner)
-            descriptor = ConditionerDescriptor(
+            descriptor = _make_descriptor(
                 identifier=identifier,
                 conditioner=conditioner,
                 classification=ConditionerClass.DESCRIPTIVE,
                 label=DESCRIPTIVE_LABEL,
                 metadata=metadata,
+            )
+            self.__entries[identifier] = descriptor
+            self.__callable_identifiers[id(conditioner)] = identifier
+            return descriptor
+
+    def _register_causal(
+        self,
+        identifier: str,
+        conditioner: Callable[..., Any],
+        metadata: Mapping[str, ImmutableMetadataValue],
+        locality_cases: tuple[DependencyCase, ...],
+        witness_checks: tuple[WitnessCheck, ...],
+        negative_controls: tuple[NegativeControl, ...],
+    ) -> ConditionerDescriptor:
+        with self.__lock:
+            if self.__admission_in_progress:
+                raise SpineError("nested causal admission is forbidden")
+            self.__require_available(identifier, conditioner)
+            self.__admission_in_progress = True
+            try:
+                for case in locality_cases:
+                    run_dependency_locality(case)
+                for check in witness_checks:
+                    run_deterministic_witness(check.case, check.witness)
+                for control in negative_controls:
+                    _run_negative_control(control)
+            finally:
+                self.__admission_in_progress = False
+
+            comparison_policies = tuple(
+                RegisteredComparison(
+                    case_name=case.name,
+                    kind=case.comparison.kind,
+                    atol=case.comparison.atol,
+                    rtol=case.comparison.rtol,
+                )
+                for case in locality_cases
+            )
+            descriptor = _make_descriptor(
+                identifier=identifier,
+                conditioner=conditioner,
+                classification=ConditionerClass.CAUSAL,
+                label=CAUSAL_LABEL,
+                metadata=metadata,
+                locality_case_count=len(locality_cases),
+                witness_count=len(witness_checks),
+                negative_control_count=len(negative_controls),
+                comparison_policies=comparison_policies,
             )
             self.__entries[identifier] = descriptor
             self.__callable_identifiers[id(conditioner)] = identifier
@@ -188,6 +343,150 @@ def _require_registry(registry: Any) -> ConditionerRegistry:
     if type(registry) is not ConditionerRegistry:
         raise SpineError("registry must be an exact ConditionerRegistry")
     return registry
+
+
+def _require_exact_tuple(
+    value: Any, element_type: type[Any], description: str
+) -> tuple[Any, ...]:
+    if not isinstance(value, tuple) or not value:
+        raise SpineError(
+            f"{description} must be a non-empty tuple of {element_type.__name__}"
+        )
+    if any(type(item) is not element_type for item in value):
+        raise SpineError(
+            f"{description} must be a non-empty tuple of {element_type.__name__}"
+        )
+    return value
+
+
+def _validate_causal_suite(
+    conditioner: Callable[..., Any],
+    locality_cases: Any,
+    witness_checks: Any,
+    negative_controls: Any,
+) -> tuple[
+    tuple[DependencyCase, ...],
+    tuple[WitnessCheck, ...],
+    tuple[NegativeControl, ...],
+]:
+    cases = _require_exact_tuple(
+        locality_cases, DependencyCase, "locality cases"
+    )
+    checks = _require_exact_tuple(
+        witness_checks, WitnessCheck, "witness checks"
+    )
+    controls = _require_exact_tuple(
+        negative_controls, NegativeControl, "negative controls"
+    )
+
+    case_names: set[str] = set()
+    for case in cases:
+        if case.name in case_names:
+            raise SpineError(f"duplicate locality case name {case.name!r}")
+        case_names.add(case.name)
+        if case.invoke is not conditioner:
+            raise SpineError(
+                f"locality case {case.name!r} does not invoke the exact "
+                "conditioner callable being registered"
+            )
+
+    declared_case_ids = {id(case) for case in cases}
+    witness_names: set[str] = set()
+    for check in checks:
+        if id(check.case) not in declared_case_ids:
+            raise SpineError(
+                f"witness {check.witness.name!r} must reference a declared "
+                "locality case object"
+            )
+        if check.witness.name in witness_names:
+            raise SpineError(
+                f"duplicate deterministic witness name {check.witness.name!r}"
+            )
+        witness_names.add(check.witness.name)
+
+    control_names: set[str] = set()
+    required_failures: set[NegativeControlFailure] = set()
+    for control in controls:
+        if control.name in control_names:
+            raise SpineError(f"duplicate negative control name {control.name!r}")
+        control_names.add(control.name)
+        required_failures.add(control.failure)
+    if required_failures != set(NegativeControlFailure):
+        raise SpineError(
+            "negative controls must include locality-output and witness-output "
+            "failure families"
+        )
+    return cases, checks, controls
+
+
+def _run_negative_control(control: NegativeControl) -> None:
+    try:
+        if control.failure is NegativeControlFailure.LOCALITY_OUTPUT_CHANGE:
+            run_dependency_locality(control.case)
+        else:
+            if control.witness is None:  # defended by NegativeControl validation
+                raise SpineError("witness-output negative control lacks witness")
+            run_deterministic_witness(control.case, control.witness)
+    except SpineError as exc:
+        message = str(exc)
+        if "callable raised" in message:
+            raise SpineError(
+                f"negative control {control.name!r} used the wrong failure mechanism"
+            ) from exc
+        if control.failure is NegativeControlFailure.LOCALITY_OUTPUT_CHANGE:
+            locality_prefix = (
+                f"case {control.case.name!r}: out-of-window region "
+            )
+            valid_failure = (
+                message.startswith(locality_prefix)
+                and " changed output: out-of-window region " in message
+                and "comparison failed" in message
+            )
+        else:
+            valid_failure = (
+                message.startswith("witness changed ")
+                and "comparison failed" in message
+            )
+        if not valid_failure:
+            raise SpineError(
+                f"negative control {control.name!r} used the wrong failure mechanism"
+            ) from exc
+        return
+    raise SpineError(f"negative control {control.name!r} unexpectedly passed")
+
+
+def register_causal_conditioner(
+    registry: ConditionerRegistry,
+    identifier: str,
+    conditioner: Callable[..., Any],
+    *,
+    metadata: Mapping[str, ImmutableMetadataValue],
+    locality_cases: tuple[DependencyCase, ...],
+    witness_checks: tuple[WitnessCheck, ...],
+    negative_controls: tuple[NegativeControl, ...],
+) -> ConditionerDescriptor:
+    """Execute the complete empirical suite, then atomically admit once.
+
+    Cases, witnesses, and negative controls are executable declarations, never
+    cached results or pass certificates.  Successful execution is empirical
+    admission evidence against those cases, not proof of causality.
+    """
+
+    exact_registry = _require_registry(registry)
+    exact_identifier = _validate_identifier(identifier)
+    exact_conditioner = _validate_conditioner(conditioner)
+    frozen_metadata = _freeze_metadata(metadata)
+    cases, checks, controls = _validate_causal_suite(
+        exact_conditioner, locality_cases, witness_checks, negative_controls
+    )
+    return exact_registry._register_causal(
+        exact_identifier,
+        exact_conditioner,
+        frozen_metadata,
+        cases,
+        checks,
+        controls,
+    )
 
 
 def register_descriptive_conditioner(

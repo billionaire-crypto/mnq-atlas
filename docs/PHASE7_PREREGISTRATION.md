@@ -809,3 +809,57 @@ Phase 7 establishes no conditional market effect, contrast, prevalence,
 statistical significance, confirmation, profitability, execution rule, or
 trading strategy. No parameter may be optimized or selected after measured
 results. Phase 8 remains unauthorized after Phase 7 closes.
+
+## 21. Amendment 1 — pinned-base maintenance pre-authorization
+
+**Finding:** `P7C-1` from the first independent contract-ratification audit.
+That audit ratified §§1–14 and §§17–20 substantively, but found that implementing
+§15 and §16 literally would change two previously audited files without an
+executable hash-transition rule. The original preregistration commit
+`e0853cae217f8b4da1850de32e47507a2d1cce99` and its failed audit remain in
+history. This section is a prospective governance correction, not a claim that
+the first contract audit passed.
+
+Implementation step 1 includes exactly one declared pinned-base maintenance
+commit that performs these three changes atomically:
+
+1. append the single Phase 7 discrepancy entry recording the file-level frozen
+   §13 item-18 convention, closing F-0 by assigning `tests/test_roll_reset.py`
+   to Phase 7, and recording closure of the D17 #8 real-conditioner semantic-
+   window obligation under §10 of this contract;
+2. convert `test_a5_calendar_import_isolation` in
+   `tests/test_phase7_calendar_input.py` from its strict pending xfail into the
+   real passing sentinel-and-mutant test specified in §16; and
+3. update only that test file's internal `EXPECTED_ARTIFACTS` byte count and
+   SHA-256 for `docs/DISCREPANCIES.md` to the exact post-append values.
+
+The maintenance commit message records the old and new byte counts and SHA-256
+values for both changed files:
+
+- `docs/DISCREPANCIES.md` old pin: 49,015 bytes,
+  `68325d575bd5a480fa23c11cc22dc5b1b1ecfbd0f7714cca007721e8f63df1c7`;
+- `tests/test_phase7_calendar_input.py` old audited pin: 17,186 bytes,
+  `d4429aadae3f800d728b87c20addbe1dc9bfea0797a1ff1dde1433c51be7f11a`;
+- the exact new byte counts and hashes measured after the declared edits.
+
+No other pinned value changes in that commit. The A5 test must be genuinely
+discriminating before the commit is made: it executes the real scale modules
+while a calendar-loader sentinel is installed, and a test-only mutant that adds
+calendar access must reach the sentinel and fail. Merely removing the xfail,
+changing its reason, or making it pass because a module is absent is forbidden.
+
+`docs/PHASE7_CALENDAR_INPUT.md` is an immutable historical audit record of the
+`ded8ba0`-era bytes. It is not updated to describe the later transition. The
+unchanged calendar ledger likewise remains the historical authorization record.
+The new discrepancy entry and maintenance commit message together form the
+append-only transition record.
+
+This exactly declared maintenance commit is planned by this byte-pinned
+preregistration and therefore does not count as an unplanned protected-artifact
+change and does not trigger an intermediate independent checkpoint. The Phase 7
+closeout audit must re-verify both old-to-new hash transitions, the atomic
+three-part scope, the real A5 mutation, and the unchanged historical records.
+Any further change to either `docs/DISCREPANCIES.md` or
+`tests/test_phase7_calendar_input.py`, or any change to another protected
+artifact, remains unplanned under §19 and requires an independent review before
+continuation.

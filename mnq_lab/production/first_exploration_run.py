@@ -973,12 +973,28 @@ def _peak_process_memory_bytes() -> int:
 
         counters = _Counters()
         counters.cb = ctypes.sizeof(counters)
-        process = ctypes.windll.kernel32.GetCurrentProcess()
-        ok = ctypes.windll.psapi.GetProcessMemoryInfo(
-            process, ctypes.byref(counters), counters.cb
-        )
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        psapi = ctypes.WinDLL("psapi", use_last_error=True)
+        get_current_process = kernel32.GetCurrentProcess
+        get_current_process.argtypes = []
+        get_current_process.restype = wintypes.HANDLE
+        get_process_memory_info = psapi.GetProcessMemoryInfo
+        get_process_memory_info.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(_Counters),
+            wintypes.DWORD,
+        ]
+        get_process_memory_info.restype = wintypes.BOOL
+
+        process = get_current_process()
+        ctypes.set_last_error(0)
+        ok = get_process_memory_info(process, ctypes.byref(counters), counters.cb)
         if not ok:
-            raise SpineError("cannot read process peak working-set memory")
+            error_code = ctypes.get_last_error()
+            raise SpineError(
+                "cannot read process peak working-set memory "
+                f"(Windows error {error_code})"
+            )
         return int(counters.peak_working_set_size)
     import resource
 
@@ -995,6 +1011,7 @@ def run_shakedown() -> dict[str, Any]:
     environment = environment_fingerprint(REPO_ROOT)
     if not environment.get("commit") or environment.get("dirty") is not False:
         raise SpineError("shakedown requires a clean committed worktree")
+    _peak_process_memory_bytes()
 
     started = time.perf_counter()
     timings: dict[str, float] = {}

@@ -8,8 +8,8 @@ import subprocess
 from mnq_lab.constants import REPO_ROOT
 
 CLOSEOUT = REPO_ROOT / "docs" / "UNIT_O.md"
-CLOSEOUT_BYTES = 9_172
-CLOSEOUT_SHA256 = "93cc9aeca323d3144c31089350d3fee4b1fb598ab11345337329a7df3c6c634e"
+CLOSEOUT_BYTES = 10_474
+CLOSEOUT_SHA256 = "59dc13ef23e02b269cbacceb3561a1054c23c91c03429d99ef4a81e212e8aac6"
 
 PROTECTED = {
     "REV6_FROZEN_SPEC.md": (48_177, "70dae16c8b12fe26d38a7bfdabf0202066fe7149f790d0d2942279d9c3b8ff50"),
@@ -17,12 +17,11 @@ PROTECTED = {
     "docs/OUTCOME_LAYER_PREREGISTRATION.md": (17_614, "4b5bc97fdfd4b0219c69e6a8adf76f18072091a9389700191d3ddcd10f8207c8"),
     "docs/PHASE8_PREREGISTRATION.md": (31_862, "d07174ed0acc9e60ab6b255f4b33fc08141969c64e04f66e1e08c0aca98b4680"),
     "docs/PHASE7.md": (15_856, "d987eddb15fd3f3581c60dbc590704f84d783f8ffe140fcd57259392c0f513a7"),
-    "docs/DISCREPANCIES.md": (54_495, "e7d6a2704d7159e5f5f522705f4d989a0120756594c8026c9e559a144042655e"),
     "mnq_lab/outcomes/artifacts.py": (6_242, "7ca7e36a94eb59c38f0e8530ece891dc51c32cf1d736dc3901f468b04eceab76"),
     "mnq_lab/outcomes/excursions.py": (27_972, "c521c17e272a391e39902e4016e913e449f7e567755b18455496cb7f9b7db31e"),
     "tests/test_estimand_definition.py": (19_561, "11d086e6dd1522bb635b52a9e283fc8432b4c07bccca7729454995b8ba8c8b70"),
     "tests/test_outcome_artifacts.py": (7_550, "cd175a9df82d4cd2499a2ffd7b6d7db8105e637b1e68f4232ad0726d1a980930"),
-    "tests/test_outcome_excursions.py": (10_965, "f8080b27671012e4b89ece8de87c3921238e751ab23fa3ab12028a3c0e0a2858"),
+    "tests/test_outcome_excursions.py": (11_469, "c79ca27e6230bc192b6599534f53c513e054bc32d60bdf49124f23c1e1779285"),
     "tests/test_outcome_isolation.py": (5_239, "ba38d2bfb978a20357048f58a5ce4f17088b918322ac3c67bf6921d5676e811f"),
     "tests/test_outcome_locality.py": (7_622, "f34cb9170103af5ea58bfd067994763c1a66e6e578c4b2c218c7d73389f081f0"),
     "tests/test_phase7_calendar_input.py": (25_061, "d9b8dee45bf5dd533074623e9f0fae435123b1fe9a03c714d16aab71245d52f5"),
@@ -51,14 +50,14 @@ def test_every_unit_o_closeout_protected_hash_matches_raw_bytes():
 def test_d21_transition_preserves_the_exact_historical_prefix():
     payload = (REPO_ROOT / "docs" / "DISCREPANCIES.md").read_bytes()
     historical = payload[:51_539]
-    assert len(payload) == 54_495
+    assert len(payload) >= 51_539
     assert _digest(historical) == (
         "7ec200bb1de83769b8ce07551fec4e0b81f5e90e20a4792c22ae47f285bed615"
     )
-    assert _digest(payload) == PROTECTED["docs/DISCREPANCIES.md"][1]
+    assert b"## D21" in payload[51_539:]
 
 
-def test_unit_o_commit_chain_is_ordered_and_scope_is_local():
+def test_unit_o_commit_chain_has_required_ancestry():
     commits = (
         "e9e8a10b03a3b102cffb9692eef14cfeba563232",
         "fe1476c7955dd64f2b292f60f776b1e03691b22e",

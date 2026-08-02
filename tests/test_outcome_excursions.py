@@ -289,6 +289,20 @@ def test_public_build_compares_decoded_symbols_not_merely_integer_codes(tmp_path
     assert not row["path_symbol_mismatch"]
 
 
+def test_public_build_flags_a_genuine_decoded_symbol_change(tmp_path):
+    columns = synthetic_outcome_columns(symbol_changes={"08:40": 1})
+    store = in_memory_store(
+        tmp_path / "exploration" / "bars_5m",
+        columns,
+        symbols=("MNQM1", "MNQU1"),
+    )
+    table = build_outcome_table(store)
+    row = _row(table, estimand=ESTIMAND_OBSERVED)
+    assert row["outcome_status"] == STATUS_PATH_SYMBOL_MISMATCH
+    assert row["path_symbol_mismatch"]
+    assert not row["outcome_valid"]
+
+
 def test_duplicate_timestamps_and_impossible_cross_estimand_status_halt(tmp_path):
     columns = synthetic_outcome_columns()
     duplicated = {name: np.insert(value, 1, value[0]) for name, value in columns.items()}

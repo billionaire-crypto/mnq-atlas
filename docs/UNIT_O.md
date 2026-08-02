@@ -5,7 +5,7 @@
 **Branch:** `phase-7b-outcome-layer`  
 **Starting tip:** `e9e8a10b03a3b102cffb9692eef14cfeba563232`  
 **Implemented tip:** `212ca4dc231b769fd3eea7130d41d66681798866`  
-**Status:** implementation complete; independent Unit O closeout audit pending
+**Status:** implementation corrections complete; focused independent re-audit pending
 
 This document closes the implementation work authorized by the ratified
 `docs/OUTCOME_LAYER_PREREGISTRATION.md`. It records implementation through
@@ -111,7 +111,7 @@ The closeout audit must recompute every entry as raw bytes.
 | `c521c17e272a391e39902e4016e913e449f7e567755b18455496cb7f9b7db31e` | 27,972 | `mnq_lab/outcomes/excursions.py` |
 | `11d086e6dd1522bb635b52a9e283fc8432b4c07bccca7729454995b8ba8c8b70` | 19,561 | `tests/test_estimand_definition.py` |
 | `cd175a9df82d4cd2499a2ffd7b6d7db8105e637b1e68f4232ad0726d1a980930` | 7,550 | `tests/test_outcome_artifacts.py` |
-| `f8080b27671012e4b89ece8de87c3921238e751ab23fa3ab12028a3c0e0a2858` | 10,965 | `tests/test_outcome_excursions.py` |
+| `c79ca27e6230bc192b6599534f53c513e054bc32d60bdf49124f23c1e1779285` | 11,469 | `tests/test_outcome_excursions.py` |
 | `ba38d2bfb978a20357048f58a5ce4f17088b918322ac3c67bf6921d5676e811f` | 5,239 | `tests/test_outcome_isolation.py` |
 | `f34cb9170103af5ea58bfd067994763c1a66e6e578c4b2c218c7d73389f081f0` | 7,622 | `tests/test_outcome_locality.py` |
 | `d9b8dee45bf5dd533074623e9f0fae435123b1fe9a03c714d16aab71245d52f5` | 25,061 | `tests/test_phase7_calendar_input.py` |
@@ -127,11 +127,14 @@ to 54,495 bytes /
 The first 51,539 bytes remain byte-identical to the old hash.
 
 The same commit changed `tests/test_phase7_calendar_input.py` from 24,490 bytes /
-`1687f2a792e81cd397c80e34eff47d088df1511adb4a5bb2e61928f9b52fba`
+`1687f2a792e81cd397b22e1e1a81524fd88df1511adb4a5bb2e61928f9b52fba`
 to 25,061 bytes /
 `d9b8dee45bf5dd533074623e9f0fae435123b1fe9a03c714d16aab71245d52f5`.
 The test now rejects truncation or mutation of the historical prefix and permits
-only suffix growth. No other pinned value changed in that maintenance commit.
+only suffix growth. The immutable `fe1476c` commit message contains a malformed
+62-character version of the old test hash; this closeout corrects the provenance
+record without rewriting commit history. No other pinned value changed in that
+maintenance commit.
 
 ## 8. Verification result
 
@@ -148,18 +151,45 @@ produced:
 937 passed, 2 xfailed
 ```
 
-After adding this closeout document and its raw-byte/ancestry pin tests, the
-final clean-tip invocation produced:
+After adding the initial closeout document and its raw-byte/ancestry pin tests,
+the clean invocation at audited tip `9620f14` produced:
 
 ```text
 941 passed, 2 xfailed
+```
+
+After the four focused audit corrections recorded below, the final clean-tip
+invocation produced:
+
+```text
+942 passed, 2 xfailed
 ```
 
 The two xfails remain exactly `prevalence_results` and
 `consumed_vintage_artifacts`. The protected acceptance module was not imported,
 collected, or executed. The bare full suite was not run.
 
-## 9. Limits and authorization boundary
+## 9. Independent audit correction record
+
+The independent audit of `9620f14` returned `OPEN` with four finite defects in
+test coverage and provenance, while independently confirming every excursion
+value, window boundary, estimand rule, support flag, semantic mask, isolation
+boundary and deterministic artifact check it recomputed.
+
+The focused correction changes no production module:
+
+- UO-1 adds the missing positive-direction production-builder witness for a
+  genuine decoded-symbol change;
+- UO-2 removes the reintroduced full-file discrepancy pin and retains only the
+  exact 51,539-byte historical-prefix invariant plus D21 suffix presence;
+- UO-3 corrects the malformed old calendar-input-test hash above and records the
+  immutable commit-message error; and
+- UO-4 renames the commit-chain test to claim ancestry only, matching its body.
+
+Phase 8 remains unauthorized until these corrections receive a focused
+independent `CLOSED` re-audit.
+
+## 10. Limits and authorization boundary
 
 The outcomes are extrema among recorded OHLC bars on complete expected clock-
 time paths. Five one-minute labels do not prove trade-feed completeness, and a

@@ -22,6 +22,38 @@ from mnq_lab.constants import CONSTANTS_PATH, SPEC_PATH, load_constants
 from mnq_lab.spine.gates import EXPECTED_ROLL_COUNT, ROLL_FIXTURE_PATH
 from mnq_lab.spine.seal import SEAL_BOUNDARY_TRADE_DATE
 
+from mnq_lab.conditioners.arms import ARM_CONFIGS
+from mnq_lab.conditioners.assignments import (
+    CATEGORY_NAMES,
+    CATEGORY_ORDER,
+    THRESHOLD_WARMUP_SESSIONS,
+)
+from mnq_lab.conditioners.calendar import (
+    CALENDAR_SHA256,
+    CALENDAR_VERSION,
+    SCHEMA_VERSION as CALENDAR_SCHEMA_VERSION,
+)
+from mnq_lab.conditioners.scales.ewma import EWMA_WARMUP_RETURNS
+from mnq_lab.conditioners.scales.mad import MAD_FACTOR, MAD_WINDOW_RETURNS
+from mnq_lab.conditioners.seasonal import (
+    RTH_BUCKETS,
+    SEASONAL_MIN_BUCKET_OBS,
+    SEASONAL_SHRINK_K,
+    SEASONAL_WARMUP_SESSIONS,
+)
+from mnq_lab.conditioners.status import (
+    AnchorStatus,
+    AssignmentStatus,
+    EwmaStatus,
+    MadStatus,
+    ResetReason,
+    ReturnMissingReason,
+    ReturnStatus,
+    SeasonalStatus,
+    ThresholdStatus,
+    VolRelStatus,
+)
+
 PHASE5_PREREGISTRATION_PATH = (
     SPEC_PATH.parent / "docs" / "PHASE5_PREREGISTRATION.md"
 )
@@ -45,6 +77,10 @@ PHASE6_PREREGISTRATION_PATH = (
 )
 PHASE6_PREREGISTRATION_SHA256 = (
     "e800e446ecd23fdb416c499603d086c50b1754c99106279284e3277a33b4ccb9"
+)
+PHASE7_PREREGISTRATION_PATH = SPEC_PATH.parent / "docs" / "PHASE7_PREREGISTRATION.md"
+PHASE7_PREREGISTRATION_SHA256 = (
+    "eeb97cb7e6ccd17a0ccd676de3cf7424f511fc773bacd62ff9e9f88aa404a930"
 )
 
 
@@ -336,3 +372,140 @@ def test_negative_case_a_drifted_constant_would_be_caught(tmp_path):
     )
     assert load_constants(altered).get("estimands", "path") == "observed_bar_path"
     assert load_constants().get("estimands", "path") == "fully_labeled_1m_grid"
+
+
+def test_phase7_preregistration_bytes_are_pinned():
+    assert PHASE7_PREREGISTRATION_PATH.is_file()
+    assert (
+        hashlib.sha256(PHASE7_PREREGISTRATION_PATH.read_bytes()).hexdigest()
+        == PHASE7_PREREGISTRATION_SHA256
+    )
+
+
+def test_phase7_event_time_and_scale_constants_match_yaml(constants):
+    """Frozen test 13: event-time, scale, MAD, and shrinkage constants agree."""
+    assert len(RTH_BUCKETS) == 78
+    assert RTH_BUCKETS[0] == constants.get("time", "rth_start_ct") == "08:30"
+    assert RTH_BUCKETS[-1] == "14:55"
+    assert tuple(constants.get("session_phases")) == (
+        "open",
+        "morning",
+        "midday",
+        "afternoon",
+        "close",
+    )
+    assert EWMA_WARMUP_RETURNS == constants.get("volatility", "ewma_halflife_bars") == 78
+    assert SEASONAL_WARMUP_SESSIONS == constants.get(
+        "volatility", "seasonal_warmup_sessions"
+    ) == 60
+    assert SEASONAL_MIN_BUCKET_OBS == constants.get(
+        "volatility", "seasonal_min_bucket_obs"
+    ) == 30
+    assert SEASONAL_SHRINK_K == constants.get("volatility", "seasonal_shrink_k") == 30
+    independent = constants.get("volatility", "independent_estimator")
+    assert independent == {
+        "kind": "rolling_mad",
+        "window_bars": 78,
+        "scale_factor": 1.4826,
+        "require_contiguous": True,
+    }
+    assert MAD_WINDOW_RETURNS == independent["window_bars"]
+    assert float(MAD_FACTOR) == independent["scale_factor"]
+    assert THRESHOLD_WARMUP_SESSIONS == 60
+
+
+def test_phase7_arm_inventory_matches_frozen_alternatives(constants):
+    alternatives = constants.get("alternative_definitions")
+    assert alternatives == {
+        "tercile_shift_pctpoints": [-5, -2, 2, 5],
+        "rolling_window_sessions": [60],
+        "ewma_halflife_bars": [39, 156],
+    }
+    assert tuple(config.order for config in ARM_CONFIGS) == tuple(range(10))
+    assert tuple(config.arm_id for config in ARM_CONFIGS) == (
+        "primary_ewma78_permissive_expanding",
+        "coverage_strict",
+        "ewma39",
+        "ewma156",
+        "mad78",
+        "threshold_rolling60",
+        "threshold_shift_m05",
+        "threshold_shift_m02",
+        "threshold_shift_p02",
+        "threshold_shift_p05",
+    )
+    primary = ARM_CONFIGS[0]
+    for alternative in ARM_CONFIGS[1:]:
+        differences = sum(
+            getattr(alternative, field) != getattr(primary, field)
+            for field in (
+                "scale_kind",
+                "coverage",
+                "halflife",
+                "history_kind",
+                "lower_probability",
+                "upper_probability",
+            )
+        )
+        if alternative.arm_id.startswith("threshold_shift_"):
+            assert differences == 2  # the paired probabilities are one ruled factor
+        elif alternative.arm_id == "mad78":
+            assert differences == 2  # estimator kind replaces the EWMA halflife field
+        else:
+            assert differences == 1
+
+
+def test_phase7_calendar_statuses_and_category_encoding_are_frozen():
+    assert CALENDAR_VERSION == "mnq-cme-equity-index-calendar-v1"
+    assert CALENDAR_SCHEMA_VERSION == "cme-equity-index-session-calendar-v1"
+    assert CALENDAR_SHA256 == "b86e112c16112bf11a6a548ca8b3f21d28a08f90442b4dde84098f9d3f6eb069"
+    assert CATEGORY_ORDER == (-1, 0, 1, 2)
+    assert CATEGORY_NAMES == {-1: "undefined", 0: "low", 1: "mid", 2: "high"}
+    assert tuple(value.value for value in AnchorStatus) == ("ok", "anchor_bar_missing")
+    assert tuple(value.value for value in ReturnStatus) == ("ok", "missing_return")
+    assert tuple(value.value for value in ReturnMissingReason) == (
+        "bar_absent",
+        "insufficient_components",
+        "spacing_break",
+        "symbol_change",
+    )
+    assert tuple(value.value for value in ResetReason) == (
+        "none",
+        "roll_reset",
+        "gap_reset",
+    )
+    assert tuple(value.value for value in EwmaStatus) == ("ok", "warmup")
+    assert tuple(value.value for value in MadStatus) == ("ok", "warmup", "zero_scale")
+    assert tuple(value.value for value in SeasonalStatus) == (
+        "ok",
+        "warmup",
+        "seasonal_fallback_unavailable",
+        "calendar_classification_missing",
+    )
+    assert tuple(value.value for value in VolRelStatus) == (
+        "ok",
+        "zero_scale",
+        "upstream_undefined",
+    )
+    assert tuple(value.value for value in ThresholdStatus) == (
+        "ok",
+        "insufficient_threshold_history",
+        "degenerate_boundaries",
+    )
+    assert tuple(value.value for value in AssignmentStatus) == (
+        "ok",
+        "warmup",
+        "upstream_undefined",
+    )
+
+
+def test_phase7_deferred_input_and_phase_boundaries_are_explicit():
+    text = PHASE7_PREREGISTRATION_PATH.read_text(encoding="utf-8")
+    assert "liquidity_era_status=deferred_missing_versioned_input" in text
+    assert "Phase 7 emits no contrast," in text
+    assert "prevalence, p-value, null, confirmation, vintage" in text
+    assert "Phase 8 owns named outcome contrasts" in text
+    assert "Phase 9 owns prevalence" in text
+    assert "Phase 10 owns\nnull engines" in text
+    assert "Phase 11 owns guards, the\nresult ledger, vintages" in text
+    assert "Phase 12 owns S01A rendering" in text

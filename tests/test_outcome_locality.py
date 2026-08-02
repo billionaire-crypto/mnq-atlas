@@ -117,7 +117,18 @@ def test_component_fields_are_dependencies_only_for_fully_labeled_estimand():
     mutated["observed_1m_components"][index] = 3
     observed_after = _resolve(mutated, ESTIMAND_OBSERVED)
     full_after = _resolve(mutated, ESTIMAND_FULLY_LABELED)
-    assert observed_after == observed_before
+    for name in (
+        "outcome_status",
+        "outcome_valid",
+        "n_present_bars",
+        "downward_excursion_ticks",
+        "upward_excursion_ticks",
+        "signed_downward_extreme_ticks",
+        "signed_upward_extreme_ticks",
+    ):
+        assert observed_after[name] == observed_before[name]
+    assert observed_after["n_fully_labeled_bars"] == 2
+    assert observed_before["n_fully_labeled_bars"] == 3
     assert full_after["outcome_status"] == STATUS_INSUFFICIENT_COMPONENTS
 
 

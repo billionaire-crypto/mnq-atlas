@@ -38,6 +38,28 @@ def test_unit_o_public_api_has_no_conditioner_calendar_or_scale_arguments():
     assert forbidden.isdisjoint(signature.parameters)
 
 
+def test_public_builder_calls_both_existing_boundary_guards(tmp_path, monkeypatch):
+    columns = synthetic_outcome_columns()
+    store = write_synthetic_store(tmp_path / "data", columns)
+    calls = {"exploration": 0, "duration": 0}
+    real_exploration_guard = excursions.assert_exploration_safe
+    real_duration_guard = excursions.assert_store_bar_seconds
+
+    def exploration_guard(path):
+        calls["exploration"] += 1
+        return real_exploration_guard(path)
+
+    def duration_guard(manifest):
+        calls["duration"] += 1
+        return real_duration_guard(manifest)
+
+    monkeypatch.setattr(excursions, "assert_exploration_safe", exploration_guard)
+    monkeypatch.setattr(excursions, "assert_store_bar_seconds", duration_guard)
+    table = excursions.build_outcome_table(store)
+    assert table.row_count > 0
+    assert calls == {"exploration": 1, "duration": 1}
+
+
 def test_real_unit_o_modules_have_no_forbidden_import_or_path_literal():
     discovered = [excursions, artifacts]
     assert {module.__name__ for module in discovered} == {

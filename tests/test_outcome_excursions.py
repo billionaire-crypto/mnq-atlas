@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+
 import numpy as np
 import pytest
 
 from mnq_lab import SpineError
+from mnq_lab.constants import Constants, load_constants
 from mnq_lab.outcomes.excursions import (
     ESTIMAND_FULLY_LABELED,
     ESTIMAND_OBSERVED,
@@ -17,6 +20,7 @@ from mnq_lab.outcomes.excursions import (
     STATUS_PATH_SYMBOL_MISMATCH,
     STATUS_PATH_TIMESTAMP_MISSING,
     STATUS_WINDOW_OUTSIDE_RTH,
+    _OutcomeContract,
     build_outcome_table,
     compute_excursion_ticks,
     resolve_outcome_row,
@@ -63,6 +67,24 @@ def test_status_vocabulary_and_precedence_are_closed():
         STATUS_INSUFFICIENT_COMPONENTS,
         STATUS_OK,
     )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda data: data.pop("horizons_minutes"),
+        lambda data: data.__setitem__("horizons_minutes", [30, 15, 60]),
+        lambda data: data.__setitem__("horizons_minutes", [15, 30, 45, 60]),
+        lambda data: data.__setitem__("horizons_minutes", [15, 30, 61]),
+    ],
+)
+def test_unit_o_constants_fail_closed_when_horizons_are_missing_extra_or_reordered(
+    mutation,
+):
+    data = deepcopy(load_constants().as_dict())
+    mutation(data)
+    with pytest.raises(SpineError, match="horizon"):
+        _OutcomeContract.from_constants(Constants(data, load_constants().source))
 
 
 def test_exact_window_uses_anchor_close_and_excludes_anchor_extremes_and_end_bar():
@@ -138,9 +160,10 @@ def test_int32_prices_widen_before_extrema_and_subtraction():
             np.asarray([np.iinfo(np.int32).min], dtype=np.int32),
             np.asarray([np.iinfo(np.int32).max], dtype=np.int32),
         )
-    wrapped_mutant = np.int32(np.iinfo(np.int32).max) - np.int32(
-        np.iinfo(np.int32).min
-    )
+    with np.errstate(over="ignore"):
+        wrapped_mutant = np.int32(np.iinfo(np.int32).max) - np.int32(
+            np.iinfo(np.int32).min
+        )
     assert int(wrapped_mutant) == -1  # the named mutation is genuinely dangerous
 
 
@@ -253,6 +276,19 @@ def test_public_build_emits_every_anchor_horizon_estimand_row_in_fixed_order(tmp
     validate_outcome_table(table)
 
 
+def test_public_build_compares_decoded_symbols_not_merely_integer_codes(tmp_path):
+    columns = synthetic_outcome_columns(symbol_changes={"08:40": 1})
+    store = in_memory_store(
+        tmp_path / "exploration" / "bars_5m",
+        columns,
+        symbols=("MNQM1", "MNQM1"),
+    )
+    table = build_outcome_table(store)
+    row = _row(table, estimand=ESTIMAND_OBSERVED)
+    assert row["outcome_status"] == STATUS_OK
+    assert not row["path_symbol_mismatch"]
+
+
 def test_duplicate_timestamps_and_impossible_cross_estimand_status_halt(tmp_path):
     columns = synthetic_outcome_columns()
     duplicated = {name: np.insert(value, 1, value[0]) for name, value in columns.items()}
@@ -277,5 +313,5 @@ def test_duplicate_timestamps_and_impossible_cross_estimand_status_halt(tmp_path
     mutated["outcome_status"][full] = STATUS_OK
     mutated["outcome_valid"][full] = True
     mutated["outcome_status"][observed] = STATUS_INSUFFICIENT_COMPONENTS
-    with pytest.raises(SpineError, match="impossible"):
+    with pytest.raises(SpineError, match="observed_bar_path"):
         validate_outcome_table(clean.from_columns(mutated))

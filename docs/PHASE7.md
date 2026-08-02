@@ -9,9 +9,10 @@
 
 This document closes the implementation work authorized by U13, U14, and U15.
 It records the implementation through `9e41a0b`; it does not authorize Phase 8
-and it does not report a market result. The commit introducing this document is
-a child of `9e41a0b` and is itself unaudited until the independent closeout
-audit. This document therefore does not contain or claim its own SHA-256.
+and it does not report a market result. The commits carrying this document are
+outside the recorded implementation range and remain unaudited until the
+independent closeout audit. This document therefore does not contain or claim
+its own SHA-256.
 
 ## 1. Audited inputs and contract history
 

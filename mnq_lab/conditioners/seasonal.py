@@ -16,6 +16,12 @@ from mnq_lab.conditioners.calendar import (
     CALENDAR_VERSION,
     CalendarTable,
 )
+from mnq_lab.conditioners.dependencies import (
+    CanonicalDependencyPool,
+    CanonicalDependencySequence,
+    DependencyRange,
+    validate_dependency_range,
+)
 from mnq_lab.conditioners.scales.median import lower_median
 from mnq_lab.conditioners.status import SeasonalStatus
 from mnq_lab.spine.timemodel import BAR_NS, TimeModel
@@ -153,7 +159,7 @@ class ScaleAnchorTable:
             raise SpineError("scale anchor rows must be unique and ordered by session/tau")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class SeasonalProfileRow:
     arm_id: str
     session_id: int
@@ -172,6 +178,154 @@ class SeasonalProfileRow:
     calendar_version: str
     calendar_sha256: str
     dependency_keys: tuple[tuple[int, str], ...]
+
+    def __init__(
+        self,
+        arm_id: str,
+        session_id: int,
+        observation_bucket_ct: str,
+        session_phase: str,
+        qualifying_prior_sessions: int,
+        bucket_n: int,
+        bucket_median: float,
+        bucket_median_valid: bool,
+        phase_session_median: float,
+        phase_session_median_valid: bool,
+        shrink_weight: float,
+        seasonal_profile: float,
+        seasonal_valid: bool,
+        seasonal_status: SeasonalStatus,
+        calendar_version: str,
+        calendar_sha256: str,
+        dependency_keys: tuple[tuple[int, str], ...],
+    ) -> None:
+        sequence = CanonicalDependencySequence.from_legacy(
+            "seasonal",
+            arm_id,
+            session_phase,
+            dependency_keys,
+        )
+        dependency_range = DependencyRange(sequence, 0, len(sequence))
+        self._initialize(
+            arm_id,
+            session_id,
+            observation_bucket_ct,
+            session_phase,
+            qualifying_prior_sessions,
+            bucket_n,
+            bucket_median,
+            bucket_median_valid,
+            phase_session_median,
+            phase_session_median_valid,
+            shrink_weight,
+            seasonal_profile,
+            seasonal_valid,
+            seasonal_status,
+            calendar_version,
+            calendar_sha256,
+            dependency_range,
+        )
+
+    @classmethod
+    def _from_dependency_range(
+        cls,
+        arm_id: str,
+        session_id: int,
+        observation_bucket_ct: str,
+        session_phase: str,
+        qualifying_prior_sessions: int,
+        bucket_n: int,
+        bucket_median: float,
+        bucket_median_valid: bool,
+        phase_session_median: float,
+        phase_session_median_valid: bool,
+        shrink_weight: float,
+        seasonal_profile: float,
+        seasonal_valid: bool,
+        seasonal_status: SeasonalStatus,
+        calendar_version: str,
+        calendar_sha256: str,
+        dependency_range: DependencyRange,
+    ) -> SeasonalProfileRow:
+        row = cls.__new__(cls)
+        row._initialize(
+            arm_id,
+            session_id,
+            observation_bucket_ct,
+            session_phase,
+            qualifying_prior_sessions,
+            bucket_n,
+            bucket_median,
+            bucket_median_valid,
+            phase_session_median,
+            phase_session_median_valid,
+            shrink_weight,
+            seasonal_profile,
+            seasonal_valid,
+            seasonal_status,
+            calendar_version,
+            calendar_sha256,
+            dependency_range,
+        )
+        return row
+
+    def _initialize(
+        self,
+        arm_id: str,
+        session_id: int,
+        observation_bucket_ct: str,
+        session_phase: str,
+        qualifying_prior_sessions: int,
+        bucket_n: int,
+        bucket_median: float,
+        bucket_median_valid: bool,
+        phase_session_median: float,
+        phase_session_median_valid: bool,
+        shrink_weight: float,
+        seasonal_profile: float,
+        seasonal_valid: bool,
+        seasonal_status: SeasonalStatus,
+        calendar_version: str,
+        calendar_sha256: str,
+        dependency_range: DependencyRange,
+    ) -> None:
+        values = {
+            "arm_id": arm_id,
+            "session_id": session_id,
+            "observation_bucket_ct": observation_bucket_ct,
+            "session_phase": session_phase,
+            "qualifying_prior_sessions": qualifying_prior_sessions,
+            "bucket_n": bucket_n,
+            "bucket_median": bucket_median,
+            "bucket_median_valid": bucket_median_valid,
+            "phase_session_median": phase_session_median,
+            "phase_session_median_valid": phase_session_median_valid,
+            "shrink_weight": shrink_weight,
+            "seasonal_profile": seasonal_profile,
+            "seasonal_valid": seasonal_valid,
+            "seasonal_status": seasonal_status,
+            "calendar_version": calendar_version,
+            "calendar_sha256": calendar_sha256,
+        }
+        for name, value in values.items():
+            object.__setattr__(self, name, value)
+        object.__setattr__(self, "_dependency_range", dependency_range)
+        self.__post_init__()
+
+    @property
+    def sequence_ref(self) -> CanonicalDependencySequence:
+        return self._dependency_range.sequence_ref
+
+    @property
+    def start(self) -> int:
+        return self._dependency_range.start
+
+    @property
+    def end(self) -> int:
+        return self._dependency_range.end
+
+    def _expanded_dependency_keys(self) -> tuple[tuple[int, str], ...]:
+        return self._dependency_range.dependency_keys
 
     def __post_init__(self) -> None:
         if not isinstance(self.seasonal_status, SeasonalStatus):
@@ -210,10 +364,25 @@ class SeasonalProfileRow:
             raise SpineError("undefined seasonal row cannot expose a usable median")
         if self.calendar_version != CALENDAR_VERSION or self.calendar_sha256 != CALENDAR_SHA256:
             raise SpineError("seasonal row calendar identity differs from accepted input")
-        if self.dependency_keys != tuple(sorted(set(self.dependency_keys))):
-            raise SpineError("seasonal dependency keys must be unique and ordered")
-        if any(session >= self.session_id for session, _ in self.dependency_keys):
-            raise SpineError("seasonal dependency includes current or future session")
+        validate_dependency_range(
+            self._dependency_range,
+            key_kind="seasonal",
+            arm_id=self.arm_id,
+            session_phase=self.session_phase,
+            current_session=self.session_id,
+            qualifying_prior_sessions=self.qualifying_prior_sessions,
+            history_kind=(
+                "empty"
+                if self.seasonal_status
+                is SeasonalStatus.CALENDAR_CLASSIFICATION_MISSING
+                else "expanding"
+            ),
+        )
+
+
+SeasonalProfileRow.dependency_keys = property(
+    SeasonalProfileRow._expanded_dependency_keys
+)
 
 
 @dataclass(frozen=True)
@@ -232,6 +401,22 @@ class SeasonalProfileTable:
             raise SpineError("seasonal rows must be unique and canonically ordered")
         if any(row.arm_id != self.arm_id for row in self.rows):
             raise SpineError("seasonal profile table mixes arm identifiers")
+        canonical_sequences: dict[str, CanonicalDependencySequence] = {}
+        canonical_ranges: dict[tuple[int, str], DependencyRange] = {}
+        for row in self.rows:
+            if not row.sequence_ref.canonical:
+                continue
+            registered = canonical_sequences.setdefault(
+                row.session_phase, row.sequence_ref
+            )
+            if row.sequence_ref is not registered:
+                raise SpineError("seasonal phase rows use different canonical sequences")
+            range_key = (row.session_id, row.session_phase)
+            registered_range = canonical_ranges.setdefault(
+                range_key, row._dependency_range
+            )
+            if row._dependency_range is not registered_range:
+                raise SpineError("seasonal session-phase buckets do not share one range")
         object.__setattr__(
             self,
             "_by_key",
@@ -333,59 +518,83 @@ def build_seasonal_profiles(
         by_session_phase.setdefault((row.session_id, row.session_phase), []).append(row)
         by_session_bucket[(row.session_id, row.observation_bucket_ct)] = row
 
-    output: list[SeasonalProfileRow] = []
     ordered_completed = tuple(sorted(completed_sessions))
+    phases = tuple(_time_model().phase_names)
+    dependency_pool = CanonicalDependencyPool("seasonal", scales.arm_id, phases)
+    phase_sessions: dict[str, tuple[int, ...]] = {}
+    phase_medians_all: dict[str, tuple[float, ...]] = {}
+    for phase in phases:
+        qualifying_sessions: list[int] = []
+        qualifying_medians: list[float] = []
+        for prior in ordered_completed:
+            prior_calendar = calendar.lookup(prior)
+            if (
+                prior_calendar is None
+                or not prior_calendar.seasonal_reference_eligible
+            ):
+                continue
+            phase_rows = tuple(
+                row
+                for row in by_session_phase.get((prior, phase), ())
+                if row.scale_valid
+            )
+            if not phase_rows:
+                continue
+            block_keys = tuple(
+                (row.session_id, row.observation_bucket_ct) for row in phase_rows
+            )
+            dependency_pool.append_block(
+                phase,
+                prior,
+                block_keys,
+                source_phase=phase,
+                calendar_eligible=prior_calendar.seasonal_reference_eligible,
+                source_rows_valid=all(row.scale_valid for row in phase_rows),
+            )
+            qualifying_sessions.append(prior)
+            qualifying_medians.append(
+                float(
+                    lower_median(
+                        np.asarray(
+                            [row.scale_value for row in phase_rows],
+                            dtype=np.float64,
+                        )
+                    )
+                )
+            )
+        phase_sessions[phase] = tuple(qualifying_sessions)
+        phase_medians_all[phase] = tuple(qualifying_medians)
+    dependency_pool.seal()
+
+    output: list[SeasonalProfileRow] = []
     for current_session in current_sessions:
         current_calendar = calendar.lookup(current_session)
         phase_context: dict[
-            str, tuple[list[int], list[float], tuple[tuple[int, str], ...]]
+            str, tuple[tuple[int, ...], tuple[float, ...], DependencyRange]
         ] = {}
         if current_calendar is not None:
-            for phase in _time_model().phase_names:
-                prior_sessions: list[int] = []
-                phase_medians: list[float] = []
-                phase_dependency_keys: list[tuple[int, str]] = []
-                for prior in ordered_completed:
-                    if prior >= current_session:
-                        break
-                    prior_calendar = calendar.lookup(prior)
-                    if (
-                        prior_calendar is None
-                        or not prior_calendar.seasonal_reference_eligible
-                    ):
-                        continue
-                    phase_rows = [
-                        row
-                        for row in by_session_phase.get((prior, phase), ())
-                        if row.scale_valid
-                    ]
-                    if not phase_rows:
-                        continue
-                    prior_sessions.append(prior)
-                    phase_medians.append(
-                        float(
-                            lower_median(
-                                np.asarray(
-                                    [row.scale_value for row in phase_rows],
-                                    dtype=np.float64,
-                                )
-                            )
-                        )
-                    )
-                    phase_dependency_keys.extend(
-                        (row.session_id, row.observation_bucket_ct)
-                        for row in phase_rows
-                    )
+            for phase in phases:
+                sequence = dependency_pool.sequence(phase)
+                prefix_count = sequence.prefix_block_count(current_session)
                 phase_context[phase] = (
-                    prior_sessions,
-                    phase_medians,
-                    tuple(sorted(set(phase_dependency_keys))),
+                    phase_sessions[phase][:prefix_count],
+                    phase_medians_all[phase][:prefix_count],
+                    dependency_pool.range_for(
+                        phase, current_session, "expanding"
+                    ),
+                )
+        else:
+            for phase in phases:
+                phase_context[phase] = (
+                    (),
+                    (),
+                    dependency_pool.range_for(phase, current_session, "empty"),
                 )
         for bucket in RTH_BUCKETS:
             phase = _phase_for_bucket(bucket)
             if current_calendar is None:
                 output.append(
-                    SeasonalProfileRow(
+                    SeasonalProfileRow._from_dependency_range(
                         scales.arm_id,
                         current_session,
                         bucket,
@@ -402,12 +611,12 @@ def build_seasonal_profiles(
                         SeasonalStatus.CALENDAR_CLASSIFICATION_MISSING,
                         CALENDAR_VERSION,
                         CALENDAR_SHA256,
-                        (),
+                        phase_context[phase][2],
                     )
                 )
                 continue
 
-            prior_sessions, phase_medians, dependencies = phase_context[phase]
+            prior_sessions, phase_medians, dependency_range = phase_context[phase]
 
             bucket_rows = [
                 by_session_bucket[(prior, bucket)]
@@ -424,7 +633,7 @@ def build_seasonal_profiles(
             # Every bucket member is already a member of the emitted phase
             # fallback support, so the shared phase identity set is the exact union.
             output.append(
-                SeasonalProfileRow(
+                SeasonalProfileRow._from_dependency_range(
                     scales.arm_id,
                     current_session,
                     bucket,
@@ -441,7 +650,7 @@ def build_seasonal_profiles(
                     calculated[7],
                     CALENDAR_VERSION,
                     CALENDAR_SHA256,
-                    dependencies,
+                    dependency_range,
                 )
             )
     return SeasonalProfileTable(scales.arm_id, tuple(output))

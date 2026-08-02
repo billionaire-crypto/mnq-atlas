@@ -244,7 +244,7 @@ def _scale_and_profile(values: np.ndarray, arm_id: str):
                 SeasonalStatus.OK,
                 CALENDAR_VERSION,
                 CALENDAR_SHA256,
-                tuple((_SESSIONS[index], "08:30") for index in range(5)),
+                tuple((_SESSIONS[index], "08:30") for index in range(60)),
             ),
         ),
     )

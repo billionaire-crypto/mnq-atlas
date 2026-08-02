@@ -10,6 +10,12 @@ import numpy as np
 from mnq_lab import SpineError
 from mnq_lab.conditioners.arms import ArmConfig
 from mnq_lab.conditioners.calendar import CalendarTable
+from mnq_lab.conditioners.dependencies import (
+    CanonicalDependencyPool,
+    CanonicalDependencySequence,
+    DependencyRange,
+    validate_dependency_range,
+)
 from mnq_lab.conditioners.seasonal import (
     ScaleAnchorTable,
     SeasonalProfileTable,
@@ -171,7 +177,7 @@ def build_vol_rel(
     return VolRelTable(scales.arm_id, tuple(output))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class ThresholdRow:
     arm_id: str
     session_id: int
@@ -185,6 +191,126 @@ class ThresholdRow:
     threshold_valid: bool
     threshold_status: ThresholdStatus
     dependency_keys: tuple[tuple[int, int], ...]
+
+    def __init__(
+        self,
+        arm_id: str,
+        session_id: int,
+        session_phase: str,
+        history_kind: str,
+        qualifying_prior_sessions: int,
+        lower_probability: float,
+        upper_probability: float,
+        lower_threshold: float,
+        upper_threshold: float,
+        threshold_valid: bool,
+        threshold_status: ThresholdStatus,
+        dependency_keys: tuple[tuple[int, int], ...],
+    ) -> None:
+        sequence = CanonicalDependencySequence.from_legacy(
+            "threshold",
+            arm_id,
+            session_phase,
+            dependency_keys,
+        )
+        dependency_range = DependencyRange(sequence, 0, len(sequence))
+        self._initialize(
+            arm_id,
+            session_id,
+            session_phase,
+            history_kind,
+            qualifying_prior_sessions,
+            lower_probability,
+            upper_probability,
+            lower_threshold,
+            upper_threshold,
+            threshold_valid,
+            threshold_status,
+            dependency_range,
+        )
+
+    @classmethod
+    def _from_dependency_range(
+        cls,
+        arm_id: str,
+        session_id: int,
+        session_phase: str,
+        history_kind: str,
+        qualifying_prior_sessions: int,
+        lower_probability: float,
+        upper_probability: float,
+        lower_threshold: float,
+        upper_threshold: float,
+        threshold_valid: bool,
+        threshold_status: ThresholdStatus,
+        dependency_range: DependencyRange,
+    ) -> ThresholdRow:
+        row = cls.__new__(cls)
+        row._initialize(
+            arm_id,
+            session_id,
+            session_phase,
+            history_kind,
+            qualifying_prior_sessions,
+            lower_probability,
+            upper_probability,
+            lower_threshold,
+            upper_threshold,
+            threshold_valid,
+            threshold_status,
+            dependency_range,
+        )
+        return row
+
+    def _initialize(
+        self,
+        arm_id: str,
+        session_id: int,
+        session_phase: str,
+        history_kind: str,
+        qualifying_prior_sessions: int,
+        lower_probability: float,
+        upper_probability: float,
+        lower_threshold: float,
+        upper_threshold: float,
+        threshold_valid: bool,
+        threshold_status: ThresholdStatus,
+        dependency_range: DependencyRange,
+    ) -> None:
+        values = {
+            "arm_id": arm_id,
+            "session_id": session_id,
+            "session_phase": session_phase,
+            "history_kind": history_kind,
+            "qualifying_prior_sessions": qualifying_prior_sessions,
+            "lower_probability": lower_probability,
+            "upper_probability": upper_probability,
+            "lower_threshold": lower_threshold,
+            "upper_threshold": upper_threshold,
+            "threshold_valid": threshold_valid,
+            "threshold_status": threshold_status,
+        }
+        for name, value in values.items():
+            object.__setattr__(self, name, value)
+        object.__setattr__(self, "_dependency_range", dependency_range)
+
+    @property
+    def sequence_ref(self) -> CanonicalDependencySequence:
+        return self._dependency_range.sequence_ref
+
+    @property
+    def start(self) -> int:
+        return self._dependency_range.start
+
+    @property
+    def end(self) -> int:
+        return self._dependency_range.end
+
+    def _expanded_dependency_keys(self) -> tuple[tuple[int, int], ...]:
+        return self._dependency_range.dependency_keys
+
+
+ThresholdRow.dependency_keys = property(ThresholdRow._expanded_dependency_keys)
 
 
 @dataclass(frozen=True)
@@ -200,6 +326,7 @@ class ThresholdTable:
         ]
         if keys != sorted(keys) or len(set(keys)) != len(keys):
             raise SpineError("threshold rows must be unique and canonically ordered")
+        canonical_sequences: dict[str, CanonicalDependencySequence] = {}
         for row in self.rows:
             if row.arm_id != self.arm_id:
                 raise SpineError("threshold table mixes arm identifiers")
@@ -248,12 +375,23 @@ class ThresholdTable:
                 row.lower_threshold == row.upper_threshold
             ):
                 raise SpineError("equal boundaries require degenerate threshold status")
-            if row.dependency_keys != tuple(sorted(set(row.dependency_keys))):
-                raise SpineError("threshold dependency keys must be unique and ordered")
-            if any(session >= row.session_id for session, _ in row.dependency_keys):
-                raise SpineError("threshold dependency includes current or future session")
-            if len({session for session, _ in row.dependency_keys}) != row.qualifying_prior_sessions:
-                raise SpineError("threshold dependencies and qualifying-session count disagree")
+            validate_dependency_range(
+                row._dependency_range,
+                key_kind="threshold",
+                arm_id=row.arm_id,
+                session_phase=row.session_phase,
+                current_session=row.session_id,
+                qualifying_prior_sessions=row.qualifying_prior_sessions,
+                history_kind=row.history_kind,
+            )
+            if row.sequence_ref.canonical:
+                registered = canonical_sequences.setdefault(
+                    row.session_phase, row.sequence_ref
+                )
+                if row.sequence_ref is not registered:
+                    raise SpineError(
+                        "threshold phase rows use different canonical sequences"
+                    )
         object.__setattr__(
             self,
             "_by_key",
@@ -289,6 +427,27 @@ def build_thresholds(
         if row.vol_rel_valid:
             by_session_phase.setdefault((row.session_id, row.session_phase), []).append(row)
 
+    dependency_pool = CanonicalDependencyPool(
+        "threshold", config.arm_id, PHASE_ORDER
+    )
+    for phase in PHASE_ORDER:
+        for prior in sorted(completed_sessions):
+            calendar_row = calendar.lookup(prior)
+            if calendar_row is None or not calendar_row.seasonal_reference_eligible:
+                continue
+            phase_rows = tuple(by_session_phase.get((prior, phase), ()))
+            if not phase_rows:
+                continue
+            dependency_pool.append_block(
+                phase,
+                prior,
+                tuple((row.session_id, row.tau_ns) for row in phase_rows),
+                source_phase=phase,
+                calendar_eligible=calendar_row.seasonal_reference_eligible,
+                source_rows_valid=all(row.vol_rel_valid for row in phase_rows),
+            )
+    dependency_pool.seal()
+
     output: list[ThresholdRow] = []
     for current in current_sessions:
         for phase in PHASE_ORDER:
@@ -306,14 +465,14 @@ def build_thresholds(
                 if config.history_kind == "rolling60"
                 else eligible_sessions
             )
-            dependency_keys = tuple(
-                (row.session_id, row.tau_ns)
-                for prior in selected
-                for row in by_session_phase[(prior, phase)]
+            dependency_range = dependency_pool.range_for(
+                phase,
+                current,
+                config.history_kind,
             )
             if len(eligible_sessions) < THRESHOLD_WARMUP_SESSIONS:
                 output.append(
-                    ThresholdRow(
+                    ThresholdRow._from_dependency_range(
                         config.arm_id,
                         current,
                         phase,
@@ -325,7 +484,7 @@ def build_thresholds(
                         0.0,
                         False,
                         ThresholdStatus.INSUFFICIENT_THRESHOLD_HISTORY,
-                        dependency_keys,
+                        dependency_range,
                     )
                 )
                 continue
@@ -352,7 +511,7 @@ def build_thresholds(
                 else ThresholdStatus.OK
             )
             output.append(
-                ThresholdRow(
+                ThresholdRow._from_dependency_range(
                     config.arm_id,
                     current,
                     phase,
@@ -364,7 +523,7 @@ def build_thresholds(
                     float(upper),
                     True,
                     status,
-                    dependency_keys,
+                    dependency_range,
                 )
             )
     return ThresholdTable(config.arm_id, tuple(output))

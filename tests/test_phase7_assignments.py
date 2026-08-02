@@ -167,7 +167,7 @@ def test_vol_rel_propagates_upstream_statuses_and_handles_zero_exactly():
                 SeasonalStatus.OK if profile_valid else SeasonalStatus.WARMUP,
                 CALENDAR_VERSION,
                 CALENDAR_SHA256,
-                (),
+                tuple((20190000 + prior, "08:30") for prior in range(60)),
             )
         )
     result = build_vol_rel(scales, SeasonalProfileTable("x", tuple(profiles)))

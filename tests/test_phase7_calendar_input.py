@@ -50,11 +50,12 @@ EXPECTED_ARTIFACTS = {
     MANIFEST: (5_844, "bdd923a534152ef88bd9db874e60e08c757b85dae729b397ae78351a3e3d7a1d"),
     ACCEPTANCE: (24_039, "f63e58854e4c5427271140be4452ebb7169a39f665927641f0b63bea3d0df64d"),
     TOOL: (39_158, "937abff993d3e5a5d43282ae12b895ca0e1a99328082e1438687f6972a306db6"),
-    REPO / "docs/DISCREPANCIES.md": (
-        51_539,
-        "7ec200bb1de83769b8ce07551fec4e0b81f5e90e20a4792c22ae47f285bed615",
-    ),
 }
+DISCREPANCIES = REPO / "docs/DISCREPANCIES.md"
+DISCREPANCIES_HISTORICAL_PREFIX_BYTES = 51_539
+DISCREPANCIES_HISTORICAL_PREFIX_SHA256 = (
+    "7ec200bb1de83769b8ce07551fec4e0b81f5e90e20a4792c22ae47f285bed615"
+)
 EXPECTED_COLUMNS = [
     "trade_date",
     "market",
@@ -169,6 +170,15 @@ def _assert_expected_artifact(path: Path, expected: tuple[int, str]) -> None:
     assert _sha256_bytes(payload) == expected[1], path
 
 
+def _assert_discrepancies_append_only(payload: bytes) -> None:
+    assert len(payload) >= DISCREPANCIES_HISTORICAL_PREFIX_BYTES
+    historical_prefix = payload[:DISCREPANCIES_HISTORICAL_PREFIX_BYTES]
+    assert (
+        _sha256_bytes(historical_prefix)
+        == DISCREPANCIES_HISTORICAL_PREFIX_SHA256
+    )
+
+
 def _sha256_bytes(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
@@ -255,10 +265,8 @@ def test_calendar_ledger_precedes_and_binds_committed_artifacts(monkeypatch):
     )
     validated = validate_calendar_entry_artifacts()
     assert validated == entry
-    current_record = EXPECTED_ARTIFACTS[REPO / "docs/DISCREPANCIES.md"]
-    current_payload = original_read_bytes(REPO / "docs/DISCREPANCIES.md")
-    assert len(current_payload) == current_record[0]
-    assert _sha256_bytes(current_payload) == current_record[1]
+    current_payload = original_read_bytes(DISCREPANCIES)
+    _assert_discrepancies_append_only(current_payload)
     assert entry == load_calendar_entry()
     assert entry["phase7_production_authorized"] is False
     assert entry["no_affected_result_has_run"] is True
@@ -280,6 +288,7 @@ def test_calendar_ledger_precedes_and_binds_committed_artifacts(monkeypatch):
 def test_calendar_artifact_hashes_and_json_are_canonical():
     for path, expected in EXPECTED_ARTIFACTS.items():
         _assert_expected_artifact(path, expected)
+    _assert_discrepancies_append_only(DISCREPANCIES.read_bytes())
     for path in (TABLE, MANIFEST, ACCEPTANCE, INDEX, LOCK):
         payload = path.read_bytes()
         assert payload == _canonical(json.loads(payload.decode("utf-8"))), path
@@ -310,9 +319,16 @@ def test_historical_ledger_binding_negative_controls(monkeypatch):
         validate_calendar_entry_artifacts()
 
     monkeypatch.undo()
-    current_path = REPO / "docs/DISCREPANCIES.md"
     with pytest.raises(AssertionError):
-        _assert_expected_artifact(current_path, (51_539, "0" * 64))
+        _assert_discrepancies_append_only(
+            DISCREPANCIES.read_bytes()[:DISCREPANCIES_HISTORICAL_PREFIX_BYTES - 1]
+        )
+    corrupted_prefix = bytearray(
+        DISCREPANCIES.read_bytes()[:DISCREPANCIES_HISTORICAL_PREFIX_BYTES]
+    )
+    corrupted_prefix[-1] ^= 1
+    with pytest.raises(AssertionError):
+        _assert_discrepancies_append_only(bytes(corrupted_prefix))
 
 
 def test_calendar_table_schema_support_and_total_mapping():

@@ -953,3 +953,55 @@ test and only the internal pin for this file is updated. The maintenance commit
 records both files' old and new byte counts and SHA-256 values. Historical
 calendar closeout and ledger bytes are not amended. Phase 8 remains
 unauthorized.
+
+---
+
+## D21 - Outcome-layer and Phase 8 contract rulings - `RESOLVED`
+
+The two ratified, byte-pinned preregistrations surfaced four points that the
+frozen specification does not determine uniquely. Each resolution below was
+fixed before any Unit O outcome value existed. They do not amend Phase 7 or
+authorize Phase 8 production.
+
+**Natural-prevalence reading.** Frozen section 8's "pooled at natural ANCHOR
+frequency" is ambiguous. Phase 8 section 4 reads it as pooling constituent
+cells at natural prevalence while preserving session-equal weighting within
+each cell. Anchor-equal pooling is rejected: it would duplicate section 7.1's
+separate `anchor_weighted` companion and contradict the rule that, within an
+estimand, `session_equal_weighted` is primary. This is a resolved ambiguity in
+the D11a/D12 pattern, not an outcome-dependent choice.
+
+**Equal-mass extension.** Frozen section 8 defines equal weighting across
+comparison phases and, by explicit analogy, across volatility states. It does
+not define equal weighting for `cell_vs_complement` or
+`cell_vs_population`. Phase 8 section 4 extends the rule to give equal mass to
+each constituent phase-volatility cell, with the named estimand's
+session-equal construction applied inside each cell. This is declared
+preregistered latitude fixed before outcomes: an extension, not a
+transcription.
+
+**Year-concentration ruling - user ratified 2026-08-01.** Frozen section 6
+fires `insufficient_completion` when accepted sessions "concentrate in one
+year or era" without defining how much concentration is enough. The gate fires
+only when accepted support is confined completely to one calendar year while
+the source population spans more than one. Every other concentration is
+emitted as a per-year completion diagnostic and does not fire the gate. The
+basis is frozen section 10.1: thresholds chosen before their distributions are
+known would be the same tuning this lab exists to avoid, while later work may
+preregister validity requirements against known diagnostic ranges. Choosing a
+numeric cutoff now would be that forbidden blind threshold, so a numeric rule
+is deliberately deferred to a later preregistration. Nothing is hidden because
+per-year completion is emitted regardless. Era concentration is not evaluated
+while `liquidity_era` is inactive.
+
+**Liquidity-era wording.** Phase 7's shipped `state_validity.py` emits
+`deferred_missing_versioned_input`; the ratified term from Phase 8 onward is
+`inactive_missing_versioned_input`. The substance is identical: no partition,
+correlation invalid rather than zero, and no conservativeness claim. Phase 7
+is historical and is not amended.
+
+**Status:** `RESOLVED`. The calendar-input test now protects the first 51,539
+bytes of this append-only document against the historical SHA-256
+`7ec200bb1de83769b8ce07551fec4e0b81f5e90e20a4792c22ae47f285bed615`
+and permits only growth after that exact prefix. No frozen or accepted-calendar
+pin changes.

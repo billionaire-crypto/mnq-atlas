@@ -916,3 +916,77 @@ The failed gate and the independent P7C-3 review are the protected-artifact
 exception already defined by §19; they do not consume or add a routine audit
 checkpoint. This amendment requires its own focused ratification before the
 maintenance commit. The Phase 7 closeout audit remains required.
+
+## 23. Amendment 3 -- conditioner-layer guard scope correction
+
+Finding: P7C-4. `tests/test_conditioner_registry.py::
+test_registry_package_is_market_free_and_never_orders_by_measurement` scans
+the entire `mnq_lab/conditioners` tree and bans ordering calls irrespective of
+operand. Its authority is Phase 6 preregistration item 15 and D17 #7, both of
+which scope the constraint to the registry and harness and to Phase 6. Applied
+to real Phase 7 conditioners it contradicts frozen section 16.3
+(`conditioners/` know markets), frozen sections 16.4.4 and 11 (selection verbs
+are banned in `core/` and on measured output), and ratified section 13
+(ascending event/session order). The guard is narrowed and a replacement
+Phase 7 guard is added. No Phase 6 guarantee is removed; only its over-wide
+file scope is corrected.
+
+The permitted files for the guard correction are exhaustive:
+
+1. `tests/test_conditioner_registry.py`; and
+2. new `tests/test_phase7_conditioner_layer_scope.py`.
+
+The protected Phase 6 test's pin before this change is 31,452 bytes and
+SHA-256
+`cc7ea4a520245fe03feee61f11e23b59b6e855212659917123dbb3c30ab884ae`.
+
+The narrowed Phase 6 scan covers exactly
+`mnq_lab/conditioners/registry.py` and
+`mnq_lab/conditioners/__init__.py`, the Phase 6 registry implementation and
+its exports, and is renamed to state that scope. Its import, ordering, and
+data-tier rules are otherwise unchanged. The unconditional ordering ban
+remains correct for registry mechanics because registry iteration is
+insertion-ordered and never sorted.
+
+The new Phase 7 guard scans every other Python module below
+`mnq_lab/conditioners` and:
+
+1. forbids imports from `studies`, `nulls`, `report`, `ledger`, and `outcomes`,
+   and any locked-tier or store-path literal;
+2. permits imports from `mnq_lab.spine` and `mnq_lab.constants` under frozen
+   section 16.3 and ratified section 3;
+3. bans `sort_values`, `nlargest`, `idxmax`, `argmax`, and `rank` on every
+   operand; and
+4. permits built-in `sorted` and `.sort` only when the operand expression's
+   root identifier is present in a literal immutable identity allowlist. The
+   allowlist is never computed and covers only session/trade-date identities,
+   dependency and primary keys, phases, buckets, arm identifiers, and
+   timestamps. Every other operand fails.
+
+Three mandatory non-vacuous mutations must fail:
+
+1. M1 injects `from mnq_lab.spine.timemodel import TimeModel` into an in-memory
+   copy of `mnq_lab/conditioners/registry.py`; the narrowed Phase 6 scan must
+   reject it, proving that narrowing did not disarm registry isolation.
+2. M2 injects both `sorted(scale_values)` and
+   `vol_rel.sort_values()` into Phase 7 conditioner source. The Phase 7 guard
+   must reject the first because `scale_values` is not in the immutable
+   identity allowlist and the second because the verb is unconditionally
+   banned.
+3. M3 routes ordering of a measured series through a private helper. The guard
+   must still reject it, proving that permission is operand-based rather than
+   helper-name-based.
+
+Commit order is fixed. First, this section 23 amendment is committed alone,
+with its old and new preregistration byte counts and SHA-256 values and
+`Finding: P7C-4` in the commit message, and is independently ratified. Second,
+the two-file guard correction is committed with the Phase 6 test's old and new
+pins in its message. Third, the step-3/4 implementation may be committed. The
+uncommitted step-3/4 draft remains uncommitted until this amendment is
+ratified.
+
+The P7C-4 stop and review are a section 16.6 fail-closed exception and a
+section 19 protected-artifact review. They do not consume checkpoint 3,
+because step 4 is not yet committed and the authorized suite is not yet green.
+Checkpoint 3 remains owed. This amendment is not a general exemption: any
+further protected change remains unplanned under section 19.

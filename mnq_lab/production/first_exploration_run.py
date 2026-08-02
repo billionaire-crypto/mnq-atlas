@@ -14,7 +14,6 @@ import os
 from pathlib import Path
 import sys
 import time
-import tracemalloc
 from typing import Any, Mapping
 
 import numpy as np
@@ -997,7 +996,6 @@ def run_shakedown() -> dict[str, Any]:
     if not environment.get("commit") or environment.get("dirty") is not False:
         raise SpineError("shakedown requires a clean committed worktree")
 
-    tracemalloc.start()
     started = time.perf_counter()
     timings: dict[str, float] = {}
 
@@ -1032,9 +1030,7 @@ def run_shakedown() -> dict[str, Any]:
     )
     timings["unit_o_write_and_full_verify"] = time.perf_counter() - mark
     timings["total"] = time.perf_counter() - started
-    _, traced_peak = tracemalloc.get_traced_memory()
-    peak_memory = max(int(traced_peak), _peak_process_memory_bytes())
-    tracemalloc.stop()
+    peak_memory = _peak_process_memory_bytes()
 
     return _finalize_staged_run(
         staging_root,

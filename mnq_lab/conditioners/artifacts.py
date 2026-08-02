@@ -60,6 +60,7 @@ ANCHOR_SCALE_SCHEMA = (
     ("scheduled_break", "bool"),
     ("contiguous_return_count", "int32"),
     ("scale_value", "float64"),
+    ("scale_valid", "bool"),
     ("ewma_status", "U16"),
     ("mad_status", "U16"),
 )
@@ -212,7 +213,11 @@ class Phase7ArtifactBundle:
     tables: Mapping[str, ArtifactTable]
 
     def __post_init__(self) -> None:
-        if any(name.lower() in _FORBIDDEN_ARTIFACT_KEYS for name in self.tables):
+        if any(
+            token in name.lower()
+            for name in self.tables
+            for token in _FORBIDDEN_ARTIFACT_KEYS
+        ):
             raise SpineError("Phase 8-12 artifact key entered the Phase 7 bundle")
         if tuple(self.tables) != tuple(_SCHEMAS):
             raise SpineError("Phase 7 artifact bundle differs from the frozen table order")
@@ -338,6 +343,7 @@ def write_phase7_artifacts(
     env = dict(environment) if environment is not None else environment_fingerprint(REPO_ROOT)
     manifest = {
         "artifact_schema_version": PHASE7_ARTIFACT_SCHEMA_VERSION,
+        "arm_schema_version": "phase7-ofat-arms-v1",
         "source_build_id": source_build_id,
         "frozen_inputs": {
             "REV6_FROZEN_SPEC.md": _sha256_file(SPEC_PATH),
@@ -353,6 +359,9 @@ def write_phase7_artifacts(
         "environment_fingerprint": env,
         "arm_order": [config.arm_id for config in ARM_CONFIGS],
         "table_order": list(bundle.tables),
+        "table_schema_versions": {
+            name: f"phase7-{name.replace('_', '-')}-v1" for name in bundle.tables
+        },
         "tables": table_manifest,
         "registry_comparison_policies": _comparison_policies(),
         "semantic_determinism": "exact discrete; float64 atol=0 rtol=1e-12",

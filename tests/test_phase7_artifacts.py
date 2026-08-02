@@ -43,6 +43,7 @@ def _anchor_columns():
         "scheduled_break": [False],
         "contiguous_return_count": [78],
         "scale_value": [-0.0],
+        "scale_valid": [True],
         "ewma_status": ["ok"],
         "mad_status": [""],
     }
@@ -124,6 +125,8 @@ def test_manifest_binds_every_column_and_required_identity(tmp_path, bundle):
     assert raw.endswith(b"\n") and b"\r" not in raw
     assert json.loads(raw) == manifest
     assert manifest["artifact_schema_version"] == PHASE7_ARTIFACT_SCHEMA_VERSION
+    assert manifest["arm_schema_version"] == "phase7-ofat-arms-v1"
+    assert tuple(manifest["table_schema_versions"]) == tuple(bundle.tables)
     assert manifest["calendar_version"] == CALENDAR_VERSION
     assert manifest["calendar_sha256"] == CALENDAR_SHA256
     assert manifest["code_commit"] == "a" * 40
@@ -167,7 +170,7 @@ def test_calendar_identity_fails_before_any_write(tmp_path, bundle, version, dig
 
 def test_schema_rejects_a_phase8_artifact_key(bundle):
     tables = dict(bundle.tables)
-    tables["contrast"] = tables["assignments"]
+    tables["contrast_results"] = tables["assignments"]
     from mnq_lab.conditioners.artifacts import Phase7ArtifactBundle
 
     with pytest.raises(SpineError, match="Phase 8-12 artifact key"):

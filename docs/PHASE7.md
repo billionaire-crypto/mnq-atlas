@@ -4,13 +4,13 @@
 **Specification:** `REV6_FROZEN_SPEC.md`, revision 6  
 **Branch:** `phase-7-conditioners`  
 **Accepted calendar base:** `ded8ba0733f525b31b3cb948ece9a6ada493c9ec`  
-**Implemented tip:** `85da2417e80d325ca5243680a35db4d6bd35f9c3`  
+**Implemented tip:** `9e41a0b5829b2e35eae2e3021388f50c413a8032`  
 **Status:** implementation complete; independent Phase 7 closeout audit pending
 
 This document closes the implementation work authorized by U13, U14, and U15.
-It records the implementation through `85da241`; it does not authorize Phase 8
+It records the implementation through `9e41a0b`; it does not authorize Phase 8
 and it does not report a market result. The commit introducing this document is
-a child of `85da241` and is itself unaudited until the independent closeout
+a child of `9e41a0b` and is itself unaudited until the independent closeout
 audit. This document therefore does not contain or claim its own SHA-256.
 
 ## 1. Audited inputs and contract history
@@ -38,7 +38,8 @@ The implementation chain after the accepted calendar base is:
 10. `226955e` — implement `vol_rel`, thresholds, assignments, and migration;
 11. `383cc9d` — execute the integrated real-conditioner registry gate;
 12. `c2ada39` — implement the descriptive state-validity panel; and
-13. `85da241` — implement deterministic artifacts and frozen test 13.
+13. `85da241` — implement deterministic artifacts and frozen test 13; and
+14. `9e41a0b` — add explicit anchor-scale validity and harden artifact schemas.
 
 No accepted-calendar byte, calendar-ledger byte, frozen specification byte,
 YAML byte, Phase 5 artifact, or scale implementation changed after its relevant
@@ -147,10 +148,10 @@ as xfails are now passing tests. The only remaining xfails are:
 
 Neither may be deleted or converted in Phase 7.
 
-## 7. Protected hashes through `85da241`
+## 7. Protected hashes through `9e41a0b`
 
 The following raw-byte pins cover every path changed from accepted base
-`ded8ba0` through implemented tip `85da241`. The closeout audit must recompute
+`ded8ba0` through implemented tip `9e41a0b`. The closeout audit must recompute
 them; this table does not include this document.
 
 | SHA-256 | Bytes | Path |
@@ -159,7 +160,7 @@ them; this table does not include this document.
 | `eeb97cb7e6ccd17a0ccd676de3cf7424f511fc773bacd62ff9e9f88aa404a930` | 51,877 | `docs/PHASE7_PREREGISTRATION.md` |
 | `ceeb30224d2e880386e12720d066e8909b7145e7cca64d822b9bffc5cc894860` | 19,330 | `mnq_lab/conditioners/admission.py` |
 | `f25fd25d8d681eacd673b3af901a60d384aff7ffba9b6f4c8cd963702841a6c8` | 2,430 | `mnq_lab/conditioners/arms.py` |
-| `9520b27fd8aa28af319eaa83ce1436c7ac34e70993f550d07d677adfe937d8ec` | 13,535 | `mnq_lab/conditioners/artifacts.py` |
+| `b97d3fede3d4071438802d987e39d64a66679346b1622a9e77bb44867d08845e` | 13,810 | `mnq_lab/conditioners/artifacts.py` |
 | `c10a4ef369d41508517d5c599dd4b754fe4b52c866bdee6270fa15e347db4b56` | 29,138 | `mnq_lab/conditioners/assignments.py` |
 | `b8b5d6888b91a96c8df2809653b240535e171fda05850acfa99740a39f0ac2f7` | 9,168 | `mnq_lab/conditioners/calendar.py` |
 | `638f44ecd85b8bd8b889c35a0592b3a3786b17de0f02a4acd42a7f1b5cb59e5a` | 6,440 | `mnq_lab/conditioners/pipeline.py` |
@@ -176,7 +177,7 @@ them; this table does not include this document.
 | `7ff4484b88eed981e0006fe7382ec7c30ffef7b2e33695d41c711f49bb62bfc2` | 1,258 | `tests/phase7_contract_oracles.py` |
 | `f9b4c6d77985c69670f1e02ea6f312453e783b64c05142bebec2cf85004f7d31` | 2,973 | `tests/phase7_pipeline_fixtures.py` |
 | `d0814c6851ff763c6b6b588a17346b250165f42ed2981f8da5dca40ee6ef5750` | 31,941 | `tests/test_conditioner_registry.py` |
-| `a953bdeb5df37f43f3fb839394d1d9c1a3d15ddffcb4fe3acc878b85f0c4a99f` | 5,915 | `tests/test_phase7_artifacts.py` |
+| `fe176b2f17cfe017dbd1c4774a8b216d83305c49c6a9dafefb1a8aeab3d120fc` | 6,097 | `tests/test_phase7_artifacts.py` |
 | `f802bb3f0286b957ad9109ec6db96ed82c251ac627d3ff11cac126e5cb9bb44d` | 12,579 | `tests/test_phase7_assignments.py` |
 | `b6cd9ca93c397c80e34eff47fc6259331070a4d23989edb1df0ad21e30cefb50` | 11,889 | `tests/test_phase7_calendar_and_seasonal.py` |
 | `1687f2a792e81cd397b22e1e1a81524fd88df1511adb4a5bb2e61928f9b52fba` | 24,490 | `tests/test_phase7_calendar_input.py` |
@@ -217,7 +218,7 @@ The only authorized suite invocation is:
 python -m pytest tests --ignore=tests/test_bootstrap_acceptance.py -q
 ```
 
-At implemented tip `85da241` it produced:
+At implemented tip `9e41a0b` it produced:
 
 ```text
 893 passed, 2 xfailed

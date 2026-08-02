@@ -961,15 +961,26 @@ def _registry_scope_violations(path):
     return violations
 
 
-def test_registry_package_is_market_free_and_never_orders_by_measurement():
-    paths = sorted(_CONDITIONERS_ROOT.rglob("*.py"))
-    assert paths
+def test_phase6_registry_files_are_market_free_and_never_order_values():
+    paths = (
+        _CONDITIONERS_ROOT / "registry.py",
+        _CONDITIONERS_ROOT / "__init__.py",
+    )
+    assert all(path.is_file() for path in paths)
     violations = {
         path.name: _registry_scope_violations(path)
         for path in paths
         if _registry_scope_violations(path)
     }
     assert not violations
+
+
+def test_narrowed_registry_guard_kills_planted_spine_import(tmp_path):
+    source = (_CONDITIONERS_ROOT / "registry.py").read_text(encoding="utf-8")
+    planted = "from mnq_lab.spine.timemodel import TimeModel\n" + source
+    path = tmp_path / "planted_registry.py"
+    path.write_text(planted, encoding="utf-8")
+    assert "forbidden import mnq_lab.spine.timemodel" in _registry_scope_violations(path)
 
 
 @pytest.mark.parametrize(

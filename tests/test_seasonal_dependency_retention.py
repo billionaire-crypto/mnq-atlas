@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import fields, replace
 from datetime import date, datetime, time, timedelta
+import struct
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -223,9 +224,19 @@ def _assert_complete_table_equal(
         zip(expected.rows, actual.rows, strict=True)
     ):
         for field in fields(seasonal.SeasonalProfileRow):
-            assert getattr(expected_row, field.name) == getattr(actual_row, field.name), (
-                f"row {row_index} field {field.name} differs"
+            expected_value = getattr(expected_row, field.name)
+            actual_value = getattr(actual_row, field.name)
+            assert type(expected_value) is type(actual_value), (
+                f"row {row_index} field {field.name} type differs"
             )
+            if isinstance(expected_value, float):
+                assert struct.pack(">d", expected_value) == struct.pack(">d", actual_value), (
+                    f"row {row_index} field {field.name} differs"
+                )
+            else:
+                assert expected_value == actual_value, (
+                    f"row {row_index} field {field.name} differs"
+                )
 
 
 @pytest.fixture(scope="module")

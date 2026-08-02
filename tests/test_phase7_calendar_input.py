@@ -6,9 +6,12 @@ seasonal-profile, threshold, assignment, or other Phase 7 production logic.
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import importlib
+import importlib.abc
 import importlib.util
+import inspect
 import json
 import pkgutil
 import subprocess
@@ -48,8 +51,8 @@ EXPECTED_ARTIFACTS = {
     ACCEPTANCE: (24_039, "f63e58854e4c5427271140be4452ebb7169a39f665927641f0b63bea3d0df64d"),
     TOOL: (39_158, "937abff993d3e5a5d43282ae12b895ca0e1a99328082e1438687f6972a306db6"),
     REPO / "docs/DISCREPANCIES.md": (
-        49_015,
-        "68325d575bd5a480fa23c11cc22dc5b1b1ecfbd0f7714cca007721e8f63df1c7",
+        51_539,
+        "7ec200bb1de83769b8ce07551fec4e0b81f5e90e20a4792c22ae47f285bed615",
     ),
 }
 EXPECTED_COLUMNS = [
@@ -69,6 +72,101 @@ EXPECTED_COLUMNS = [
     "schema_version",
 ]
 KNOWN_DISCREPANCIES = {20200228: "10:00", 20200630: "09:15"}
+SCALE_PACKAGES = ("mnq_lab.conditioners.scales",)
+REQUIRED_SCALE_MODULES = {
+    "mnq_lab.conditioners.scales.median",
+    "mnq_lab.conditioners.scales.returns",
+}
+
+
+class CalendarAccessSentinel(RuntimeError):
+    """Raised only when a scale module reaches the forbidden calendar loader."""
+
+
+class _InMemorySourceLoader(importlib.abc.Loader):
+    def __init__(self, source: str, origin: str):
+        self.source = source
+        self.origin = origin
+
+    def exec_module(self, module) -> None:
+        exec(compile(self.source, self.origin, "exec"), module.__dict__)
+
+
+def _discover_scale_modules():
+    discovered = []
+    for package_name in SCALE_PACKAGES:
+        package = importlib.import_module(package_name)
+        names = sorted(
+            info.name
+            for info in pkgutil.walk_packages(
+                package.__path__, prefix=f"{package.__name__}."
+            )
+            if not info.ispkg
+        )
+        discovered.extend(importlib.import_module(name) for name in names)
+    return discovered
+
+
+def _assert_calendar_free_source(module_name: str, source: str) -> None:
+    tree = ast.parse(source)
+    imports = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imports.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module is not None:
+            imports.append(node.module)
+            imports.extend(
+                f"{node.module}.{alias.name}" for alias in node.names
+            )
+    assert not any(
+        name == "calendar" or name.endswith(".calendar") or ".calendar." in name
+        for name in imports
+    ), f"{module_name} imports a calendar module"
+
+
+def _load_in_memory_module(name: str, source: str, origin: str):
+    loader = _InMemorySourceLoader(source, origin)
+    spec = importlib.util.spec_from_loader(name, loader, origin=origin)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(name, None)
+        raise
+    return module
+
+
+def _historical_discrepancies_blob() -> bytes:
+    result = subprocess.run(
+        [
+            "git",
+            "show",
+            "ded8ba0733f525b31b3cb948ece9a6ada493c9ec:docs/DISCREPANCIES.md",
+        ],
+        cwd=REPO,
+        check=True,
+        capture_output=True,
+    )
+    return result.stdout
+
+
+def _assert_historical_discrepancies_record(entry: dict, payload: bytes) -> None:
+    record = entry["discrepancies"]
+    assert record == {
+        "bytes": 49_015,
+        "path": "docs/DISCREPANCIES.md",
+        "sha256": "68325d575bd5a480fa23c11cc22dc5b1b1ecfbd0f7714cca007721e8f63df1c7",
+    }
+    assert len(payload) == record["bytes"]
+    assert _sha256_bytes(payload) == record["sha256"]
+
+
+def _assert_expected_artifact(path: Path, expected: tuple[int, str]) -> None:
+    payload = path.read_bytes()
+    assert len(payload) == expected[0], path
+    assert _sha256_bytes(payload) == expected[1], path
 
 
 def _sha256_bytes(payload: bytes) -> str:
@@ -139,12 +237,33 @@ def _observed_sessions() -> dict[int, tuple[str, str | None]]:
     return observed
 
 
-def test_calendar_ledger_precedes_and_binds_committed_artifacts():
-    entry = validate_calendar_entry_artifacts()
+def test_calendar_ledger_precedes_and_binds_committed_artifacts(monkeypatch):
+    entry = load_calendar_entry()
+    historical = _historical_discrepancies_blob()
+    _assert_historical_discrepancies_record(entry, historical)
+
+    original_read_bytes = Path.read_bytes
+    discrepancies_path = (REPO / entry["discrepancies"]["path"]).resolve()
+
+    def historical_discrepancies_and_live_immutable_artifacts(path):
+        if path.resolve() == discrepancies_path:
+            return historical
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(
+        Path, "read_bytes", historical_discrepancies_and_live_immutable_artifacts
+    )
+    validated = validate_calendar_entry_artifacts()
+    assert validated == entry
+    current_record = EXPECTED_ARTIFACTS[REPO / "docs/DISCREPANCIES.md"]
+    current_payload = original_read_bytes(REPO / "docs/DISCREPANCIES.md")
+    assert len(current_payload) == current_record[0]
+    assert _sha256_bytes(current_payload) == current_record[1]
     assert entry == load_calendar_entry()
     assert entry["phase7_production_authorized"] is False
     assert entry["no_affected_result_has_run"] is True
     assert entry["source_provenance"]["complete_python_file_count"] == 47
+    assert "D20" not in json.dumps(entry, sort_keys=True)
 
     base = "4100abadad1d8212b8c98ad7382e1019a1afbe96"
     ledger_commit = "b5377a3"
@@ -159,13 +278,41 @@ def test_calendar_ledger_precedes_and_binds_committed_artifacts():
 
 
 def test_calendar_artifact_hashes_and_json_are_canonical():
-    for path, (expected_bytes, expected_hash) in EXPECTED_ARTIFACTS.items():
-        payload = path.read_bytes()
-        assert len(payload) == expected_bytes, path
-        assert _sha256_bytes(payload) == expected_hash, path
+    for path, expected in EXPECTED_ARTIFACTS.items():
+        _assert_expected_artifact(path, expected)
     for path in (TABLE, MANIFEST, ACCEPTANCE, INDEX, LOCK):
         payload = path.read_bytes()
         assert payload == _canonical(json.loads(payload.decode("utf-8"))), path
+
+
+def test_historical_ledger_binding_negative_controls(monkeypatch):
+    entry = load_calendar_entry()
+    historical = _historical_discrepancies_blob()
+    corrupted_historical = historical[:-1] + bytes([historical[-1] ^ 1])
+    with pytest.raises(AssertionError):
+        _assert_historical_discrepancies_record(entry, corrupted_historical)
+
+    original_read_bytes = Path.read_bytes
+    discrepancies_path = (REPO / entry["discrepancies"]["path"]).resolve()
+    table_path = TABLE.resolve()
+
+    def corrupt_one_live_immutable_artifact(path):
+        resolved = path.resolve()
+        if resolved == discrepancies_path:
+            return historical
+        payload = original_read_bytes(path)
+        if resolved == table_path:
+            return payload + b"corruption"
+        return payload
+
+    monkeypatch.setattr(Path, "read_bytes", corrupt_one_live_immutable_artifact)
+    with pytest.raises(SpineError, match="canonical_table.*byte count differs"):
+        validate_calendar_entry_artifacts()
+
+    monkeypatch.undo()
+    current_path = REPO / "docs/DISCREPANCIES.md"
+    with pytest.raises(AssertionError):
+        _assert_expected_artifact(current_path, (51_539, "0" * 64))
 
 
 def test_calendar_table_schema_support_and_total_mapping():
@@ -415,10 +562,58 @@ def test_negative_calendar_ledger_hash_mutation_fails(tmp_path):
         validate_calendar_entry_artifacts(entry)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="U11 A5: mandatory calendar import-isolation gate awaits real Phase 7 scale modules",
-)
-def test_a5_calendar_import_isolation():
-    """Must become a discriminating passing test when dependent modules exist."""
-    pytest.fail("a5_calendar_import_isolation is pending; removal without conversion is forbidden")
+def test_a5_calendar_import_isolation(monkeypatch):
+    """Dynamically execute every scale module and kill a calendar-read mutant."""
+    modules = _discover_scale_modules()
+    names = {module.__name__ for module in modules}
+    assert modules, "A5 is vacuous without discovered real scale modules"
+    assert REQUIRED_SCALE_MODULES <= names
+
+    from mnq_lab.spine import calendar as session_calendar
+
+    def forbidden_calendar_loader(*args, **kwargs):
+        raise CalendarAccessSentinel("scale module reached the calendar loader")
+
+    monkeypatch.setattr(
+        session_calendar, "trade_date_ids", forbidden_calendar_loader
+    )
+    for module in modules:
+        path = Path(inspect.getsourcefile(module) or "")
+        assert path.is_file(), f"no inspectable source for {module.__name__}"
+        source = path.read_text(encoding="utf-8")
+        _assert_calendar_free_source(module.__name__, source)
+        public = tuple(getattr(module, "__all__", ()))
+        assert "calendar_isolation_probe" in public
+        probe = getattr(module, "calendar_isolation_probe", None)
+        assert callable(probe)
+        for public_name in public:
+            public_object = getattr(module, public_name)
+            if callable(public_object):
+                parameters = inspect.signature(public_object).parameters
+                assert not any(
+                    "calendar" in name.lower() or "path" in name.lower()
+                    for name in parameters
+                ), f"{module.__name__}.{public_name} accepts calendar/path input"
+        probe()
+
+    real = next(
+        module for module in modules if module.__name__.endswith(".median")
+    )
+    real_path = Path(inspect.getsourcefile(real) or "")
+    real_source = real_path.read_text(encoding="utf-8")
+    mutant_source = real_source + """
+from mnq_lab.spine import calendar as _a5_forbidden_calendar
+_a5_real_probe = calendar_isolation_probe
+def calendar_isolation_probe():
+    _a5_forbidden_calendar.trade_date_ids(None)
+    return _a5_real_probe()
+"""
+    with pytest.raises(AssertionError, match="imports a calendar module"):
+        _assert_calendar_free_source("_a5_calendar_access_mutant", mutant_source)
+    mutant_name = "mnq_lab.conditioners.scales._a5_calendar_access_mutant"
+    mutant = _load_in_memory_module(mutant_name, mutant_source, str(real_path))
+    try:
+        with pytest.raises(CalendarAccessSentinel, match="calendar loader"):
+            mutant.calendar_isolation_probe()
+    finally:
+        sys.modules.pop(mutant_name, None)

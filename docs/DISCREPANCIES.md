@@ -914,3 +914,42 @@ been computed.
 **Status.** `OPEN; COMMITTED ARTIFACT AUDIT PENDING`. This entry authorizes only
 the bounded calendar reference-input commits. Phase 7 production, Phase 7b,
 Phase 8, and every later phase remain unauthorized.
+
+---
+
+## D20 — Phase 7 frozen test-name convention and real dependency windows — `CONTRACT CLOSED; IMPLEMENTATION EVIDENCE PENDING`
+
+**Frozen test-name convention (F-0).** Frozen spec §13 item 18 names nine
+required tests, while the repository convention through Phase 6 implements
+those names at file level rather than as literal function definitions. Seven
+names already existed as files. `test_vintage_consumption.py` remains correctly
+deferred to Phase 11. `test_roll_reset.py` is assigned to Phase 7 because the
+named behavior is the Phase 7 EWMA/MAD reset at a contract roll with a new
+78-return warmup; it is not the distinct Phase 1 causal roll-mapping property
+covered by `test_roll_causality.py`. Phase 7 must therefore add
+`tests/test_roll_reset.py` and satisfy the from-scratch, zero-memory, warmup,
+gap, maintenance-halt, and deliberately bridging negative controls frozen in
+`docs/PHASE7_PREREGISTRATION.md` §15. This records and closes F-0's ownership
+ambiguity; passing evidence remains due at Phase 7 closeout.
+
+**Real-conditioner dependency windows (D17 #8).** Phase 6 established locality
+only relative to a caller-declared mask and explicitly deferred proof that each
+real declaration is semantically correct and minimally sufficient. The
+byte-pinned Phase 7 contract closes that design obligation in §10 before any
+estimator exists: masks index bars; 78 returns span 79 bars; expected masks are
+constructed independently from the preregistered pseudocode; admission requires
+`numpy.array_equal(declared_mask, semantic_mask)`, never containment; and the
+required widened, narrowed, future, and EWMA-versus-MAD long-run mutations make
+an over-wide declaration fail even where output values happen not to change.
+No expected mask may be obtained from an estimator or its metadata. This closes
+D17 #8 at the executable-contract level. Real-conditioner admission evidence
+and all required mutations remain mandatory implementation and closeout gates;
+this entry does not claim that not-yet-written estimators have passed them.
+
+**Governance.** This append accompanies the single pinned-base maintenance
+commit pre-authorized by Phase 7 preregistration §21. In the same atomic commit,
+the calendar A5 strict xfail is converted into its dynamic sentinel-and-mutant
+test and only the internal pin for this file is updated. The maintenance commit
+records both files' old and new byte counts and SHA-256 values. Historical
+calendar closeout and ledger bytes are not amended. Phase 8 remains
+unauthorized.

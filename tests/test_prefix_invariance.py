@@ -25,6 +25,9 @@ from mnq_lab.spine.resample import resample_to_five_minutes
 from mnq_lab.spine.rolls import build_causal_active_contract_map
 from mnq_lab.spine.source import scan_source
 from tests.conftest import SourceBuilder, session_grid
+from mnq_lab.conditioners.scales.median import lower_median
+from mnq_lab.core.weights import weighted_quantile
+from tests.phase7_pipeline_fixtures import synthetic_pipeline
 
 NEAR = "MNQM1"
 FAR = "MNQU1"
@@ -145,19 +148,117 @@ def test_negative_case_a_lookahead_normaliser_breaks_invariance(builds):
 
 
 DEFERRED_TARGETS = [
-    "seasonal_profiles",
-    "tercile_thresholds",
-    "conditioner_assignments",
     "prevalence_results",
     "consumed_vintage_artifacts",
 ]
+
+
+@pytest.fixture(scope="module")
+def phase7_builds():
+    return synthetic_pipeline(123), synthetic_pipeline(125)
+
+
+def test_seasonal_profiles_are_prefix_invariant(phase7_builds):
+    short, long = phase7_builds
+    short_sessions, short_scales, _, short_pipeline = short
+    _, long_scales, _, long_pipeline = long
+    cutoff = short_sessions[-1]
+    for arm_id, short_table in short_pipeline.seasonal_profiles.items():
+        long_rows = tuple(
+            row
+            for row in long_pipeline.seasonal_profiles[arm_id].rows
+            if row.session_id <= cutoff
+        )
+        assert short_table.rows == long_rows
+        assert all(
+            dependency_session < row.session_id
+            for row in short_table.rows
+            for dependency_session, _ in row.dependency_keys
+        )
+
+    def leaky_corpus_profile(scale_table):
+        values = np.asarray(
+            [row.scale_value for row in scale_table.rows if row.scale_valid],
+            dtype=np.float64,
+        )
+        return lower_median(values)
+
+    primary = "primary_ewma78_permissive_expanding"
+    assert leaky_corpus_profile(short_scales[primary]) != leaky_corpus_profile(
+        long_scales[primary]
+    )
+
+
+def test_tercile_thresholds_are_prefix_invariant(phase7_builds):
+    short, long = phase7_builds
+    short_sessions, _, _, short_pipeline = short
+    _, _, _, long_pipeline = long
+    cutoff = short_sessions[-1]
+    for arm_id, short_table in short_pipeline.threshold_tables.items():
+        long_rows = tuple(
+            row
+            for row in long_pipeline.threshold_tables[arm_id].rows
+            if row.session_id <= cutoff
+        )
+        assert short_table.rows == long_rows
+        assert all(
+            dependency_session < row.session_id
+            for row in short_table.rows
+            for dependency_session, _ in row.dependency_keys
+        )
+
+    def leaky_corpus_threshold(vol_table):
+        values = np.asarray(
+            [row.vol_rel for row in vol_table.rows if row.vol_rel_valid],
+            dtype=np.float64,
+        )
+        weights = np.ones(values.size, dtype=np.float64)
+        return (
+            weighted_quantile(values, weights, 1.0 / 3.0),
+            weighted_quantile(values, weights, 2.0 / 3.0),
+        )
+
+    primary = "primary_ewma78_permissive_expanding"
+    assert leaky_corpus_threshold(
+        short_pipeline.vol_rel_tables[primary]
+    ) != leaky_corpus_threshold(long_pipeline.vol_rel_tables[primary])
+
+
+def test_conditioner_assignments_are_prefix_invariant(phase7_builds):
+    short, long = phase7_builds
+    short_sessions, _, _, short_pipeline = short
+    _, _, _, long_pipeline = long
+    cutoff = short_sessions[-1]
+    for arm_id, short_table in short_pipeline.assignment_tables.items():
+        long_rows = tuple(
+            row
+            for row in long_pipeline.assignment_tables[arm_id].rows
+            if row.session_id <= cutoff
+        )
+        assert short_table.rows == long_rows
+
+    def backward_carry(table, prefix_length):
+        assert table.rows[-1].category_code != -1
+        carried = table.rows[-1].category_code
+        return tuple(
+            carried if row.category_code == -1 else row.category_code
+            for row in table.rows[:prefix_length]
+        )
+
+    primary = "primary_ewma78_permissive_expanding"
+    short_table = short_pipeline.assignment_tables[primary]
+    long_table = long_pipeline.assignment_tables[primary]
+    assert short_table.rows[-1].category_code != long_table.rows[-1].category_code
+    assert backward_carry(short_table, len(short_table.rows)) != backward_carry(
+        long_table, len(short_table.rows)
+    )
 
 
 @pytest.mark.parametrize("target", DEFERRED_TARGETS)
 def test_deferred_prefix_invariance_targets(target):
     """Registered as unimplemented so §13 test 4 is not silently under-covered.
 
-    These are produced in phases 7, 9 and 11. This is a visible placeholder, not a
+    These are produced in phases 9 and 11. This is a visible placeholder, not a
     passing check of the property.
     """
     pytest.xfail(f"{target} does not exist until a later phase (spec §15)")

@@ -863,3 +863,56 @@ Any further change to either `docs/DISCREPANCIES.md` or
 `tests/test_phase7_calendar_input.py`, or any change to another protected
 artifact, remains unplanned under §19 and requires an independent review before
 continuation.
+
+## 22. Amendment 2 — ledger historical-binding correction
+
+**Finding:** `P7C-3` from the first independent implementation-gate audit.
+Section 21 omitted that the calendar ledger entry independently pins
+`docs/DISCREPANCIES.md` and that
+`mnq_lab/ledger/calendar_entries/validator.py` validates that record against
+live bytes. Because `docs/DISCREPANCIES.md` is an append-only living document,
+that binding fails on the next appended entry in any phase; Phase 7 is the first
+to reach it. The ledger record is a historical statement of the bytes at
+calendar authorization, not a claim about the file's future.
+
+The §21 maintenance commit is extended by exactly one further change, and no
+other: in `tests/test_phase7_calendar_input.py`,
+`test_calendar_ledger_precedes_and_binds_committed_artifacts` is adapted to
+assert, without altering the ledger entry or its validator:
+
+1. the ledger's `discrepancies` record still reads exactly 49,015 bytes and
+   SHA-256
+   `68325d575bd5a480fa23c11cc22dc5b1b1ecfbd0f7714cca007721e8f63df1c7`;
+2. that record is true of history, proven non-circularly by reading the git blob
+   `docs/DISCREPANCIES.md` at the independently audited commit
+   `ded8ba0733f525b31b3cb948ece9a6ada493c9ec`, hashing the retrieved bytes, and
+   asserting equality with the ledger record;
+3. every other ledger-bound artifact — canonical table, manifest, acceptance
+   record, and extractor — still validates against live bytes, unchanged,
+   through the existing validator;
+4. the current `docs/DISCREPANCIES.md` validates only against its own explicit
+   `EXPECTED_ARTIFACTS` pin; and
+5. the historical ledger record does not authorize a later appended entry.
+   Authorization for D20 derives only from §21, this §22 amendment, and the
+   applicable user rulings.
+
+Three negative controls are mandatory and must fail for their intended reason:
+a corrupted historical-blob hash, a live byte change to another ledger-bound
+artifact, and a tampered `EXPECTED_ARTIFACTS` pin for the current discrepancies
+file. The ledger entry, the ledger validator,
+`docs/PHASE7_CALENDAR_INPUT.md`, and every third file remain unchanged.
+
+This authorizes exactly one additional change within the single declared
+maintenance commit and is not a general exemption. The permitted maintenance
+scope remains exactly `docs/DISCREPANCIES.md` and
+`tests/test_phase7_calendar_input.py`. Its four changes are: append D20; convert
+A5 under §16 with an alias-aware AST check; update the current discrepancies
+pin in `EXPECTED_ARTIFACTS`; and implement the historical-binding adaptation
+above. The commit message records the old and new byte counts and SHA-256 values
+for both files and names `Finding: P7C-3`. Any further protected-artifact edit
+remains unplanned under §19.
+
+The failed gate and the independent P7C-3 review are the protected-artifact
+exception already defined by §19; they do not consume or add a routine audit
+checkpoint. This amendment requires its own focused ratification before the
+maintenance commit. The Phase 7 closeout audit remains required.

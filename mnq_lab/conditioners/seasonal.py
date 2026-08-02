@@ -338,7 +338,7 @@ def build_seasonal_profiles(
     for current_session in current_sessions:
         current_calendar = calendar.lookup(current_session)
         phase_context: dict[
-            str, tuple[list[int], list[float], list[tuple[int, str]]]
+            str, tuple[list[int], list[float], tuple[tuple[int, str], ...]]
         ] = {}
         if current_calendar is not None:
             for phase in _time_model().phase_names:
@@ -379,7 +379,7 @@ def build_seasonal_profiles(
                 phase_context[phase] = (
                     prior_sessions,
                     phase_medians,
-                    phase_dependency_keys,
+                    tuple(sorted(set(phase_dependency_keys))),
                 )
         for bucket in RTH_BUCKETS:
             phase = _phase_for_bucket(bucket)
@@ -407,7 +407,7 @@ def build_seasonal_profiles(
                 )
                 continue
 
-            prior_sessions, phase_medians, phase_dependency_keys = phase_context[phase]
+            prior_sessions, phase_medians, dependencies = phase_context[phase]
 
             bucket_rows = [
                 by_session_bucket[(prior, bucket)]
@@ -422,8 +422,7 @@ def build_seasonal_profiles(
                 len(prior_sessions),
             )
             # Every bucket member is already a member of the emitted phase
-            # fallback support, so the phase identity set is the exact union.
-            dependencies = tuple(sorted(set(phase_dependency_keys)))
+            # fallback support, so the shared phase identity set is the exact union.
             output.append(
                 SeasonalProfileRow(
                     scales.arm_id,

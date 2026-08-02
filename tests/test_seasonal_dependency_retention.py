@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import fields, replace
+from dataclasses import dataclass, fields, replace
 from datetime import date, datetime, time, timedelta
+import hashlib
+from pathlib import Path
 import struct
 from zoneinfo import ZoneInfo
 
@@ -11,6 +13,15 @@ import numpy as np
 import pytest
 
 from mnq_lab.conditioners import seasonal
+from mnq_lab.conditioners.arms import ArmConfig, arm_config
+from mnq_lab.conditioners.assignments import (
+    PHASE_ORDER,
+    ThresholdRow,
+    ThresholdTable,
+    VolRelRow,
+    VolRelTable,
+    build_thresholds,
+)
 from mnq_lab.conditioners.calendar import (
     CALENDAR_VERSION,
     SCHEMA_VERSION,
@@ -18,10 +29,22 @@ from mnq_lab.conditioners.calendar import (
     CalendarTable,
 )
 from mnq_lab.conditioners.scales.median import lower_median
+from mnq_lab.conditioners.status import ThresholdStatus, UpstreamStage, VolRelStatus
+from mnq_lab.core.weights import weighted_quantile
 
 CT = ZoneInfo("America/Chicago")
 ARM_ID = "primary_ewma78_permissive_expanding"
-IDENTITY_SESSION_COUNT = 20
+ROLLING_ARM_ID = "threshold_rolling60"
+IDENTITY_SESSION_COUNT = 70
+PREREGISTRATION_BYTES = 21_026
+PREREGISTRATION_SHA256 = (
+    "759527ca33f13c9cefaf73124541ac300eab650ac72349753a1d4c95154944e1"
+)
+PREREGISTRATION_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "docs"
+    / "DEPENDENCY_REPRESENTATION_PREREGISTRATION.md"
+)
 
 
 def _weekdays(count: int) -> tuple[date, ...]:
@@ -43,25 +66,47 @@ def _full_density_fixture(
 ) -> tuple[tuple[int, ...], CalendarTable, seasonal.ScaleAnchorTable]:
     days = _weekdays(session_count)
     sessions = tuple(_session_id(value) for value in days)
-    calendar = CalendarTable(
-        tuple(
-            CalendarRow(
-                session,
-                "CME_GLOBEX_EQUITY_INDEX_FUTURES",
+
+    def calendar_row(index: int, session: int) -> CalendarRow:
+        if index == 4:
+            session_class, status, rth_close, raw_close = (
+                "scheduled_early_close",
+                "shortened_rth",
+                "12:00",
+                "12:00",
+            )
+            rth_open, raw_open = "08:30", "17:00"
+        elif index == 11:
+            session_class = status = "full_exchange_holiday"
+            rth_open = rth_close = raw_open = raw_close = ""
+        else:
+            session_class, status, rth_close, raw_close = (
                 "regular",
                 "full_rth",
-                "08:30",
                 "15:00",
-                "17:00",
                 "16:00",
-                False,
-                f"seasonal-sharing-fixture:{session}",
-                "synthetic-calendar",
-                "test",
-                CALENDAR_VERSION,
-                SCHEMA_VERSION,
             )
-            for session in sessions
+            rth_open, raw_open = "08:30", "17:00"
+        return CalendarRow(
+            session,
+            "CME_GLOBEX_EQUITY_INDEX_FUTURES",
+            session_class,
+            status,
+            rth_open,
+            rth_close,
+            raw_open,
+            raw_close,
+            False,
+            f"dependency-oracle:{session}",
+            "synthetic-calendar",
+            "test",
+            CALENDAR_VERSION,
+            SCHEMA_VERSION,
+        )
+
+    calendar = CalendarTable(
+        tuple(
+            calendar_row(index, session) for index, session in enumerate(sessions)
         )
     )
     rows: list[seasonal.ScaleAnchorRow] = []
@@ -214,6 +259,129 @@ def _build_pre_fix_reference(
     return seasonal.SeasonalProfileTable(scales.arm_id, tuple(output))
 
 
+def _vol_rel_fixture(scales: seasonal.ScaleAnchorTable) -> VolRelTable:
+    rows: list[VolRelRow] = []
+    for row in scales.rows:
+        valid = row.scale_valid
+        rows.append(
+            VolRelRow(
+                ARM_ID,
+                row.session_id,
+                row.ts_event_ns,
+                row.tau_ns,
+                row.observation_bucket_ct,
+                row.session_phase,
+                row.scale_value,
+                row.scale_valid,
+                1.0,
+                True,
+                row.scale_value if valid else 0.0,
+                valid,
+                VolRelStatus.OK if valid else VolRelStatus.UPSTREAM_UNDEFINED,
+                None if valid else UpstreamStage.EWMA,
+                row.data_quality_status,
+            )
+        )
+    return VolRelTable(ARM_ID, tuple(rows))
+
+
+def _build_threshold_reference(
+    config: ArmConfig,
+    vol_rel: VolRelTable,
+    current_sessions: tuple[int, ...],
+    completed_sessions: frozenset[int],
+    calendar: CalendarTable,
+) -> ThresholdTable:
+    """Exact current threshold construction, independent of build_thresholds."""
+    by_session_phase: dict[tuple[int, str], list[VolRelRow]] = {}
+    for row in vol_rel.rows:
+        if row.vol_rel_valid:
+            by_session_phase.setdefault((row.session_id, row.session_phase), []).append(
+                row
+            )
+
+    output: list[ThresholdRow] = []
+    for current in current_sessions:
+        for phase in PHASE_ORDER:
+            eligible_sessions: list[int] = []
+            for prior in sorted(completed_sessions):
+                if prior >= current:
+                    break
+                calendar_row = calendar.lookup(prior)
+                if (
+                    calendar_row is None
+                    or not calendar_row.seasonal_reference_eligible
+                ):
+                    continue
+                if by_session_phase.get((prior, phase)):
+                    eligible_sessions.append(prior)
+            selected = (
+                eligible_sessions[-60:]
+                if config.history_kind == "rolling60"
+                else eligible_sessions
+            )
+            dependency_keys = tuple(
+                (row.session_id, row.tau_ns)
+                for prior in selected
+                for row in by_session_phase[(prior, phase)]
+            )
+            if len(eligible_sessions) < 60:
+                output.append(
+                    ThresholdRow(
+                        config.arm_id,
+                        current,
+                        phase,
+                        config.history_kind,
+                        len(selected),
+                        config.lower_probability,
+                        config.upper_probability,
+                        0.0,
+                        0.0,
+                        False,
+                        ThresholdStatus.INSUFFICIENT_THRESHOLD_HISTORY,
+                        dependency_keys,
+                    )
+                )
+                continue
+            values: list[float] = []
+            weights: list[float] = []
+            for prior in selected:
+                rows = by_session_phase[(prior, phase)]
+                mass = float(np.float64(1.0) / np.float64(len(rows)))
+                values.extend(row.vol_rel for row in rows)
+                weights.extend(mass for _ in rows)
+            value_array = np.asarray(values, dtype=np.float64)
+            weight_array = np.asarray(weights, dtype=np.float64)
+            lower = weighted_quantile(
+                value_array, weight_array, config.lower_probability
+            )
+            upper = weighted_quantile(
+                value_array, weight_array, config.upper_probability
+            )
+            status = (
+                ThresholdStatus.DEGENERATE_BOUNDARIES
+                if lower == upper
+                else ThresholdStatus.OK
+            )
+            output.append(
+                ThresholdRow(
+                    config.arm_id,
+                    current,
+                    phase,
+                    config.history_kind,
+                    len(selected),
+                    config.lower_probability,
+                    config.upper_probability,
+                    float(lower),
+                    float(upper),
+                    True,
+                    status,
+                    dependency_keys,
+                )
+            )
+    return ThresholdTable(config.arm_id, tuple(output))
+
+
 def _assert_complete_table_equal(
     expected: seasonal.SeasonalProfileTable,
     actual: seasonal.SeasonalProfileTable,
@@ -239,24 +407,79 @@ def _assert_complete_table_equal(
                 )
 
 
+def _assert_complete_threshold_table_equal(
+    expected: ThresholdTable,
+    actual: ThresholdTable,
+) -> None:
+    assert expected.arm_id == actual.arm_id
+    assert len(expected.rows) == len(actual.rows)
+    for row_index, (expected_row, actual_row) in enumerate(
+        zip(expected.rows, actual.rows, strict=True)
+    ):
+        for field in fields(ThresholdRow):
+            expected_value = getattr(expected_row, field.name)
+            actual_value = getattr(actual_row, field.name)
+            assert type(expected_value) is type(actual_value), (
+                f"row {row_index} field {field.name} type differs"
+            )
+            if isinstance(expected_value, float):
+                assert struct.pack(">d", expected_value) == struct.pack(">d", actual_value), (
+                    f"row {row_index} field {field.name} differs"
+                )
+            else:
+                assert expected_value == actual_value, (
+                    f"row {row_index} field {field.name} differs"
+                )
+
+
+@dataclass(frozen=True)
+class _IdentityOracle:
+    sessions: tuple[int, ...]
+    seasonal_reference: seasonal.SeasonalProfileTable
+    seasonal_actual: seasonal.SeasonalProfileTable
+    threshold_reference: dict[str, ThresholdTable]
+    threshold_actual: dict[str, ThresholdTable]
+
+
 @pytest.fixture(scope="module")
-def _identity_tables() -> tuple[
-    tuple[int, ...], seasonal.SeasonalProfileTable, seasonal.SeasonalProfileTable
-]:
+def _identity_tables() -> _IdentityOracle:
     sessions, calendar, scales = _full_density_fixture(IDENTITY_SESSION_COUNT)
     completed = frozenset(sessions)
-    reference = _build_pre_fix_reference(scales, sessions, completed, calendar)
-    actual = seasonal.build_seasonal_profiles(scales, sessions, completed, calendar)
-    return sessions, reference, actual
+    seasonal_reference = _build_pre_fix_reference(
+        scales, sessions, completed, calendar
+    )
+    seasonal_actual = seasonal.build_seasonal_profiles(
+        scales, sessions, completed, calendar
+    )
+    vol_rel = _vol_rel_fixture(scales)
+    configs = (arm_config(ARM_ID), arm_config(ROLLING_ARM_ID))
+    threshold_reference = {
+        config.arm_id: _build_threshold_reference(
+            config, vol_rel, sessions, completed, calendar
+        )
+        for config in configs
+    }
+    threshold_actual = {
+        config.arm_id: build_thresholds(
+            config, vol_rel, sessions, completed, calendar
+        )
+        for config in configs
+    }
+    return _IdentityOracle(
+        sessions,
+        seasonal_reference,
+        seasonal_actual,
+        threshold_reference,
+        threshold_actual,
+    )
 
 
 def test_shared_dependencies_preserve_every_pre_fix_row_field_and_oracle_can_fail(
-    _identity_tables: tuple[
-        tuple[int, ...], seasonal.SeasonalProfileTable, seasonal.SeasonalProfileTable
-    ],
+    _identity_tables: _IdentityOracle,
 ) -> None:
-    _, reference, actual = _identity_tables
-    assert len(actual.rows) == IDENTITY_SESSION_COUNT * len(seasonal.RTH_BUCKETS) == 1_560
+    reference = _identity_tables.seasonal_reference
+    actual = _identity_tables.seasonal_actual
+    assert len(actual.rows) == IDENTITY_SESSION_COUNT * len(seasonal.RTH_BUCKETS) == 5_460
     _assert_complete_table_equal(reference, actual)
 
     source = next(row for row in reference.rows if row.dependency_keys)
@@ -277,11 +500,10 @@ def test_shared_dependencies_preserve_every_pre_fix_row_field_and_oracle_can_fai
 
 
 def test_all_buckets_within_each_session_phase_share_one_dependency_tuple_object(
-    _identity_tables: tuple[
-        tuple[int, ...], seasonal.SeasonalProfileTable, seasonal.SeasonalProfileTable
-    ],
+    _identity_tables: _IdentityOracle,
 ) -> None:
-    sessions, _, actual = _identity_tables
+    sessions = _identity_tables.sessions
+    actual = _identity_tables.seasonal_actual
     final_rows = [row for row in actual.rows if row.session_id == sessions[-1]]
     for phase in seasonal._time_model().phase_names:
         phase_rows = [row for row in final_rows if row.session_phase == phase]
@@ -290,3 +512,67 @@ def test_all_buckets_within_each_session_phase_share_one_dependency_tuple_object
         assert all(
             row.dependency_keys is phase_rows[0].dependency_keys for row in phase_rows[1:]
         )
+
+
+def test_threshold_legacy_oracle_covers_expanding_and_rolling60_at_full_density(
+    _identity_tables: _IdentityOracle,
+) -> None:
+    expected_rows = IDENTITY_SESSION_COUNT * len(PHASE_ORDER)
+    assert expected_rows == 350
+    for arm_id in (ARM_ID, ROLLING_ARM_ID):
+        reference = _identity_tables.threshold_reference[arm_id]
+        actual = _identity_tables.threshold_actual[arm_id]
+        assert len(reference.rows) == len(actual.rows) == expected_rows
+        _assert_complete_threshold_table_equal(reference, actual)
+
+    final_session = _identity_tables.sessions[-1]
+    expanding = _identity_tables.threshold_actual[ARM_ID].lookup(
+        final_session, PHASE_ORDER[0]
+    )
+    rolling = _identity_tables.threshold_actual[ROLLING_ARM_ID].lookup(
+        final_session, PHASE_ORDER[0]
+    )
+    assert expanding.qualifying_prior_sessions == 67
+    assert rolling.qualifying_prior_sessions == 60
+    assert expanding.dependency_keys != rolling.dependency_keys
+
+
+@pytest.mark.parametrize("arm_id", (ARM_ID, ROLLING_ARM_ID))
+def test_threshold_legacy_oracle_rejects_one_structurally_valid_key_perturbation(
+    _identity_tables: _IdentityOracle,
+    arm_id: str,
+) -> None:
+    reference = _identity_tables.threshold_reference[arm_id]
+    actual = _identity_tables.threshold_actual[arm_id]
+    source = next(row for row in reference.rows if row.dependency_keys)
+    first_session, first_tau = source.dependency_keys[0]
+    perturbed_dependencies = tuple(
+        sorted(
+            ((first_session, first_tau + 1) if key == (first_session, first_tau) else key)
+            for key in source.dependency_keys
+        )
+    )
+    perturbed_row = replace(source, dependency_keys=perturbed_dependencies)
+    perturbed = ThresholdTable(
+        reference.arm_id,
+        tuple(perturbed_row if row is source else row for row in reference.rows),
+    )
+    with pytest.raises(AssertionError, match="dependency_keys"):
+        _assert_complete_threshold_table_equal(perturbed, actual)
+
+
+def _assert_preregistration_pin(payload: bytes) -> None:
+    assert len(payload) == PREREGISTRATION_BYTES
+    assert hashlib.sha256(payload).hexdigest() == PREREGISTRATION_SHA256
+
+
+def test_dependency_representation_preregistration_is_byte_pinned_and_guard_can_fail():
+    payload = PREREGISTRATION_PATH.read_bytes()
+    _assert_preregistration_pin(payload)
+
+    with pytest.raises(AssertionError):
+        _assert_preregistration_pin(payload[:-1])
+    changed = bytearray(payload)
+    changed[100] ^= 1
+    with pytest.raises(AssertionError):
+        _assert_preregistration_pin(bytes(changed))

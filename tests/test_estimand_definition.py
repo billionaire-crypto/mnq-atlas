@@ -353,3 +353,100 @@ def test_real_store_prevalence_support_is_horizon_invariant(real_completion):
             real_completion[f"outcome_eligible_{ESTIMAND_FULLY_LABELED}_h{h}"].sum()
         )
         assert eligible < n_state
+
+
+# --- Unit O realizes both path estimands without changing their definitions --------
+
+def test_unit_o_partial_components_split_status_but_not_observed_excursion(tmp_path):
+    from mnq_lab.outcomes.excursions import (
+        ESTIMAND_FULLY_LABELED as O_FULL,
+        ESTIMAND_OBSERVED as O_OBSERVED,
+        STATUS_INSUFFICIENT_COMPONENTS,
+        STATUS_OK as OUTCOME_OK,
+        build_outcome_table,
+    )
+    from tests.conftest import ct_ns
+    from tests.unit_o_fixtures import in_memory_store, synthetic_outcome_columns
+
+    columns = synthetic_outcome_columns(partial={"08:40": 3})
+    table = build_outcome_table(
+        in_memory_store(tmp_path / "exploration" / "bars_5m", columns)
+    )
+    key = (table.column("tau_ns") == ct_ns(f"{ORDINARY} 08:35")) & (
+        table.column("horizon_minutes") == 15
+    )
+    full = key & (table.column("estimand") == O_FULL)
+    observed = key & (table.column("estimand") == O_OBSERVED)
+    assert table.column("outcome_status")[full].tolist() == [
+        STATUS_INSUFFICIENT_COMPONENTS
+    ]
+    assert table.column("outcome_status")[observed].tolist() == [OUTCOME_OK]
+    assert not table.column("outcome_valid")[full].item()
+    assert table.column("outcome_valid")[observed].item()
+
+
+def test_unit_o_wholly_missing_bar_fails_both_estimands(tmp_path):
+    from mnq_lab.outcomes.excursions import (
+        STATUS_PATH_TIMESTAMP_MISSING,
+        build_outcome_table,
+    )
+    from tests.conftest import ct_ns
+    from tests.unit_o_fixtures import in_memory_store, synthetic_outcome_columns
+
+    columns = synthetic_outcome_columns(missing=("08:40",))
+    table = build_outcome_table(
+        in_memory_store(tmp_path / "exploration" / "bars_5m", columns)
+    )
+    rows = (table.column("tau_ns") == ct_ns(f"{ORDINARY} 08:35")) & (
+        table.column("horizon_minutes") == 15
+    )
+    assert table.column("outcome_status")[rows].tolist() == [
+        STATUS_PATH_TIMESTAMP_MISSING,
+        STATUS_PATH_TIMESTAMP_MISSING,
+    ]
+
+
+def test_unit_o_common_support_is_per_estimand_not_their_intersection(tmp_path):
+    from mnq_lab.outcomes.excursions import (
+        ESTIMAND_FULLY_LABELED as O_FULL,
+        ESTIMAND_OBSERVED as O_OBSERVED,
+        STATUS_OK as OUTCOME_OK,
+        build_outcome_table,
+    )
+    from tests.conftest import ct_ns
+    from tests.unit_o_fixtures import in_memory_store, synthetic_outcome_columns
+
+    columns = synthetic_outcome_columns(partial={"09:20": 3})
+    table = build_outcome_table(
+        in_memory_store(tmp_path / "exploration" / "bars_5m", columns)
+    )
+    key = (table.column("tau_ns") == ct_ns(f"{ORDINARY} 08:35")) & (
+        table.column("horizon_minutes") == 15
+    )
+    full = key & (table.column("estimand") == O_FULL)
+    observed = key & (table.column("estimand") == O_OBSERVED)
+    assert table.column("outcome_status")[full].item() == OUTCOME_OK
+    assert table.column("outcome_status")[observed].item() == OUTCOME_OK
+    assert not table.column("common_support")[full].item()
+    assert table.column("common_support")[observed].item()
+
+
+def test_unit_o_anchor_component_count_is_not_an_outcome_requirement(tmp_path):
+    from mnq_lab.outcomes.excursions import (
+        ESTIMAND_FULLY_LABELED as O_FULL,
+        STATUS_OK as OUTCOME_OK,
+        build_outcome_table,
+    )
+    from tests.conftest import ct_ns
+    from tests.unit_o_fixtures import in_memory_store, synthetic_outcome_columns
+
+    columns = synthetic_outcome_columns(partial={"08:30": 2})
+    table = build_outcome_table(
+        in_memory_store(tmp_path / "exploration" / "bars_5m", columns)
+    )
+    row = (
+        (table.column("estimand") == O_FULL)
+        & (table.column("tau_ns") == ct_ns(f"{ORDINARY} 08:35"))
+        & (table.column("horizon_minutes") == 15)
+    )
+    assert table.column("outcome_status")[row].item() == OUTCOME_OK

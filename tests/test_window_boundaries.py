@@ -167,3 +167,86 @@ def test_negative_the_grid_detects_a_wrong_session_count(time_model):
     )
     assert len(grid) == 156
     assert set(grid["session_id"].tolist()) == {20210615, 20210616}
+
+
+# --- Unit O excursion boundary consumers ------------------------------------------
+
+def test_unit_o_0835_worked_example_resolves_the_exact_three_future_labels():
+    from mnq_lab.outcomes.excursions import (
+        ESTIMAND_OBSERVED,
+        STATUS_OK as OUTCOME_OK,
+        resolve_outcome_row,
+    )
+    from tests.unit_o_fixtures import synthetic_outcome_columns
+
+    columns = synthetic_outcome_columns(
+        price_overrides={
+            "08:30": (100, 101, 99, 100),
+            "08:35": (100, 103, 98, 101),
+            "08:40": (101, 106, 97, 102),
+            "08:45": (102, 104, 96, 103),
+            "08:50": (100, 999, 1, 100),
+        }
+    )
+    row = resolve_outcome_row(
+        columns,
+        session_id=20210615,
+        tau_ns=ct_ns(f"{ORDINARY} 08:35"),
+        tau_ct_minute=8 * 60 + 35,
+        session_phase="open",
+        horizon_minutes=15,
+        estimand=ESTIMAND_OBSERVED,
+    )
+    assert row["outcome_status"] == OUTCOME_OK
+    assert row["n_required_bars"] == 3
+    assert row["n_present_bars"] == 3
+    assert row["downward_excursion_ticks"] == 4
+    assert row["upward_excursion_ticks"] == 6
+
+
+def test_unit_o_tau_1400_fits_h60_but_tau_1405_does_not():
+    from mnq_lab.outcomes.excursions import (
+        ESTIMAND_OBSERVED,
+        STATUS_OK as OUTCOME_OK,
+        STATUS_WINDOW_OUTSIDE_RTH,
+        resolve_outcome_row,
+    )
+    from tests.unit_o_fixtures import synthetic_outcome_columns
+
+    columns = synthetic_outcome_columns()
+
+    def resolved(tau):
+        return resolve_outcome_row(
+            columns,
+            session_id=20210615,
+            tau_ns=ct_ns(f"{ORDINARY} {tau}"),
+            tau_ct_minute=int(tau[:2]) * 60 + int(tau[3:]),
+            session_phase="close",
+            horizon_minutes=60,
+            estimand=ESTIMAND_OBSERVED,
+        )
+
+    assert resolved("14:00")["outcome_status"] == OUTCOME_OK
+    assert resolved("14:05")["outcome_status"] == STATUS_WINDOW_OUTSIDE_RTH
+
+
+def test_unit_o_exact_label_resolution_rejects_positional_adjacency():
+    from mnq_lab.outcomes.excursions import (
+        ESTIMAND_OBSERVED,
+        STATUS_PATH_TIMESTAMP_MISSING,
+        resolve_outcome_row,
+    )
+    from tests.unit_o_fixtures import synthetic_outcome_columns
+
+    columns = synthetic_outcome_columns(missing=("08:40",))
+    row = resolve_outcome_row(
+        columns,
+        session_id=20210615,
+        tau_ns=ct_ns(f"{ORDINARY} 08:35"),
+        tau_ct_minute=8 * 60 + 35,
+        session_phase="open",
+        horizon_minutes=15,
+        estimand=ESTIMAND_OBSERVED,
+    )
+    assert row["n_present_bars"] == 2
+    assert row["outcome_status"] == STATUS_PATH_TIMESTAMP_MISSING

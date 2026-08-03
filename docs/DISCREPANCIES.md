@@ -1358,3 +1358,45 @@ impractical, Step 7 stops again and returns for a user decision.
 **Status:** `OPEN`. CP-1 is closed. Step 7 artifact production remains blocked
 on measured feasibility; this entry authorizes only the exact-semantics timing
 experiment above.
+---
+
+## D28. Prepared ordering is exact but does not resolve Step 7 feasibility
+
+**Authorized D27 experiment completed.** The core inverse-CDF implementation
+now exposes a prepared value-ordering path while retaining the original
+implementation as its independent executable oracle. Preparation performs the
+stable value `mergesort` once per term. Every replicate still sorts weights
+within each tied-value group, removes zero-mass support, accumulates group and
+support mass in the frozen binary64 order and uses
+`searchsorted(..., side="left")`. No draw, seed, block length, mask, weight,
+quantile probability, interval endpoint or retry rule changed.
+
+**Exact-identity evidence.** Tests compare the prepared and original paths on
+fixed randomized weights, tied tick values, changing zero-weight rows,
+single-positive-support cells, binary64 accumulation-order witnesses and all
+three Phase 8 statistics. A structural spy confirms value `argsort` runs once
+during preparation and not when later replicate weights are evaluated. The
+authorized safe suite returned 1,112 passed, one skipped and two expected
+xfails before the repeated benchmark.
+
+**Repeated ratified measurement.** The same two-term, 240-row benchmark entered
+the Unit O tree through `require_ratified_unit_o`, used 222 eligible anchors
+from two sessions and executed 39,992 quantile calls. It printed no tick,
+quantile or interval value. Total runtime fell from 37.759852 to 34.413233
+seconds. Time inside the quantile helper fell from 18.927489 to 15.945487
+seconds, or from 9.463745 to 7.972744 seconds per term across all frozen draws.
+That is an approximately 15.8 percent reduction in measured quantile time.
+
+**Feasibility remains unresolved.** Applying the new measured per-term time to
+the corrected 3,240-term absolute-distribution lower bound gives approximately
+25,832 seconds, or 7.18 hours, on the small 222-anchor slice alone. This still
+excludes comparative baselines, 270 survival rows, 216 day-type terms,
+interaction terms, full-frame weight composition and materially larger real
+supports. The one authorized implementation experiment therefore does not make
+the complete frozen computation tractable. No further optimization is inferred
+or authorized from this result.
+
+**Status:** `OPEN`. The prepared implementation is an exact measured
+improvement, but Step 7 artifact production remains blocked. No Phase 8 result
+table, artifact manifest or closeout was created; the feasibility question
+returns for user decision.

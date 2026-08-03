@@ -5,6 +5,7 @@ from __future__ import annotations
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass
 import hashlib
+import multiprocessing
 from numbers import Integral
 import os
 from pathlib import Path
@@ -53,7 +54,7 @@ _INT64_INFO = np.iinfo(np.int64)
 # realistic-support benchmark. Sixteen improved throughput but consumed about
 # 4.37 GB before the complete production inventory was resident, leaving too
 # little margin under the frozen 6 GiB ceiling.
-_MAX_TERM_WORKERS = max(1, min(8, os.cpu_count() or 1))
+_DEFAULT_TERM_WORKERS = max(1, min(8, os.cpu_count() or 1))
 
 __all__ = [
     "BLOCK_LENGTHS",
@@ -198,6 +199,13 @@ class _CompiledTermEvaluation:
     eligible_session_indices: np.ndarray
     prepared: Any
     positive_session_indices: np.ndarray
+
+
+@dataclass(frozen=True)
+class _JointPlanMatrices:
+    group_digest: str
+    contract: BootstrapContract
+    matrices: tuple[np.ndarray, ...]
 
 
 def _validate_identifier(value: Any, name: str) -> Hashable:
@@ -806,12 +814,102 @@ def _evaluate_compiled_chunk(
     )
 
 
-def joint_bootstrap_intervals(
+def _group_digest(groups: np.ndarray) -> str:
+    digest = hashlib.sha256()
+    digest.update(str(groups.dtype).encode("ascii"))
+    digest.update(np.asarray(groups.shape, dtype=np.int64).tobytes())
+    if groups.dtype.kind == "O":
+        digest.update(repr(tuple(groups)).encode("utf-8"))
+    else:
+        digest.update(np.ascontiguousarray(groups).tobytes())
+    return digest.hexdigest()
+
+
+def _validated_plan_matrices(
+    bundle: _JointPlanMatrices,
+    *,
+    groups: np.ndarray,
+    session_count: int,
+    contract: BootstrapContract,
+    compiled: tuple[_CompiledTermEvaluation, ...],
+) -> tuple[np.ndarray, ...]:
+    if not isinstance(bundle, _JointPlanMatrices):
+        raise SpineError("Phase 8 checkpoint plans have the wrong type")
+    if bundle.group_digest != _group_digest(groups) or bundle.contract != contract:
+        raise SpineError("Phase 8 checkpoint plans differ from the aligned frame or contract")
+    if not isinstance(bundle.matrices, tuple) or len(bundle.matrices) != len(contract.block_lengths):
+        raise SpineError("Phase 8 checkpoint plan count differs from block lengths")
+    validated: list[np.ndarray] = []
+    for block_length, raw in zip(contract.block_lengths, bundle.matrices, strict=True):
+        matrix = np.asarray(raw)
+        if (
+            matrix.ndim != 2
+            or matrix.shape != (contract.draws_per_block_length, session_count)
+            or matrix.dtype.kind not in {"i", "u"}
+            or bool(np.any(matrix < 0))
+            or not bool(np.all(np.sum(matrix, axis=1, dtype=np.int64) == session_count))
+        ):
+            raise SpineError(
+                f"Phase 8 checkpoint plans are invalid for block length {block_length}"
+            )
+        for evaluation in compiled:
+            supported = np.any(
+                matrix[:, evaluation.positive_session_indices] > 0,
+                axis=1,
+            )
+            if not bool(np.all(supported)):
+                replicate_index = int(np.flatnonzero(~supported)[0])
+                raise SpineError(
+                    f"Phase 8 block length {block_length}, replicate "
+                    f"{replicate_index}, term {evaluation.term_ids[0]!r} failed: "
+                    "weights must have strictly positive total mass"
+                )
+        matrix.setflags(write=False)
+        validated.append(matrix)
+    return tuple(validated)
+
+
+def _prepare_joint_plan_matrices(
+    group_ids: Any,
+    terms: Any = (),
+    *,
+    constants_path: Path | None = None,
+) -> _JointPlanMatrices:
+    """Generate the one frozen plan set before any checkpoint term chunk."""
+    contract = bootstrap_contract(constants_path)
+    groups = _one_dimensional(group_ids, "group_ids")
+    if groups.size == 0:
+        raise SpineError("joint bootstrap requires the complete nonempty aligned frame")
+    try:
+        term_tuple = tuple(terms)
+    except TypeError as exc:
+        raise SpineError("bootstrap terms must be a finite sequence") from exc
+    if any(not isinstance(term, BootstrapQuantileTerm) for term in term_tuple):
+        raise SpineError("bootstrap plan terms must contain BootstrapQuantileTerm values")
+    if any(term.values.size != groups.size for term in term_tuple):
+        raise SpineError("every bootstrap term must align to the complete group frame")
+    if len({term.term_id for term in term_tuple}) != len(term_tuple):
+        raise SpineError("bootstrap term ids must be unique")
+    session_labels, row_session_indices = _ordered_session_structure(groups)
+    compiled = _compile_term_evaluations(term_tuple, row_session_indices)
+    matrices = _generate_session_plan_matrices(
+        groups=groups,
+        session_labels=session_labels,
+        compiled=compiled,
+        contract=contract,
+    )
+    return _JointPlanMatrices(_group_digest(groups), contract, matrices)
+
+
+def _joint_bootstrap_intervals_impl(
     group_ids: Any,
     terms: Any,
     requests: Any,
     *,
     constants_path: Path | None = None,
+    worker_count: int | None = None,
+    process_start_method: str | None = None,
+    plan_bundle: _JointPlanMatrices | None = None,
 ) -> JointBootstrapResult:
     """Evaluate exact joint intervals with compact session plans and local support."""
     contract = bootstrap_contract(constants_path)
@@ -820,28 +918,57 @@ def joint_bootstrap_intervals(
     )
     session_labels, row_session_indices = _ordered_session_structure(groups)
     compiled = _compile_term_evaluations(term_tuple, row_session_indices)
-    plan_matrices = _generate_session_plan_matrices(
-        groups=groups,
-        session_labels=session_labels,
-        compiled=compiled,
-        contract=contract,
-    )
+    if plan_bundle is None:
+        plan_matrices = _generate_session_plan_matrices(
+            groups=groups,
+            session_labels=session_labels,
+            compiled=compiled,
+            contract=contract,
+        )
+    else:
+        plan_matrices = _validated_plan_matrices(
+            plan_bundle,
+            groups=groups,
+            session_count=session_labels.size,
+            contract=contract,
+            compiled=compiled,
+        )
     intervals_by_request: dict[Hashable, list[BootstrapIntervalRow]] = {
         request.request_id: [] for request in request_tuple
     }
     root = np.random.SeedSequence(contract.root_entropy)
     children = root.spawn(len(contract.block_lengths))
+    if worker_count is None:
+        resolved_workers = _DEFAULT_TERM_WORKERS
+    elif (
+        isinstance(worker_count, (bool, np.bool_))
+        or not isinstance(worker_count, Integral)
+        or worker_count <= 0
+    ):
+        raise SpineError("Phase 8 worker_count must be a positive integer")
+    else:
+        resolved_workers = int(worker_count)
+    resolved_start_method = process_start_method or (
+        "spawn" if os.name == "nt" else "fork"
+    )
+    if resolved_start_method not in {"spawn", "fork"}:
+        raise SpineError("Phase 8 process start method must be 'spawn' or 'fork'")
+    if resolved_start_method == "fork" and os.name == "nt":
+        raise SpineError("Phase 8 process start method 'fork' is unavailable on Windows")
+    context = multiprocessing.get_context(resolved_start_method)
     use_processes = groups.size > 4_096 and len(compiled) > 1
     process_executor = None
     chunks: tuple[tuple[_CompiledTermEvaluation, ...], ...] = ()
     if use_processes:
-        worker_count = min(_MAX_TERM_WORKERS, len(compiled))
-        chunk_size = (len(compiled) + worker_count - 1) // worker_count
+        active_workers = min(resolved_workers, len(compiled))
+        chunk_size = (len(compiled) + active_workers - 1) // active_workers
         chunks = tuple(
             compiled[start : start + chunk_size]
             for start in range(0, len(compiled), chunk_size)
         )
-        process_executor = ProcessPoolExecutor(max_workers=len(chunks))
+        process_executor = ProcessPoolExecutor(
+            max_workers=len(chunks), mp_context=context
+        )
 
     try:
         for block_index, (block_length, child) in enumerate(
@@ -871,7 +998,7 @@ def joint_bootstrap_intervals(
                 )
             else:
                 with ThreadPoolExecutor(
-                    max_workers=min(_MAX_TERM_WORKERS, len(compiled))
+                    max_workers=min(resolved_workers, len(compiled))
                 ) as executor:
                     futures = tuple(
                         executor.submit(
@@ -953,3 +1080,45 @@ def joint_bootstrap_intervals(
         )
         results.append(RequestBootstrapResult(request.request_id, rows, reversal))
     return JointBootstrapResult(contract, tuple(results))
+
+
+def joint_bootstrap_intervals(
+    group_ids: Any,
+    terms: Any,
+    requests: Any,
+    *,
+    constants_path: Path | None = None,
+    worker_count: int | None = None,
+    process_start_method: str | None = None,
+) -> JointBootstrapResult:
+    """Evaluate exact intervals after generating one complete joint plan set."""
+    return _joint_bootstrap_intervals_impl(
+        group_ids,
+        terms,
+        requests,
+        constants_path=constants_path,
+        worker_count=worker_count,
+        process_start_method=process_start_method,
+    )
+
+
+def _joint_bootstrap_intervals_with_plan_matrices(
+    group_ids: Any,
+    terms: Any,
+    requests: Any,
+    plan_bundle: _JointPlanMatrices,
+    *,
+    constants_path: Path | None = None,
+    worker_count: int | None = None,
+    process_start_method: str | None = None,
+) -> JointBootstrapResult:
+    """Internal checkpoint path; validates and reuses the one frozen plan set."""
+    return _joint_bootstrap_intervals_impl(
+        group_ids,
+        terms,
+        requests,
+        constants_path=constants_path,
+        worker_count=worker_count,
+        process_start_method=process_start_method,
+        plan_bundle=plan_bundle,
+    )

@@ -49,6 +49,7 @@ from mnq_lab.phase8.uncertainty import (
     bootstrap_contract,
     joint_bootstrap_intervals,
 )
+from mnq_lab.phase8.runner import RunnerOperatingConfig, run_phase8
 
 __all__ = [
     "CONTRAST_NAMES",
@@ -91,4 +92,6 @@ __all__ = [
     "status_decision",
     "tick_contrast",
     "weighted_quantile_ticks",
+    "RunnerOperatingConfig",
+    "run_phase8",
 ]

@@ -92,8 +92,11 @@ def _write_tree(
     source_sha: str = SOURCE_STORE_MANIFEST_SHA256,
     dirty: bool = False,
     commit: str = RUN_COMMIT,
+    environment_overrides: dict[str, object] | None = None,
 ) -> None:
     environment = _environment(dirty=dirty, commit=commit)
+    if environment_overrides:
+        environment.update(environment_overrides)
     phase_columns: dict[str, dict[str, object]] = {}
     for index in range(SCIENTIFIC_COLUMN_COUNT - 25):
         name = f"phase_col_{index:03d}"
@@ -154,6 +157,8 @@ def _build_case(
     visible_at: str = VISIBLE_AFTER,
     dirty: bool = False,
     run_commit: str = RUN_COMMIT,
+    reproduction_commit: str | None = None,
+    reproduction_environment_overrides: dict[str, object] | None = None,
     override_basis: str = "2026-08-02 user ruling and independently audited bounded override",
 ) -> tuple[Path, Path, Path]:
     repo = tmp_path / "repo"
@@ -162,7 +167,14 @@ def _build_case(
     tree = repo / "artifacts" / tree_name
     replay = repo / "artifacts" / "replay"
     _write_tree(tree, source_sha=source_sha, dirty=dirty, commit=run_commit)
-    _write_tree(replay, source_sha=source_sha, dirty=dirty, commit=run_commit)
+    replay_commit = run_commit if reproduction_commit is None else reproduction_commit
+    _write_tree(
+        replay,
+        source_sha=source_sha,
+        dirty=dirty,
+        commit=replay_commit,
+        environment_overrides=reproduction_environment_overrides,
+    )
 
     tree_sha = ratification._tree_sha256(tree)
     replay_sha = ratification._tree_sha256(replay)
@@ -170,6 +182,11 @@ def _build_case(
     replay_columns = ratification._scientific_columns(replay)
     tree_relative = tree.relative_to(repo).as_posix()
     environment = _environment(dirty=dirty, commit=run_commit)
+    reproduction_environment = _environment(
+        dirty=dirty, commit=replay_commit
+    )
+    if reproduction_environment_overrides:
+        reproduction_environment.update(reproduction_environment_overrides)
 
     completion = {
         "ledger_format": COMPLETION_FORMAT,
@@ -248,7 +265,7 @@ def _build_case(
         "reproduction": {
             "tree_path": replay.relative_to(repo).as_posix(),
             "tree_sha256": replay_sha,
-            "environment_fingerprint": environment,
+            "environment_fingerprint": reproduction_environment,
             "scientific_columns": replay_columns,
         },
         "non_admissible_override": {
@@ -265,7 +282,7 @@ def _build_case(
             "C1": {"passed": True},
             "C2": {"passed": True},
             "C3": {"passed": True},
-            "C4": {"passed": True},
+            "C4": {"attested": True},
             "C5": {"passed": True},
             "C6": {"passed": True},
             "C7": {"attested_closed": True},
@@ -287,8 +304,8 @@ def test_all_seven_conditions_accept_a_complete_synthetic_certificate(tmp_path):
     repo, tree, certificate = _build_case(tmp_path)
     result = evaluate_ratification_certificate(certificate, repo_root=repo)
     assert result.passed and result.failures == ()
-    assert result.mechanically_checked == ("C1", "C2", "C3", "C4", "C5", "C6")
-    assert result.attested_not_proven == ("C7",)
+    assert result.mechanically_checked == ("C1", "C2", "C3", "C5", "C6")
+    assert result.attested_not_proven == ("C4", "C7")
     assert require_ratified_unit_o(
         tree,
         repo_root=repo,
@@ -359,6 +376,111 @@ def test_c5_refuses_self_comparison_disguised_as_a_rerun(tmp_path):
     assert "C5" in evaluate_ratification_certificate(certificate, repo_root=repo).failures
 
 
+def test_c5_accepts_commit_only_fingerprint_variance_with_identical_columns(tmp_path):
+    repo, _, certificate = _build_case(
+        tmp_path,
+        reproduction_commit="b" * 40,
+    )
+    result = evaluate_ratification_certificate(certificate, repo_root=repo)
+    assert result.passed and result.failures == ()
+
+
+@pytest.mark.parametrize(
+    ("field", "different_value"),
+    (
+        ("python", "different-python"),
+        ("numpy", "different-numpy"),
+        ("pandas", "different-pandas"),
+        ("platform", "different-platform"),
+        ("machine", "different-machine"),
+        ("branch", "different-branch"),
+        ("dirty", True),
+        ("vcs", "different-vcs"),
+        ("pipeline_version", "different-pipeline"),
+    ),
+)
+def test_c5_refuses_every_noncommit_fingerprint_difference(
+    tmp_path, field, different_value
+):
+    repo, _, certificate = _build_case(
+        tmp_path,
+        reproduction_commit="b" * 40,
+        reproduction_environment_overrides={field: different_value},
+    )
+    assert "C5" in evaluate_ratification_certificate(
+        certificate, repo_root=repo
+    ).failures
+
+
+@pytest.mark.parametrize("mutation", ("missing_key", "additional_key"))
+def test_c5_refuses_fingerprint_key_set_mutation(tmp_path, mutation):
+    repo, _, certificate = _build_case(
+        tmp_path,
+        reproduction_commit="b" * 40,
+    )
+    loaded = ratification._load_canonical_json(certificate, "test certificate")
+    reproduction = loaded["reproduction"]["environment_fingerprint"]
+    replay_manifest = repo / "artifacts/replay/run_manifest.json"
+    replay_unit_manifest = repo / "artifacts/replay/unit_o/manifest.json"
+    replay_run = ratification._load_canonical_json(replay_manifest, "replay run")
+    replay_unit = ratification._load_canonical_json(
+        replay_unit_manifest, "replay unit"
+    )
+    if mutation == "missing_key":
+        for value in (
+            reproduction,
+            replay_run["environment_fingerprint"],
+            replay_unit["environment_fingerprint"],
+        ):
+            value.pop("machine")
+    else:
+        for value in (
+            reproduction,
+            replay_run["environment_fingerprint"],
+            replay_unit["environment_fingerprint"],
+        ):
+            value["extra"] = "undeclared"
+    _write_json(replay_unit_manifest, replay_unit)
+    replay_run["artifact_manifest_sha256"]["unit_o"] = _sha(
+        replay_unit_manifest
+    )
+    _write_json(replay_manifest, replay_run)
+    loaded["reproduction"]["tree_sha256"] = ratification._tree_sha256(
+        repo / "artifacts/replay"
+    )
+    _write_json(certificate, loaded)
+    assert "C5" in evaluate_ratification_certificate(
+        certificate, repo_root=repo
+    ).failures
+
+
+def test_audit_entry_refuses_casefold_identity_collision():
+    entry = {
+        "ledger_format": AUDIT_FORMAT,
+        "entry_id": "identity-collision",
+        "program_id": PROGRAM_ID,
+        "unit": UNIT_NAME,
+        "audited_commit": RUN_COMMIT,
+        "audited_tree": "artifacts/candidate",
+        "verdict": "CLOSED",
+        "date": "2026-08-03",
+        "findings": ["named synthetic finding"],
+        "auditor_identity": "Independent Party",
+        "producer_identity": " independent party ",
+        "evidence_hashes": {"evidence": "a" * 64},
+    }
+    with pytest.raises(SpineError, match="different parties"):
+        ratification._validate_audit_entry(entry)
+
+
+def test_claim_boundary_labels_c4_and_c7_as_attestations():
+    assert "C4 is a retrospective attestation" in CLAIM_BOUNDARY
+    assert "C2 visibility" in CLAIM_BOUNDARY
+    assert "not externally anchored" in CLAIM_BOUNDARY
+    assert "C7 is a human attestation" in CLAIM_BOUNDARY
+    assert "Append-only is repository policy" in CLAIM_BOUNDARY
+
+
 def test_certificate_for_a_different_tree_or_commit_is_refused(tmp_path):
     repo, tree, certificate = _build_case(tmp_path)
     other = repo / "artifacts/other"
@@ -399,3 +521,31 @@ def test_phase8_halts_when_no_certificate_exists(tmp_path):
             repo_root=repo,
             certificate_directory=certificate.parent,
         )
+
+
+def test_repository_unit_o_audit_and_certificate_validate_exact_completed_tree():
+    audit_path = (
+        REPO_ROOT
+        / "mnq_lab/ledger/audit_entries/2026-08-02-unit-o-first-run-v1.json"
+    )
+    certificate_path = (
+        REPO_ROOT
+        / "mnq_lab/ledger/ratification_entries/"
+        "2026-08-03-phase7-unit-o-first-run-v1.json"
+    )
+    entries = ratification.load_audit_entries(audit_path.parent)
+    assert [entry["entry_id"] for entry in entries] == [
+        "2026-08-02-unit-o-first-run-v1-audit"
+    ]
+    result = evaluate_ratification_certificate(
+        certificate_path, repo_root=REPO_ROOT
+    )
+    assert result.passed and result.failures == ()
+    tree = (
+        REPO_ROOT
+        / "data/exploration/derived/phase7-unit-o-first-run-v1"
+    )
+    certificate = require_ratified_unit_o(tree, repo_root=REPO_ROOT)
+    assert certificate["certificate_id"] == (
+        "2026-08-03-phase7-unit-o-first-run-v1-ratification"
+    )

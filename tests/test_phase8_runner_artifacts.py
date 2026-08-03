@@ -10,6 +10,7 @@ import pytest
 from mnq_lab import SpineError
 from mnq_lab.phase8.artifacts import (
     PHASE8_TABLE_ORDER,
+    PHASE8_TABLE_SCHEMAS,
     CheckpointIdentity,
     CheckpointStore,
     Phase8Table,
@@ -36,19 +37,37 @@ def _identity(*, workers=2):
 
 
 def _tables():
-    return tuple(
-        Phase8Table(
-            name=name,
-            columns=(
-                ("row_id", np.asarray([f"{name}:0", f"{name}:1"])),
-                ("n_anchors", np.asarray([30, 31], dtype=np.int64)),
-                ("n_sessions", np.asarray([20, 21], dtype=np.int64)),
-                ("weight_ess", np.asarray([20.0, 21.0], dtype=np.float64)),
-                ("status", np.asarray(["ok", "insufficient_overlap"])),
-            ),
-        )
-        for name in PHASE8_TABLE_ORDER
-    )
+    integer = {
+        "horizon_minutes", "target_quantile_ticks", "baseline_quantile_ticks",
+        "contrast_ticks", "n_anchors", "n_sessions", "baseline_n_anchors",
+        "baseline_n_sessions", "quantile_ticks", "interaction_ticks",
+        "common_n_sessions", "mean_block_sessions", "draws", "ci_lower_ticks",
+        "ci_upper_ticks",
+    }
+    floating = {
+        "weight_ess", "baseline_weight_ess", "completion_target",
+        "completion_baseline", "completion_imbalance", "unsupported_target_mass",
+        "quarter_unsupported_target_mass", "max_single_anchor_weight_share",
+        "weight_cv", "confidence_level",
+    }
+    boolean = {name for schema in PHASE8_TABLE_SCHEMAS.values() for name in schema if name.endswith("_valid")}
+    tables = []
+    for table_name in PHASE8_TABLE_ORDER:
+        columns = []
+        for column in PHASE8_TABLE_SCHEMAS[table_name]:
+            if column in integer:
+                values = np.asarray([30, 31], dtype=np.int64)
+            elif column in floating:
+                values = np.asarray([20.0, 21.0], dtype=np.float64)
+            elif column in boolean:
+                values = np.asarray([True, False], dtype=np.bool_)
+            elif column == "status":
+                values = np.asarray(["ok", "insufficient_overlap"])
+            else:
+                values = np.asarray([f"{table_name}:0", f"{table_name}:1"])
+            columns.append((column, values))
+        tables.append(Phase8Table(table_name, tuple(columns)))
+    return tuple(tables)
 
 
 def test_phase8_writer_is_canonical_hashed_and_refuses_overwrite(tmp_path):
@@ -69,11 +88,7 @@ def test_phase8_writer_is_canonical_hashed_and_refuses_overwrite(tmp_path):
     assert manifest["table_order"] == list(PHASE8_TABLE_ORDER)
     for table_name in PHASE8_TABLE_ORDER:
         table = manifest["tables"][table_name]
-        assert table["column_order"][1:4] == [
-            "n_anchors",
-            "n_sessions",
-            "weight_ess",
-        ]
+        assert table["column_order"] == list(PHASE8_TABLE_SCHEMAS[table_name])
         for record in table["columns"].values():
             path = root / table_name / record["file"]
             assert path.stat().st_size == record["bytes"]
@@ -85,6 +100,14 @@ def test_phase8_writer_is_canonical_hashed_and_refuses_overwrite(tmp_path):
             provenance={},
             operating={},
             limitations=(),
+        )
+
+
+def test_phase8_table_rejects_a_schema_that_drops_required_companions():
+    with pytest.raises(SpineError, match="immutable schema"):
+        Phase8Table(
+            "contrasts",
+            (("row_id", np.asarray(["schema-drop-mutant"])),),
         )
 
 
@@ -173,4 +196,3 @@ def test_launch_preflight_fails_before_any_chunk_computation(tmp_path):
             memory_gate=gate,
         )
     assert called is False
-

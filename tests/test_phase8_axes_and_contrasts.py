@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from mnq_lab import SpineError
+from mnq_lab.constants import load_constants
 from mnq_lab.phase8.contrasts import (
     CONTRAST_NAMES,
     OUTCOME_NAMES,
@@ -20,6 +21,7 @@ from mnq_lab.phase8.contrasts import (
     tick_contrast,
     weighted_quantile_ticks,
 )
+from mnq_lab.spine.timemodel import TimeModel
 
 
 def test_literal_axes_are_exact_and_reject_an_added_tail_statistic():
@@ -40,6 +42,10 @@ def test_literal_axes_are_exact_and_reject_an_added_tail_statistic():
 
     with pytest.raises(SpineError, match="undeclared Phase 8 statistic"):
         statistic_probability("q95")
+
+
+def test_phase_axis_is_exactly_the_vocabulary_emitted_by_the_time_model():
+    assert SESSION_PHASES == TimeModel.from_constants(load_constants()).phase_names
 
 
 def test_all_five_support_masks_equal_a_contract_derived_oracle():

@@ -5,7 +5,9 @@ from __future__ import annotations
 import inspect
 
 import numpy as np
+import pytest
 
+from mnq_lab import SpineError
 from mnq_lab.phase8.contrasts import CellKey
 from mnq_lab.phase8.estimands import (
     ESTIMAND_NAMES,
@@ -220,3 +222,95 @@ def test_every_reported_anchor_count_has_session_count_and_weight_ess():
         if cell.n_anchors:
             assert cell.n_sessions > 0
             assert cell.weight_ess is not None
+
+
+def test_undeclared_estimand_is_a_named_fail_closed_input():
+    with pytest.raises(SpineError, match="undeclared Phase 8 estimand"):
+        _build(
+            estimand_name="retrospective_selected_cell",
+            session_ids=[1],
+            quarters=["2020Q1"],
+            phases=["open"],
+            vol_states=["low"],
+        )
+
+
+def test_undeclared_comparative_weighting_is_a_named_fail_closed_input():
+    with pytest.raises(SpineError, match="declared contrast weighting"):
+        _build(
+            estimand_name="prospective_cell",
+            session_ids=[1, 2],
+            quarters=["2020Q1", "2020Q1"],
+            phases=["open", "morning"],
+            vol_states=["low", "low"],
+            contrast_name="phase_effect_given_vol",
+            contrast_weighting="outcome_adaptive_weighting",
+        )
+
+
+def test_not_applicable_on_a_comparative_contrast_fails_closed():
+    with pytest.raises(SpineError, match="declared contrast weighting"):
+        _build(
+            estimand_name="prospective_cell",
+            session_ids=[1, 2],
+            quarters=["2020Q1", "2020Q1"],
+            phases=["open", "morning"],
+            vol_states=["low", "low"],
+            contrast_name="phase_effect_given_vol",
+            contrast_weighting="not_applicable",
+        )
+
+
+def test_comparative_weighting_on_absolute_distribution_fails_closed():
+    with pytest.raises(SpineError, match="absolute_distribution requires"):
+        _build(
+            estimand_name="prospective_cell",
+            session_ids=[1],
+            quarters=["2020Q1"],
+            phases=["open"],
+            vol_states=["low"],
+            contrast_weighting="natural_prevalence_contrast",
+        )
+
+
+def test_mismatched_estimand_vector_lengths_fail_closed():
+    with pytest.raises(SpineError, match="equal row length"):
+        build_estimand_weights(
+            estimand_name="prospective_cell",
+            session_ids=np.asarray([1, 2], dtype=np.int64),
+            calendar_quarters=np.asarray(["2020Q1"], dtype="<U8"),
+            session_phases=np.asarray(["open", "open"], dtype="<U16"),
+            volatility_states=np.asarray(["low", "low"], dtype="<U8"),
+            outcome_eligible=np.asarray([True, True]),
+            ordinary_full_length=np.asarray([True, True]),
+            target=CellKey("open", "low"),
+            contrast_name="absolute_distribution",
+            contrast_weighting="not_applicable",
+        )
+
+
+@pytest.mark.parametrize(
+    ("quarters", "ordinary_full_length"),
+    [
+        pytest.param(
+            ["2020Q1", "2020Q2"],
+            [True, True],
+            id="same-session-two-calendar-quarters",
+        ),
+        pytest.param(
+            ["2020Q1", "2020Q1"],
+            [True, False],
+            id="same-session-two-ordinary-full-length-values",
+        ),
+    ],
+)
+def test_inconsistent_session_metadata_fails_closed(quarters, ordinary_full_length):
+    with pytest.raises(SpineError, match="constant within session"):
+        _build(
+            estimand_name="prospective_cell",
+            session_ids=[1, 1],
+            quarters=quarters,
+            phases=["open", "open"],
+            vol_states=["low", "low"],
+            ordinary_full_length=ordinary_full_length,
+        )

@@ -23,6 +23,12 @@ from mnq_lab.phase8.diagnostics import (
     status_decision,
 )
 from mnq_lab.phase8.inventory import declared_result_rows
+from mnq_lab.phase8.uncertainty import (
+    BootstrapIntervalRequest,
+    BootstrapQuantileTerm,
+    bootstrap_contract,
+    joint_bootstrap_intervals,
+)
 
 __all__ = [
     "CONTRAST_NAMES",
@@ -33,13 +39,17 @@ __all__ = [
     "STATUS_PRECEDENCE",
     "VOLATILITY_STATES",
     "CellKey",
+    "BootstrapIntervalRequest",
+    "BootstrapQuantileTerm",
     "build_estimand_weights",
+    "bootstrap_contract",
     "anchor_support_failure",
     "completion_diagnostics",
     "contrast_support",
     "degenerate_baseline",
     "declared_result_rows",
     "positivity_diagnostics",
+    "joint_bootstrap_intervals",
     "statistic_probability",
     "support_masks",
     "status_decision",

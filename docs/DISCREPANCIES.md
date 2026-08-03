@@ -1180,3 +1180,69 @@ consumed.
 
 **Status:** `RESOLVED`. The `path_estimand` axis and 29,160-row primary
 inventory are now explicit; P8-C may build only against this settled key.
+---
+
+## D25. Phase 8 interaction population-estimand scope and row key
+
+**Observed during P8-D implementation.** Phase 8 preregistration section 10
+lists all three population estimands and the section 12 interaction rows in one
+primary-arm inventory. Read as a strict cross-product, that list would attach
+`prospective_cell`, `common_session_paired` and
+`standardized_shared_population` to every interaction. Section 12 instead
+fixes one interaction support, `four_cell_common_sessions`, and forbids the
+deferred `four_cell_standardized_population` by name.
+
+Section 10's bullets are not a strict cross-product. The same list includes
+q50, q75 and q90, while section 12 independently narrows interaction statistics
+to exactly q50 and q90. The section 12 family-specific restriction likewise
+governs which population estimand can truthfully describe its fixed support.
+
+**Ruling.** Phase 8 interaction rows carry
+`population_estimand = common_session_paired` only. The
+`population_estimand` column remains present and constant in the interaction
+table. The interaction inventory is 720 rows:
+
+```text
+2 outcomes x 2 path estimands x 2 support kinds x 3 horizons
+x 1 population estimand x 2 statistics x 15 phase-volatility cells
+```
+
+**Basis.** The frozen specification requires "one common population across all
+four cells." `prospective_cell` selects each side independently and requires
+no later state in the same session; requiring a four-way intersection destroys
+that prospective recognizability. Applying
+`standardized_shared_population` here would require the expressly deferred
+`four_cell_standardized_population`. Section 5.2's
+`common_session_paired` definition covers a multi-cell comparison when the
+named contrast explicitly requires every constituent cell, which section 12
+does.
+
+**Executable evidence.** The initial P8-D implementation enumerated all three
+population-estimand labels, but `population_estimand` never entered
+`build_four_cell_support`, `evaluate_interaction`, session selection or weight
+construction. The 2,160 declared rows were therefore only 720 distinct
+measurements repeated three times, twice under labels that did not describe
+their support.
+
+**Interaction-table key.** Section 14.4's prose declares both path and
+population estimands as row axes, but its literal column list omits
+`path_estimand`. D24's ruling is extended to section 14.4:
+`path_estimand` is placed immediately after `outcome_name`. This keeps the two
+Unit O path estimands uniquely representable rather than producing duplicate
+declared keys.
+
+**Timing and correction disclosure.** The tests-first oracle at commit
+`3f17a5f` asserted 2,160 interaction rows before this ruling existed. That
+count was an interpretation rather than a contract derivation. Revising it to
+720 after this ruling corrects an invalid interpretation; it does not weaken
+the test. The corrected oracle additionally requires the complete inventory's
+population-estimand vocabulary to equal `{"common_session_paired"}`, preventing
+the inert axis from returning silently.
+
+**Governance.** This appended resolution does not edit the byte-pinned Phase 8
+preregistration, frozen specification, YAML, ledger, accepted calendar,
+closeout or historical discrepancy text. It settles the interaction key before
+any real Phase 8 outcome is consumed.
+
+**Status:** `RESOLVED`. P8-D may retain the four-cell-common implementation and
+remove only the two false population-estimand labels from its inventory.

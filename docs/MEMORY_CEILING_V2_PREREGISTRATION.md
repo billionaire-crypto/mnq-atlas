@@ -70,9 +70,12 @@ The 6 GiB ceiling therefore provides approximately:
 - 3.2 times the exploration projection; and
 - 1.8 times the approximate full-span projection.
 
-It still rejects a threefold exploration regression: three times 1.862 GiB is
-approximately 5.586 GiB before normal measurement variation, and any observed
-peak above the exact 6 GiB boundary fails at the next checkpoint.
+It does not reject an exact threefold exploration regression: three times
+1.862 GiB is approximately 5.586 GiB, which is below the exact 6 GiB boundary.
+Relative to the 1.862 GiB projection, the ceiling permits approximately 3.22
+times that projected peak; only a measured peak above the exact boundary fails
+at the next checkpoint. The ceiling remains a fixed resource envelope, not a
+threefold-regression guard.
 
 These figures justify a fixed resource envelope. They do not authorize a
 change to any scientific value, evidence form, artifact field, schema, dtype,

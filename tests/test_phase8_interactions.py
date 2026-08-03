@@ -24,6 +24,7 @@ from mnq_lab.phase8.interactions import (
     build_four_cell_support,
     declared_interaction_rows,
     evaluate_interaction,
+    interaction_bootstrap_inputs,
     interaction_cells,
 )
 
@@ -359,3 +360,41 @@ def test_q75_and_misordered_completion_cells_fail_closed():
     with pytest.raises(SpineError, match="q50 and q90"):
         evaluate_interaction(values, support, _completion(cells), "q75")
 
+
+def test_ok_evaluation_translates_exactly_to_joint_bootstrap_terms_and_request():
+    target = CellKey("open", "high")
+    session_ids, phases, states, eligible, values = _four_cell_rows()
+    support = build_four_cell_support(
+        session_ids, phases, states, eligible, target
+    )
+    evaluation = evaluate_interaction(
+        values, support, _completion(interaction_cells(target)), "q50"
+    )
+    terms, request = interaction_bootstrap_inputs(
+        "open_high_q50", values, evaluation
+    )
+
+    assert len(terms) == 4
+    assert request.request_id == "open_high_q50"
+    assert request.term_ids == tuple(term.term_id for term in terms)
+    assert request.status == "ok"
+    for term, expected in zip(terms, support.terms, strict=True):
+        assert term.statistic == "q50"
+        assert np.array_equal(term.values, values)
+        assert np.array_equal(term.eligibility_mask, expected.eligibility_mask)
+        assert np.array_equal(term.weights, expected.weights)
+
+    thin_ids, thin_phases, thin_states, thin_eligible, thin_values = (
+        _four_cell_rows(sessions=range(19))
+    )
+    thin_support = build_four_cell_support(
+        thin_ids, thin_phases, thin_states, thin_eligible, target
+    )
+    thin = evaluate_interaction(
+        thin_values,
+        thin_support,
+        _completion(interaction_cells(target)),
+        "q50",
+    )
+    with pytest.raises(SpineError, match="only ok interaction evaluations"):
+        interaction_bootstrap_inputs("thin_mutant", thin_values, thin)

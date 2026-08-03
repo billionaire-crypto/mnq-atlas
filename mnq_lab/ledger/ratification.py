@@ -71,9 +71,26 @@ CERTIFICATE_PINNED_INPUTS = {
 }
 
 CLAIM_BOUNDARY = (
-    "C1-C6 passed mechanical validation. C7 is a recorded human attestation; "
-    "code cannot prove that no person inspected outcomes before the criteria "
-    "were fixed or that the audit was genuinely blind and independent."
+    "Schema and byte-integrity checks passed for C1, C2, C3, C5 and C6; "
+    "some checked inputs are producer-authored attestations. C4 is a "
+    "retrospective attestation because no producer-side gate outcomes exist. "
+    "C2 visibility rests on a recorded timestamp corroborated by the run "
+    "manifest filesystem mtime but not externally anchored. C7 is a human "
+    "attestation; code cannot prove blindness, competence or genuine "
+    "independence. Append-only is repository policy, not code-enforced."
+)
+
+ENVIRONMENT_FINGERPRINT_KEYS = (
+    "vcs",
+    "commit",
+    "branch",
+    "dirty",
+    "python",
+    "numpy",
+    "pandas",
+    "platform",
+    "machine",
+    "pipeline_version",
 )
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -84,8 +101,8 @@ COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 class RatificationResult:
     passed: bool
     failures: tuple[str, ...]
-    mechanically_checked: tuple[str, ...] = ("C1", "C2", "C3", "C4", "C5", "C6")
-    attested_not_proven: tuple[str, ...] = ("C7",)
+    mechanically_checked: tuple[str, ...] = ("C1", "C2", "C3", "C5", "C6")
+    attested_not_proven: tuple[str, ...] = ("C4", "C7")
 
 
 def canonical_json_bytes(value: Any) -> bytes:
@@ -158,6 +175,31 @@ def _parse_timestamp(value: Any, label: str) -> datetime:
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise SpineError(f"{label} must be timezone-aware")
     return parsed
+
+
+def _validate_environment_fingerprint(value: Any, label: str) -> dict[str, Any]:
+    fingerprint = _require_exact_keys(
+        value, set(ENVIRONMENT_FINGERPRINT_KEYS), label
+    )
+    _require_commit(fingerprint["commit"], f"{label} commit")
+    if type(fingerprint["dirty"]) is not bool:
+        raise SpineError(f"{label} dirty flag must be a built-in bool")
+    for key in ENVIRONMENT_FINGERPRINT_KEYS:
+        if key in {"commit", "dirty"}:
+            continue
+        if not isinstance(fingerprint[key], str) or not fingerprint[key]:
+            raise SpineError(f"{label} {key} is empty or invalid")
+    return fingerprint
+
+
+def _commit_only_fingerprint_variance(
+    candidate: Mapping[str, Any], reproduction: Mapping[str, Any]
+) -> bool:
+    return all(
+        candidate[key] == reproduction[key]
+        for key in ENVIRONMENT_FINGERPRINT_KEYS
+        if key != "commit"
+    )
 
 
 def _is_reparse_point(path: Path) -> bool:
@@ -294,6 +336,11 @@ def _validate_audit_entry(entry: Mapping[str, Any]) -> None:
     for identity in ("auditor_identity", "producer_identity"):
         if not isinstance(entry[identity], str) or not entry[identity].strip():
             raise SpineError(f"audit-verdict {identity} is empty")
+    if (
+        entry["auditor_identity"].strip().casefold()
+        == entry["producer_identity"].strip().casefold()
+    ):
+        raise SpineError("audit-verdict identities must name different parties")
     evidence = entry["evidence_hashes"]
     if not isinstance(evidence, dict) or not evidence:
         raise SpineError("audit-verdict evidence_hashes are empty")
@@ -339,7 +386,7 @@ def _certificate_skeleton(certificate: Mapping[str, Any]) -> None:
     _require_commit(certificate["run_commit"], "certificate run_commit")
     expected_conditions = {
         "C1": {"passed": True}, "C2": {"passed": True},
-        "C3": {"passed": True}, "C4": {"passed": True},
+        "C3": {"passed": True}, "C4": {"attested": True},
         "C5": {"passed": True}, "C6": {"passed": True},
         "C7": {"attested_closed": True},
     }
@@ -433,11 +480,14 @@ def evaluate_ratification_certificate(
         failures.append("C2")
 
     try:
-        environment = certificate["environment_fingerprint"]
-        if not isinstance(environment, dict) or not environment:
-            raise SpineError("environment fingerprint is empty")
+        environment = _validate_environment_fingerprint(
+            certificate["environment_fingerprint"],
+            "certificate environment fingerprint",
+        )
         if environment != run_manifest.get("environment_fingerprint"):
             raise SpineError("certificate/run environment fingerprint differs")
+        if environment != unit_manifest.get("environment_fingerprint"):
+            raise SpineError("certificate/Unit O environment fingerprint differs")
         if environment.get("commit") != certificate["run_commit"] or environment.get("dirty") is not False:
             raise SpineError("run did not use one clean committed state")
         if unit_manifest.get("code_commit") != certificate["run_commit"] or unit_manifest.get("dirty_worktree") is not False:
@@ -491,8 +541,53 @@ def evaluate_ratification_certificate(
             raise SpineError("reproduction must be a distinct rerun tree")
         if reproduction["tree_sha256"] != _tree_sha256(comparison):
             raise SpineError("comparison tree identity differs")
-        if reproduction["environment_fingerprint"] != certificate["environment_fingerprint"]:
-            raise SpineError("reproduction environment fingerprint differs")
+        reproduction_environment = _validate_environment_fingerprint(
+            reproduction["environment_fingerprint"],
+            "reproduction environment fingerprint",
+        )
+        comparison_run_manifest = _load_canonical_json(
+            comparison / "run_manifest.json", "comparison run manifest"
+        )
+        comparison_unit_manifest_path = comparison / "unit_o" / "manifest.json"
+        comparison_unit_manifest = _load_canonical_json(
+            comparison_unit_manifest_path, "comparison Unit O manifest"
+        )
+        comparison_run_environment = _validate_environment_fingerprint(
+            comparison_run_manifest.get("environment_fingerprint"),
+            "comparison run environment fingerprint",
+        )
+        comparison_unit_environment = _validate_environment_fingerprint(
+            comparison_unit_manifest.get("environment_fingerprint"),
+            "comparison Unit O environment fingerprint",
+        )
+        if (
+            reproduction_environment != comparison_run_environment
+            or reproduction_environment != comparison_unit_environment
+        ):
+            raise SpineError("reproduction environment evidence differs from its manifests")
+        if (
+            comparison_unit_manifest.get("code_commit")
+            != reproduction_environment["commit"]
+            or comparison_unit_manifest.get("dirty_worktree") is not False
+        ):
+            raise SpineError("reproduction Unit O code state differs")
+        candidate_environment = _validate_environment_fingerprint(
+            certificate["environment_fingerprint"],
+            "candidate environment fingerprint for C5",
+        )
+        if not _commit_only_fingerprint_variance(
+            candidate_environment, reproduction_environment
+        ):
+            raise SpineError("reproduction fingerprint differs outside commit")
+        comparison_artifacts = comparison_run_manifest.get(
+            "artifact_manifest_sha256"
+        )
+        if (
+            not isinstance(comparison_artifacts, dict)
+            or comparison_artifacts.get("unit_o")
+            != _sha256_file(comparison_unit_manifest_path)
+        ):
+            raise SpineError("comparison run/Unit O manifest binding differs")
         comparison_columns = _scientific_columns(comparison)
         if reproduction["scientific_columns"] != comparison_columns or comparison_columns != actual_columns:
             raise SpineError("scientific columns are not bit-identical")

@@ -13,6 +13,7 @@ from mnq_lab.core.weights import (
     weighted_quantile_prepared,
     weighted_quantiles,
     weighted_quantiles_prepared,
+    weighted_quantiles_prepared_batch_fast,
 )
 from mnq_lab.phase8.contrasts import (
     prepare_weighted_quantile_ticks,
@@ -118,3 +119,48 @@ def test_prepared_tick_contract_cannot_bypass_signed_int32_validation():
         prepare_weighted_quantile_ticks(
             np.asarray([np.iinfo(np.int32).max + 1], dtype=np.int64)
         )
+
+
+def test_batched_draws_are_bit_identical_to_one_draw_at_a_time_with_heavy_ties():
+    rng = np.random.Generator(np.random.PCG64(20260803))
+    values = rng.integers(-12, 13, size=513, dtype=np.int32)
+    prepared = prepare_weighted_quantile_values(values)
+    weights = 10.0 ** rng.uniform(-12.0, 7.0, size=(37, 513))
+    weights[rng.random((37, 513)) < 0.45] = 0.0
+    probabilities = np.asarray([0.50, 0.75, 0.90])
+
+    expected = np.vstack(
+        [
+            weighted_quantiles_prepared(prepared, row, probabilities)
+            for row in weights
+        ]
+    )
+    actual = weighted_quantiles_prepared_batch_fast(
+        prepared, weights, probabilities
+    )
+    assert np.array_equal(actual, expected)
+
+
+def test_batched_draws_preserve_dynamic_zero_support_and_single_support_rows():
+    values = np.asarray([0, 0, 2, 2, 5, 9], dtype=np.int32)
+    prepared = prepare_weighted_quantile_values(values)
+    weights = np.asarray(
+        [
+            [0.5, 0.0, 0.0, 0.0, 0.5, 0.0],
+            [0.0, 0.0, 0.0, 3.0, 0.0, 0.0],
+            [1e-12, 1e7, 1e-6, 0.0, 1.0, 0.0],
+        ]
+    )
+    probabilities = np.asarray([0.50, 0.75, 0.90])
+    expected = np.vstack(
+        [
+            weighted_quantiles_prepared(prepared, row, probabilities)
+            for row in weights
+        ]
+    )
+    assert np.array_equal(
+        weighted_quantiles_prepared_batch_fast(
+            prepared, weights, probabilities
+        ),
+        expected,
+    )

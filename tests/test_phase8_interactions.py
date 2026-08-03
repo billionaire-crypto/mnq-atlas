@@ -106,7 +106,10 @@ def test_interaction_literals_and_inventory_are_exact_with_seven_eight_split():
     assert DESCRIPTIVE_ONLY_LABEL == "DESCRIPTIVE ONLY - NO P-VALUE"
 
     declared = declared_interaction_rows()
-    assert len(declared) == 2 * 2 * 2 * 3 * 3 * 2 * 15
+    assert len(declared) == 2 * 2 * 2 * 3 * 1 * 2 * 15
+    assert {spec.population_estimand for spec in declared} == {
+        "common_session_paired"
+    }
     fixed_slice = tuple(
         spec
         for spec in declared

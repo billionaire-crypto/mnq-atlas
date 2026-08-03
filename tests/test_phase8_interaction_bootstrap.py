@@ -127,3 +127,12 @@ def test_interaction_request_rejects_invalid_status_and_non_four_term_shape():
             ("pv", "p_mid", "pv", "midday_mid"),
             "ok",
         )
+
+
+def test_interaction_request_rejects_fewer_than_four_terms():
+    with pytest.raises(SpineError, match="exactly four distinct"):
+        BootstrapInteractionRequest(
+            "three_term_mutant",
+            ("pv", "p_mid", "midday_v"),
+            "ok",
+        )

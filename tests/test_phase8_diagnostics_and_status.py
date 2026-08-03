@@ -237,6 +237,7 @@ def test_positivity_unsupported_mass_uses_target_weight_not_baseline_frequency()
     assert result.breaches == (
         "insufficient_baseline_anchors",
         "insufficient_contributing_sessions",
+        "single_anchor_weight_share_above_maximum",
         "unsupported_target_mass_above_maximum",
     )
 

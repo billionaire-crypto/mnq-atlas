@@ -30,6 +30,7 @@ __all__ = [
     "weighted_quantile_prepared",
     "weighted_quantiles",
     "weighted_quantiles_prepared",
+    "weighted_quantiles_prepared_fast",
 ]
 
 _MAX_EXACT_BINARY64_INTEGER = 2**53
@@ -365,6 +366,61 @@ def weighted_quantiles_prepared(
     probabilities = _as_quantile_vector(quantiles)
     support, cumulative = _prepared_positive_support_cdf(prepared, weights)
     total = cumulative[-1]
+    thresholds = probabilities * total
+    indices = np.searchsorted(cumulative, thresholds, side="left")
+    if bool(np.any(indices >= support.size)):
+        raise SpineError(
+            "weighted inverse-CDF selection escaped the positive-mass support"
+        )
+    return support[indices].astype(np.float64, copy=False)
+
+
+def weighted_quantiles_prepared_fast(
+    prepared: PreparedWeightedQuantileValues,
+    weights: Any,
+    quantiles: Any,
+) -> np.ndarray:
+    """Exact prepared quantiles with singleton value groups handled in bulk."""
+    probabilities = _as_quantile_vector(quantiles)
+    if not isinstance(prepared, PreparedWeightedQuantileValues):
+        raise SpineError(
+            "prepared values must come from prepare_weighted_quantile_values"
+        )
+    weight_array = _as_real_float64_vector(weights, "weights")
+    if weight_array.size != prepared.source_size:
+        raise SpineError(
+            "values and weights must have equal length; "
+            f"got {prepared.source_size} and {weight_array.size}"
+        )
+    if bool(np.any(weight_array < 0.0)):
+        bad = int(np.flatnonzero(weight_array < 0.0)[0])
+        raise SpineError(f"weights contains a negative value at index {bad}")
+
+    ordered_weights = weight_array[prepared.order]
+    group_ends = np.r_[prepared.group_starts[1:], prepared.source_size]
+    group_lengths = group_ends - prepared.group_starts
+    masses = np.empty(prepared.group_starts.size, dtype=np.float64)
+    singletons = group_lengths == 1
+    masses[singletons] = ordered_weights[prepared.group_starts[singletons]]
+    for index in np.flatnonzero(~singletons):
+        start = int(prepared.group_starts[index])
+        end = int(group_ends[index])
+        canonical_weights = np.sort(
+            ordered_weights[start:end], kind="mergesort"
+        )
+        masses[index] = np.cumsum(canonical_weights, dtype=np.float64)[-1]
+
+    positive = masses > 0.0
+    support = prepared.support[positive]
+    masses = masses[positive]
+    if support.size == 0:
+        raise SpineError("weights must have strictly positive total mass")
+    cumulative = np.cumsum(masses, dtype=np.float64)
+    total = cumulative[-1]
+    if not np.isfinite(total):
+        raise SpineError("canonical binary64 weight accumulation is non-finite")
+    if not total > 0.0:
+        raise SpineError("weights must have strictly positive total mass")
     thresholds = probabilities * total
     indices = np.searchsorted(cumulative, thresholds, side="left")
     if bool(np.any(indices >= support.size)):

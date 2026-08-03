@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 from numbers import Integral
 from pathlib import Path
 from typing import Any, Hashable
@@ -20,6 +21,7 @@ from mnq_lab.phase8.contrasts import (
     prepare_weighted_quantile_ticks,
     statistic_probability,
     weighted_quantile_ticks,
+    weighted_quantiles_ticks_prepared_fast,
 )
 from mnq_lab.phase8.diagnostics import StatusDecision, resolve_status
 
@@ -62,8 +64,10 @@ __all__ = [
     "JointBootstrapResult",
     "RequestBootstrapResult",
     "bootstrap_contract",
+    "distinct_bootstrap_evaluations",
     "interval_conclusion_reversal",
     "joint_bootstrap_intervals",
+    "joint_bootstrap_intervals_oracle",
 ]
 
 
@@ -175,6 +179,17 @@ class RequestBootstrapResult:
 class JointBootstrapResult:
     contract: BootstrapContract
     requests: tuple[RequestBootstrapResult, ...]
+
+
+@dataclass(frozen=True)
+class _CompiledTermEvaluation:
+    term_ids: tuple[Hashable, ...]
+    statistics: tuple[str, ...]
+    eligible_values: np.ndarray
+    eligible_base_weights: np.ndarray
+    eligible_session_indices: np.ndarray
+    prepared: Any
+    positive_session_indices: np.ndarray
 
 
 def _validate_identifier(value: Any, name: str) -> Hashable:
@@ -352,14 +367,14 @@ def _validated_inputs(
     return groups.copy(), term_tuple, request_tuple
 
 
-def joint_bootstrap_intervals(
+def joint_bootstrap_intervals_oracle(
     group_ids: Any,
     terms: Any,
     requests: Any,
     *,
     constants_path: Path | None = None,
 ) -> JointBootstrapResult:
-    """Apply one global whole-session plan to every aligned term per replicate."""
+    """Untouched row-frame engine retained as the executable output oracle."""
     contract = bootstrap_contract(constants_path)
     groups, term_tuple, request_tuple = _validated_inputs(
         group_ids, terms, requests
@@ -479,4 +494,332 @@ def joint_bootstrap_intervals(
         results.append(
             RequestBootstrapResult(request.request_id, rows, reversal)
         )
+    return JointBootstrapResult(contract, tuple(results))
+
+
+def _term_digest(term: BootstrapQuantileTerm) -> bytes:
+    digest = hashlib.sha256()
+    for array in (term.values, term.eligibility_mask, term.weights):
+        digest.update(str(array.dtype).encode("ascii"))
+        digest.update(np.asarray(array.shape, dtype=np.int64).tobytes())
+        digest.update(array.tobytes(order="C"))
+    return digest.digest()
+
+
+def _term_evaluation_groups(
+    terms: tuple[BootstrapQuantileTerm, ...],
+) -> tuple[tuple[BootstrapQuantileTerm, ...], ...]:
+    buckets: dict[bytes, list[list[BootstrapQuantileTerm]]] = {}
+    ordered: list[list[BootstrapQuantileTerm]] = []
+    for term in terms:
+        digest = _term_digest(term)
+        matched = None
+        for candidate in buckets.get(digest, []):
+            exemplar = candidate[0]
+            if (
+                np.array_equal(term.values, exemplar.values)
+                and np.array_equal(term.eligibility_mask, exemplar.eligibility_mask)
+                and np.array_equal(term.weights, exemplar.weights)
+            ):
+                matched = candidate
+                break
+        if matched is None:
+            matched = [term]
+            buckets.setdefault(digest, []).append(matched)
+            ordered.append(matched)
+        else:
+            matched.append(term)
+    return tuple(tuple(group) for group in ordered)
+
+
+def distinct_bootstrap_evaluations(terms: Any) -> int:
+    """Count exact value/mask/weight evaluations after statistic collapse."""
+    try:
+        term_tuple = tuple(terms)
+    except TypeError as exc:
+        raise SpineError("bootstrap terms must be a finite sequence") from exc
+    if not term_tuple or any(
+        not isinstance(term, BootstrapQuantileTerm) for term in term_tuple
+    ):
+        raise SpineError("at least one BootstrapQuantileTerm is required")
+    return len(_term_evaluation_groups(term_tuple))
+
+
+def _ordered_session_structure(
+    groups: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    boundaries = np.flatnonzero(groups[1:] != groups[:-1]) + 1
+    starts = np.r_[0, boundaries]
+    labels = groups[starts]
+    normalized: list[Hashable] = []
+    seen: set[Hashable] = set()
+    for index, raw in enumerate(labels):
+        label = raw.item() if isinstance(raw, np.generic) else raw
+        _validate_identifier(label, f"group label {index}")
+        if label in seen:
+            raise SpineError("a bootstrap session appears in non-contiguous regions")
+        seen.add(label)
+        normalized.append(label)
+    lengths = np.diff(np.r_[starts, groups.size])
+    row_session_indices = np.repeat(
+        np.arange(len(normalized), dtype=np.int32), lengths
+    )
+    label_array = np.asarray(normalized, dtype=object)
+    label_array.setflags(write=False)
+    row_session_indices.setflags(write=False)
+    return label_array, row_session_indices
+
+
+def _compile_term_evaluations(
+    terms: tuple[BootstrapQuantileTerm, ...],
+    row_session_indices: np.ndarray,
+) -> tuple[_CompiledTermEvaluation, ...]:
+    compiled: list[_CompiledTermEvaluation] = []
+    for group in _term_evaluation_groups(terms):
+        exemplar = group[0]
+        eligible_rows = np.flatnonzero(exemplar.eligibility_mask)
+        values = exemplar.values[eligible_rows].copy()
+        weights = exemplar.weights[eligible_rows].copy()
+        sessions = row_session_indices[eligible_rows].copy()
+        positive_sessions = np.unique(sessions[weights > 0.0]).astype(
+            np.int32, copy=False
+        )
+        for array in (values, weights, sessions, positive_sessions):
+            array.setflags(write=False)
+        compiled.append(
+            _CompiledTermEvaluation(
+                term_ids=tuple(term.term_id for term in group),
+                statistics=tuple(term.statistic for term in group),
+                eligible_values=values,
+                eligible_base_weights=weights,
+                eligible_session_indices=sessions,
+                prepared=prepare_weighted_quantile_ticks(values),
+                positive_session_indices=positive_sessions,
+            )
+        )
+    return tuple(compiled)
+
+
+def _generate_session_plan_matrices(
+    *,
+    groups: np.ndarray,
+    session_labels: np.ndarray,
+    compiled: tuple[_CompiledTermEvaluation, ...],
+    contract: BootstrapContract,
+) -> tuple[np.ndarray, ...]:
+    root = np.random.SeedSequence(contract.root_entropy)
+    children = root.spawn(len(contract.block_lengths))
+    session_count = session_labels.size
+    dtype = np.int16 if session_count <= np.iinfo(np.int16).max else np.int32
+    unit_session_weights = np.ones(session_count, dtype=np.float64)
+    # Preserve the original small-fixture witness while avoiding a complete
+    # row-frame scan for the 472,212-row production input.
+    plan_groups = groups if groups.size <= 4_096 else session_labels
+    matrices: list[np.ndarray] = []
+    immediate_preflight = groups.size <= 4_096
+    for block_length, child in zip(contract.block_lengths, children, strict=True):
+        rng = np.random.Generator(np.random.PCG64(child))
+        matrix = np.empty(
+            (contract.draws_per_block_length, session_count), dtype=dtype
+        )
+        for replicate_index in range(contract.draws_per_block_length):
+            try:
+                plan = stationary_group_resample(plan_groups, block_length, rng)
+                multiplicities = apply_group_multiplicities(
+                    session_labels, unit_session_weights, plan
+                )
+            except SpineError as exc:
+                raise SpineError(
+                    f"Phase 8 block length {block_length}, replicate "
+                    f"{replicate_index} plan failed: {exc}"
+                ) from exc
+            if not bool(np.equal(multiplicities, np.floor(multiplicities)).all()):
+                raise SpineError("session multiplicities must remain exact integers")
+            matrix[replicate_index] = multiplicities.astype(dtype, copy=False)
+            if immediate_preflight:
+                for evaluation in compiled:
+                    if not bool(
+                        np.any(
+                            matrix[
+                                replicate_index,
+                                evaluation.positive_session_indices,
+                            ]
+                            > 0
+                        )
+                    ):
+                        raise SpineError(
+                            f"Phase 8 block length {block_length}, replicate "
+                            f"{replicate_index}, term {evaluation.term_ids[0]!r} "
+                            "failed: weights must have strictly positive total mass"
+                        )
+        if not immediate_preflight:
+            for evaluation in compiled:
+                supported = np.any(
+                    matrix[:, evaluation.positive_session_indices] > 0,
+                    axis=1,
+                )
+                if not bool(np.all(supported)):
+                    replicate_index = int(np.flatnonzero(~supported)[0])
+                    raise SpineError(
+                        f"Phase 8 block length {block_length}, replicate "
+                        f"{replicate_index}, term {evaluation.term_ids[0]!r} "
+                        "failed: weights must have strictly positive total mass"
+                    )
+        matrix.setflags(write=False)
+        matrices.append(matrix)
+    return tuple(matrices)
+
+
+def _evaluate_compiled_terms(
+    evaluation: _CompiledTermEvaluation,
+    session_multiplicities: np.ndarray,
+    block_length: int,
+) -> dict[Hashable, np.ndarray]:
+    draws = session_multiplicities.shape[0]
+    outputs = {
+        term_id: np.empty(draws, dtype=np.int64)
+        for term_id in evaluation.term_ids
+    }
+    for replicate_index in range(draws):
+        with np.errstate(over="ignore", invalid="ignore"):
+            composed = np.multiply(
+                evaluation.eligible_base_weights,
+                session_multiplicities[
+                    replicate_index, evaluation.eligible_session_indices
+                ],
+                dtype=np.float64,
+            )
+        if not bool(np.isfinite(composed).all()):
+            raise SpineError(
+                f"Phase 8 block length {block_length}, replicate "
+                f"{replicate_index}, term {evaluation.term_ids[0]!r} produced "
+                "non-finite composed weights"
+            )
+        try:
+            if len(evaluation.term_ids) == 1:
+                ticks = (
+                    weighted_quantile_ticks(
+                        evaluation.prepared,
+                        composed,
+                        evaluation.statistics[0],
+                    ),
+                )
+            else:
+                ticks = weighted_quantiles_ticks_prepared_fast(
+                    evaluation.prepared,
+                    composed,
+                    evaluation.statistics,
+                )
+        except SpineError as exc:
+            raise SpineError(
+                f"Phase 8 block length {block_length}, replicate "
+                f"{replicate_index}, term {evaluation.term_ids[0]!r} failed: {exc}"
+            ) from exc
+        for term_id, tick in zip(evaluation.term_ids, ticks, strict=True):
+            outputs[term_id][replicate_index] = tick
+    return outputs
+
+
+def joint_bootstrap_intervals(
+    group_ids: Any,
+    terms: Any,
+    requests: Any,
+    *,
+    constants_path: Path | None = None,
+) -> JointBootstrapResult:
+    """Evaluate exact joint intervals with compact session plans and local support."""
+    contract = bootstrap_contract(constants_path)
+    groups, term_tuple, request_tuple = _validated_inputs(
+        group_ids, terms, requests
+    )
+    session_labels, row_session_indices = _ordered_session_structure(groups)
+    compiled = _compile_term_evaluations(term_tuple, row_session_indices)
+    plan_matrices = _generate_session_plan_matrices(
+        groups=groups,
+        session_labels=session_labels,
+        compiled=compiled,
+        contract=contract,
+    )
+    intervals_by_request: dict[Hashable, list[BootstrapIntervalRow]] = {
+        request.request_id: [] for request in request_tuple
+    }
+    root = np.random.SeedSequence(contract.root_entropy)
+    children = root.spawn(len(contract.block_lengths))
+
+    for block_index, (block_length, child) in enumerate(
+        zip(contract.block_lengths, children, strict=True)
+    ):
+        term_replicates: dict[Hashable, np.ndarray] = {}
+        for evaluation in compiled:
+            term_replicates.update(
+                _evaluate_compiled_terms(
+                    evaluation,
+                    plan_matrices[block_index],
+                    block_length,
+                )
+            )
+        request_replicates = np.empty(
+            (len(request_tuple), contract.draws_per_block_length),
+            dtype=np.int64,
+        )
+        for request_index, request in enumerate(request_tuple):
+            if isinstance(request, BootstrapInteractionRequest):
+                first, second, third, fourth = (
+                    term_replicates[term_id] for term_id in request.term_ids
+                )
+                request_replicates[request_index] = (
+                    first - second - third + fourth
+                )
+            else:
+                target = term_replicates[request.target_term_id]
+                request_replicates[request_index] = (
+                    target
+                    if request.baseline_term_id is None
+                    else target - term_replicates[request.baseline_term_id]
+                )
+
+        for request_index, request in enumerate(request_tuple):
+            try:
+                raw_interval = percentile_interval(
+                    request_replicates[request_index], contract.confidence_level
+                )
+            except SpineError as exc:
+                raise SpineError(
+                    f"Phase 8 block length {block_length}, request "
+                    f"{request.request_id!r} interval failed: {exc}"
+                ) from exc
+            lower, upper = _interval_pair(raw_interval)
+            intervals_by_request[request.request_id].append(
+                BootstrapIntervalRow(
+                    request_id=request.request_id,
+                    mean_block_sessions=block_length,
+                    draws=contract.draws_per_block_length,
+                    confidence_level=contract.confidence_level,
+                    ci_lower_ticks=lower,
+                    ci_upper_ticks=upper,
+                    interval_valid=True,
+                    is_primary=block_length == contract.primary_block_length,
+                    rng_root_entropy=contract.root_entropy,
+                    rng_child_spawn_key=tuple(child.spawn_key),
+                    historical_mixture_disclosure=HISTORICAL_MIXTURE_DISCLOSURE,
+                    conditioner_uncertainty_disclosure=CONDITIONER_UNCERTAINTY_DISCLOSURE,
+                    weight_ess_disclosure=WEIGHT_ESS_DISCLOSURE,
+                )
+            )
+
+    results: list[RequestBootstrapResult] = []
+    for request in request_tuple:
+        rows = tuple(intervals_by_request[request.request_id])
+        row_by_block = {row.mean_block_sessions: row for row in rows}
+        reversal = interval_conclusion_reversal(
+            (
+                row_by_block[5].ci_lower_ticks,
+                row_by_block[5].ci_upper_ticks,
+            ),
+            (
+                row_by_block[10].ci_lower_ticks,
+                row_by_block[10].ci_upper_ticks,
+            ),
+        )
+        results.append(RequestBootstrapResult(request.request_id, rows, reversal))
     return JointBootstrapResult(contract, tuple(results))

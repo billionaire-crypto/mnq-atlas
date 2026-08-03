@@ -14,6 +14,7 @@ from mnq_lab.core.weights import (
     prepare_weighted_quantile_values,
     weighted_quantile,
     weighted_quantile_prepared,
+    weighted_quantiles_prepared_fast,
 )
 
 OUTCOME_NAMES = (
@@ -53,6 +54,7 @@ __all__ = [
     "support_masks",
     "tick_contrast",
     "weighted_quantile_ticks",
+    "weighted_quantiles_ticks_prepared_fast",
 ]
 
 
@@ -247,14 +249,7 @@ def prepare_weighted_quantile_ticks(values: Any) -> PreparedTickQuantileValues:
     return PreparedTickQuantileValues(prepare_weighted_quantile_values(ticks))
 
 
-def weighted_quantile_ticks(values: Any, weights: Any, statistic: Any) -> int:
-    """Return one exact inverse-CDF tick without interpolation or rounding."""
-    probability = statistic_probability(statistic)
-    if isinstance(values, PreparedTickQuantileValues):
-        raw = weighted_quantile_prepared(values.prepared, weights, probability)
-    else:
-        ticks = _signed_int32_tick_vector(values)
-        raw = weighted_quantile(ticks, weights, probability)
+def _exact_tick_quantile(raw: Any) -> int:
     if isinstance(raw, (bool, np.bool_)) or not isinstance(raw, Real):
         raise SpineError("weighted quantile produced a non-integral tick quantile")
     numeric = float(raw)
@@ -265,6 +260,40 @@ def weighted_quantile_ticks(values: Any, weights: Any, statistic: Any) -> int:
     if numeric < _INT64_INFO.min or numeric > _INT64_INFO.max:
         raise SpineError("weighted quantile tick is outside int64 range")
     return int(numeric)
+
+
+def weighted_quantile_ticks(values: Any, weights: Any, statistic: Any) -> int:
+    """Return one exact inverse-CDF tick without interpolation or rounding."""
+    probability = statistic_probability(statistic)
+    if isinstance(values, PreparedTickQuantileValues):
+        raw = weighted_quantile_prepared(values.prepared, weights, probability)
+    else:
+        ticks = _signed_int32_tick_vector(values)
+        raw = weighted_quantile(ticks, weights, probability)
+    return _exact_tick_quantile(raw)
+
+
+def weighted_quantiles_ticks_prepared_fast(
+    prepared: PreparedTickQuantileValues,
+    weights: Any,
+    statistics: Any,
+) -> tuple[int, ...]:
+    """Evaluate several frozen tick probabilities from one exact CDF pass."""
+    if not isinstance(prepared, PreparedTickQuantileValues):
+        raise SpineError("fast tick quantiles require prepared signed int32 values")
+    try:
+        names = tuple(statistics)
+    except TypeError as exc:
+        raise SpineError("statistics must be a finite sequence") from exc
+    if not names:
+        raise SpineError("statistics must contain at least one frozen statistic")
+    probabilities = tuple(statistic_probability(name) for name in names)
+    raw = weighted_quantiles_prepared_fast(
+        prepared.prepared,
+        weights,
+        probabilities,
+    )
+    return tuple(_exact_tick_quantile(value) for value in raw)
 
 
 def tick_contrast(

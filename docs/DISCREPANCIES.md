@@ -1047,3 +1047,82 @@ is explained. No tree is selected over the other and nobody picks a winner.
 append-only audit-verdict ledger, ratification certificates, fail-closed
 validator, and focused tests. It does not itself ratify a tree or authorize
 Phase 8 execution.
+---
+
+## D23 - C5 reproduction correction and honest condition labelling - `RESOLVED`
+
+D22 and `docs/UNIT_O_RATIFICATION_PREREGISTRATION.md` contain one objective
+self-contradiction and several condition labels stronger than their mechanisms.
+Both are corrected here by appended entry. No frozen specification, no
+preregistration, no ledger entry, no accepted-calendar byte, no closeout and no
+byte-pinned historical document is edited. D22 itself is unchanged and its
+pinned section hash is preserved.
+
+**The C5 contradiction.** `UNIT_O_RATIFICATION_PREREGISTRATION.md` requires at
+C5 "a separately recorded rerun at the identical complete environment
+fingerprint", then designates the preserved first-run baseline as the supplier
+of that comparison. The baseline cannot supply it. The two environment
+fingerprints differ in exactly one field, `commit`
+(`4f185eab998f33f64ae6705fbc494cd6e3e9f327` versus
+`6dcbff89e0d7af8e812474537cef41fc6cf7add4`), and are identical in all nine
+other fields. `mnq_lab/ledger/ratification.py` enforces exact fingerprint
+equality, and the distinctness guard forbids a tree serving as its own
+reproduction. C5 was therefore unsatisfiable and no certificate could ever
+validate. Refusing to certify was correct behaviour; the defect is the
+document's claim, not the validator.
+
+**Resolution, declared POST-HOC.** A reproduction satisfies C5 when the two
+environment fingerprints differ ONLY in `commit` and the `git diff` between
+those two commits, restricted to the scientific modules, is empty. That diff
+must be machine-executed at validation time, never asserted. This relaxation
+was decided on 2026-08-02 with the knowledge that the two runs had already
+agreed on all 109 scientific column hashes. It is therefore a POST-HOC
+relaxation and must never be presented as fixed in advance. Its degrees of
+freedom are nevertheless nil: every analysis choice was frozen and pinned on
+2026-08-01 before any outcome existed, the pipeline is deterministic over a
+sealed corpus, and agreement across two different commits is stronger evidence
+than a same-commit rerun because it demonstrates determinism and also that the
+intervening commits never touched the scientific path.
+
+**C4 is NOT mechanical.** `ratification.py` builds its expected gate records by
+stamping `passed=True` onto the hardcoded gate-classification constant, so C4
+verifies only that a certificate contains that constant. No producer-side
+record of gate OUTCOMES exists in either artifact tree, and none can be created
+after a completed run. C4 is an attestation by the audited party. A certificate
+cannot express a gate failure at all. Future production runs must record real
+gate outcomes; for the 2026-08-02 trees this evidence does not exist and its
+absence may not be described as a passing check.
+
+**Condition labels downgraded.** C1, C2, C3 and C5 are mechanically CHECKED but
+several of the values they check are self-recorded by the audited party: the
+canonical source-store hash is compared against a recorded string rather than
+re-hashed from the store; result visibility rests on a timestamp in a
+producer-authored record, with no git query and no clock read anywhere in the
+validator; clean-worktree status is three JSON assertions rather than an
+inspected worktree; and a byte copy is presently indistinguishable from an
+independent rerun. The append-only ledger property is repository policy, not
+code. None of this may be described as structural. The honest present
+characterisation is a certificate schema validator with strong byte-integrity
+checks, not yet a ratification mechanism.
+
+**No certificate may issue under this entry.** This ruling records a decision;
+it does not implement it. `ratification.py` still enforces exact fingerprint
+equality, so the amended C5 is not yet executable, and
+`require_ratified_unit_o` still has no production caller. Phase 8 remains
+halted at its final step until the validator implements this entry and an
+independent audit returns `CLOSED`.
+
+**Phase 8 steps 1-6 are unaffected.** Frozen Phase 8 section 16 computes no
+real contrast until all Unit O gates and synthetic Phase 8 mutations pass, so
+the axes, supports, weight constructors, standardization, completion,
+positivity, status precedence, bootstrap and interaction layers are built and
+tested against synthetic fixtures and require no ratified table.
+
+**Authorship disclosure.** This entry was written by the independent auditor at
+explicit user direction on 2026-08-02, after that auditor reported the defects
+it corrects. Independence is therefore not available for this entry. It must be
+adversarially reviewed by the implementing party before any certificate is
+issued, and this disclosure may not be removed.
+
+**Status:** `RESOLVED`. Authorizes the validator correction and the honest
+relabelling. It ratifies no tree and authorizes no Phase 8 execution.

@@ -140,6 +140,17 @@ def test_interaction_literals_and_inventory_are_exact_with_seven_eight_split():
             "q75",
             CellKey("open", "low"),
         )
+    with pytest.raises(SpineError, match="common_session_paired"):
+        InteractionRowSpec(
+            "primary_ewma78_permissive_expanding",
+            "downward_excursion_ticks",
+            "fully_labeled_1m_grid",
+            "horizon_specific",
+            15,
+            "prospective_cell",
+            "q50",
+            CellKey("open", "low"),
+        )
 
 
 def test_four_cell_algebraic_order_and_reference_degeneracy_are_literal():

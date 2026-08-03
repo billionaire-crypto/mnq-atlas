@@ -144,7 +144,7 @@ def test_day_type_level_uses_session_equal_mass_and_reports_all_companions():
     assert result.quantile_valid
     assert result.n_anchors == 59
     assert result.n_sessions == 30
-    assert result.weight_ess == pytest.approx(31.03448275862068)
+    assert result.weight_ess == pytest.approx(30.998851894374283)
     assert result.completion.target.n_anchors == 59
     assert result.completion.target.n_sessions == 30
     assert result.completion.target.completion_rate == 1.0

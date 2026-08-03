@@ -9,7 +9,7 @@ from typing import Any, Hashable
 import numpy as np
 
 from mnq_lab import SpineError
-from mnq_lab.core.weights import weighted_quantile, weighted_quantiles
+from mnq_lab.core.weights import weighted_quantile
 
 OUTCOME_NAMES = (
     "downward_excursion_ticks",
@@ -140,8 +140,10 @@ def contrast_support(target: CellKey, contrast_name: Any) -> ContrastSupport:
         )
     elif name == "cell_vs_complement":
         baseline_cells = tuple(cell for cell in _all_cells() if cell != target)
-    else:
+    elif name == "cell_vs_population":
         baseline_cells = _all_cells()
+    else:  # pragma: no cover - _validate_contrast_name makes this unreachable
+        raise SpineError(f"unhandled declared Phase 8 contrast: {name!r}")
     return ContrastSupport(target_cells=(target,), baseline_cells=baseline_cells)
 
 

@@ -136,7 +136,7 @@ def test_interaction_literals_and_inventory_are_exact_with_seven_eight_split():
             "fully_labeled_1m_grid",
             "horizon_specific",
             15,
-            "prospective_cell",
+            "common_session_paired",
             "q75",
             CellKey("open", "low"),
         )

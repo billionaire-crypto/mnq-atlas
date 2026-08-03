@@ -77,6 +77,48 @@ def test_optimized_engine_is_exactly_equal_to_untouched_end_to_end_oracle(monkey
     assert optimized == oracle
 
 
+def test_production_sized_process_path_is_exactly_equal_to_untouched_oracle(
+    monkeypatch,
+):
+    monkeypatch.setattr(uncertainty_module, "DRAWS_PER_BLOCK_LENGTH", 999)
+    groups = np.repeat(np.arange(6, dtype=np.int32), 700)
+    values = np.tile(np.arange(700, dtype=np.int32), 6)
+    masks = []
+    terms = []
+    requests = []
+    for term_index, offset in enumerate((0, 1)):
+        mask = np.zeros(groups.size, dtype=np.bool_)
+        mask[offset::700] = True
+        weights = np.zeros(groups.size, dtype=np.float64)
+        weights[mask] = 1.0 / 6.0
+        term_id = f"process-path-{term_index}"
+        terms.append(
+            BootstrapQuantileTerm(
+                term_id,
+                values + np.int32(offset),
+                mask,
+                weights,
+                "q90",
+            )
+        )
+        requests.append(
+            BootstrapIntervalRequest(
+                f"process-request-{term_index}", term_id, None, _ok()
+            )
+        )
+        masks.append(mask)
+    assert groups.size > 4_096
+    assert all(np.count_nonzero(mask) == 6 for mask in masks)
+
+    oracle = joint_bootstrap_intervals_oracle(
+        groups, tuple(terms), tuple(requests)
+    )
+    optimized = joint_bootstrap_intervals(
+        groups, tuple(terms), tuple(requests)
+    )
+    assert optimized == oracle
+
+
 def test_three_statistics_collapse_to_one_distinct_support_evaluation():
     groups, terms, _ = _identity_fixture()
     del groups

@@ -20,12 +20,16 @@ from mnq_lab import SpineError
 
 __all__ = [
     "GroupWeightDiagnostics",
+    "PreparedWeightedQuantileValues",
     "WeightDiagnostics",
     "anchor_equal_weights",
+    "prepare_weighted_quantile_values",
     "session_equal_weights",
     "weight_ess",
     "weighted_quantile",
+    "weighted_quantile_prepared",
     "weighted_quantiles",
+    "weighted_quantiles_prepared",
 ]
 
 _MAX_EXACT_BINARY64_INTEGER = 2**53
@@ -47,6 +51,62 @@ class GroupWeightDiagnostics(WeightDiagnostics):
     contributing_group_count: int
     group_total_mass: tuple[tuple[Hashable, float], ...]
     max_group_mass_fraction: float
+
+
+@dataclass(frozen=True)
+class PreparedWeightedQuantileValues:
+    """Replicate-invariant stable value ordering for exact weighted quantiles."""
+
+    order: np.ndarray
+    group_starts: np.ndarray
+    support: np.ndarray
+    source_size: int
+
+    def __post_init__(self) -> None:
+        order = np.asarray(self.order)
+        starts = np.asarray(self.group_starts)
+        support = np.asarray(self.support)
+        if (
+            isinstance(self.source_size, bool)
+            or not isinstance(self.source_size, Integral)
+            or self.source_size <= 0
+        ):
+            raise SpineError("prepared quantile source_size must be positive")
+        size = int(self.source_size)
+        if (
+            order.ndim != 1
+            or order.dtype.kind not in {"i", "u"}
+            or order.size != size
+            or not np.array_equal(np.sort(order), np.arange(size))
+        ):
+            raise SpineError("prepared quantile order must be one full permutation")
+        if (
+            starts.ndim != 1
+            or starts.dtype.kind not in {"i", "u"}
+            or starts.size == 0
+            or int(starts[0]) != 0
+            or bool(np.any(starts[1:] <= starts[:-1]))
+            or int(starts[-1]) >= size
+        ):
+            raise SpineError("prepared quantile group starts are invalid")
+        if (
+            support.ndim != 1
+            or support.dtype != np.dtype("float64")
+            or support.size != starts.size
+            or not bool(np.isfinite(support).all())
+            or bool(np.any(support[1:] <= support[:-1]))
+        ):
+            raise SpineError("prepared quantile support must be finite and increasing")
+        order_copy = order.astype(np.intp, copy=True)
+        starts_copy = starts.astype(np.intp, copy=True)
+        support_copy = support.astype(np.float64, copy=True)
+        order_copy.setflags(write=False)
+        starts_copy.setflags(write=False)
+        support_copy.setflags(write=False)
+        object.__setattr__(self, "order", order_copy)
+        object.__setattr__(self, "group_starts", starts_copy)
+        object.__setattr__(self, "support", support_copy)
+        object.__setattr__(self, "source_size", size)
 
 
 def _reject_embedded_bools(values: Any, name: str) -> None:
@@ -215,6 +275,66 @@ def _positive_support_cdf(
     return support, cumulative
 
 
+def prepare_weighted_quantile_values(values: Any) -> PreparedWeightedQuantileValues:
+    """Prepare only the stable value ordering shared by repeated weight vectors."""
+    value_array = _as_real_float64_vector(values, "values")
+    order = np.argsort(value_array, kind="mergesort")
+    ordered_values = value_array[order]
+    group_starts = np.flatnonzero(
+        np.r_[True, ordered_values[1:] != ordered_values[:-1]]
+    )
+    support = ordered_values[group_starts]
+    return PreparedWeightedQuantileValues(
+        order=order,
+        group_starts=group_starts,
+        support=support,
+        source_size=value_array.size,
+    )
+
+
+def _prepared_positive_support_cdf(
+    prepared: PreparedWeightedQuantileValues,
+    weights: Any,
+) -> tuple[np.ndarray, np.ndarray]:
+    if not isinstance(prepared, PreparedWeightedQuantileValues):
+        raise SpineError(
+            "prepared values must come from prepare_weighted_quantile_values"
+        )
+    weight_array = _as_real_float64_vector(weights, "weights")
+    if weight_array.size != prepared.source_size:
+        raise SpineError(
+            "values and weights must have equal length; "
+            f"got {prepared.source_size} and {weight_array.size}"
+        )
+    if bool(np.any(weight_array < 0.0)):
+        bad = int(np.flatnonzero(weight_array < 0.0)[0])
+        raise SpineError(f"weights contains a negative value at index {bad}")
+
+    ordered_weights = weight_array[prepared.order]
+    group_ends = np.r_[prepared.group_starts[1:], prepared.source_size]
+    masses = np.empty(prepared.group_starts.size, dtype=np.float64)
+    for index, (start, end) in enumerate(
+        zip(prepared.group_starts, group_ends, strict=True)
+    ):
+        canonical_weights = np.sort(
+            ordered_weights[int(start) : int(end)], kind="mergesort"
+        )
+        masses[index] = np.cumsum(canonical_weights, dtype=np.float64)[-1]
+
+    positive = masses > 0.0
+    support = prepared.support[positive]
+    masses = masses[positive]
+    if support.size == 0:
+        raise SpineError("weights must have strictly positive total mass")
+    cumulative = np.cumsum(masses, dtype=np.float64)
+    total = cumulative[-1]
+    if not np.isfinite(total):
+        raise SpineError("canonical binary64 weight accumulation is non-finite")
+    if not total > 0.0:
+        raise SpineError("weights must have strictly positive total mass")
+    return support, cumulative
+
+
 def weighted_quantiles(
     values: Any, weights: Any, quantiles: Any
 ) -> np.ndarray:
@@ -236,10 +356,39 @@ def weighted_quantiles(
     return support[indices].astype(np.float64, copy=False)
 
 
+def weighted_quantiles_prepared(
+    prepared: PreparedWeightedQuantileValues,
+    weights: Any,
+    quantiles: Any,
+) -> np.ndarray:
+    """Evaluate exact inverse-CDF quantiles using one prepared value ordering."""
+    probabilities = _as_quantile_vector(quantiles)
+    support, cumulative = _prepared_positive_support_cdf(prepared, weights)
+    total = cumulative[-1]
+    thresholds = probabilities * total
+    indices = np.searchsorted(cumulative, thresholds, side="left")
+    if bool(np.any(indices >= support.size)):
+        raise SpineError(
+            "weighted inverse-CDF selection escaped the positive-mass support"
+        )
+    return support[indices].astype(np.float64, copy=False)
+
+
 def weighted_quantile(values: Any, weights: Any, q: Any) -> float:
     """Return one discrete weighted inverse-CDF observed support value."""
     probability = _as_quantile_scalar(q)
     result = weighted_quantiles(values, weights, [probability])
+    return float(result[0])
+
+
+def weighted_quantile_prepared(
+    prepared: PreparedWeightedQuantileValues,
+    weights: Any,
+    q: Any,
+) -> float:
+    """Return one exact quantile while reusing a prepared value ordering."""
+    probability = _as_quantile_scalar(q)
+    result = weighted_quantiles_prepared(prepared, weights, [probability])
     return float(result[0])
 
 

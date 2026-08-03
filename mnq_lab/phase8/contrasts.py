@@ -9,7 +9,12 @@ from typing import Any, Hashable
 import numpy as np
 
 from mnq_lab import SpineError
-from mnq_lab.core.weights import weighted_quantile
+from mnq_lab.core.weights import (
+    PreparedWeightedQuantileValues,
+    prepare_weighted_quantile_values,
+    weighted_quantile,
+    weighted_quantile_prepared,
+)
 
 OUTCOME_NAMES = (
     "downward_excursion_ticks",
@@ -40,9 +45,11 @@ __all__ = [
     "ContrastSupport",
     "SupportMasks",
     "TickContrast",
+    "PreparedTickQuantileValues",
     "contrast_support",
     "degenerate_baseline",
     "statistic_probability",
+    "prepare_weighted_quantile_ticks",
     "support_masks",
     "tick_contrast",
     "weighted_quantile_ticks",
@@ -101,6 +108,17 @@ class TickContrast:
     target_quantile_ticks: int
     baseline_quantile_ticks: int
     contrast_ticks: int
+
+
+@dataclass(frozen=True)
+class PreparedTickQuantileValues:
+    """Signed-int32 tick values with one audited prepared value ordering."""
+
+    prepared: PreparedWeightedQuantileValues
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.prepared, PreparedWeightedQuantileValues):
+            raise SpineError("prepared tick values require the audited core helper")
 
 
 def statistic_probability(statistic: Any) -> float:
@@ -223,11 +241,20 @@ def _signed_int32_tick_vector(values: Any) -> np.ndarray:
     return array
 
 
+def prepare_weighted_quantile_ticks(values: Any) -> PreparedTickQuantileValues:
+    """Validate signed int32 ticks and prepare their invariant value ordering."""
+    ticks = _signed_int32_tick_vector(values)
+    return PreparedTickQuantileValues(prepare_weighted_quantile_values(ticks))
+
+
 def weighted_quantile_ticks(values: Any, weights: Any, statistic: Any) -> int:
     """Return one exact inverse-CDF tick without interpolation or rounding."""
-    ticks = _signed_int32_tick_vector(values)
     probability = statistic_probability(statistic)
-    raw = weighted_quantile(ticks, weights, probability)
+    if isinstance(values, PreparedTickQuantileValues):
+        raw = weighted_quantile_prepared(values.prepared, weights, probability)
+    else:
+        ticks = _signed_int32_tick_vector(values)
+        raw = weighted_quantile(ticks, weights, probability)
     if isinstance(raw, (bool, np.bool_)) or not isinstance(raw, Real):
         raise SpineError("weighted quantile produced a non-integral tick quantile")
     numeric = float(raw)

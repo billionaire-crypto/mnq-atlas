@@ -16,7 +16,11 @@ from mnq_lab.core.bootstrap import (
     percentile_interval,
     stationary_group_resample,
 )
-from mnq_lab.phase8.contrasts import statistic_probability, weighted_quantile_ticks
+from mnq_lab.phase8.contrasts import (
+    prepare_weighted_quantile_ticks,
+    statistic_probability,
+    weighted_quantile_ticks,
+)
 from mnq_lab.phase8.diagnostics import StatusDecision, resolve_status
 
 ROOT_ENTROPY = (20260801, 8, 13, 1)
@@ -366,6 +370,12 @@ def joint_bootstrap_intervals(
     intervals_by_request: dict[Hashable, list[BootstrapIntervalRow]] = {
         request.request_id: [] for request in request_tuple
     }
+    prepared_by_term = {
+        term.term_id: prepare_weighted_quantile_ticks(
+            term.values[term.eligibility_mask]
+        )
+        for term in term_tuple
+    }
 
     for block_length, child in zip(contract.block_lengths, children, strict=True):
         rng = np.random.Generator(np.random.PCG64(child))
@@ -399,7 +409,9 @@ def joint_bootstrap_intervals(
                 mask = term.eligibility_mask
                 try:
                     term_statistics[term.term_id] = weighted_quantile_ticks(
-                        term.values[mask], composed[mask], term.statistic
+                        prepared_by_term[term.term_id],
+                        composed[mask],
+                        term.statistic,
                     )
                 except SpineError as exc:
                     raise SpineError(

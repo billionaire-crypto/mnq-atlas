@@ -51,6 +51,7 @@ __all__ = [
     "ROOT_ENTROPY",
     "WEIGHT_ESS_DISCLOSURE",
     "BootstrapContract",
+    "BootstrapInteractionRequest",
     "BootstrapIntervalRequest",
     "BootstrapIntervalRow",
     "BootstrapQuantileTerm",
@@ -122,6 +123,24 @@ class BootstrapIntervalRequest:
                 raise SpineError("target and baseline term ids must differ")
         if not isinstance(self.status, StatusDecision):
             raise SpineError("bootstrap request status must be a StatusDecision")
+
+
+@dataclass(frozen=True)
+class BootstrapInteractionRequest:
+    request_id: Hashable
+    term_ids: tuple[Hashable, Hashable, Hashable, Hashable]
+    status: str
+
+    def __post_init__(self) -> None:
+        _validate_identifier(self.request_id, "request_id")
+        if not isinstance(self.term_ids, tuple) or len(self.term_ids) != 4:
+            raise SpineError("interaction request requires exactly four distinct terms")
+        for term_id in self.term_ids:
+            _validate_identifier(term_id, "interaction term_id")
+        if len(set(self.term_ids)) != 4:
+            raise SpineError("interaction request requires exactly four distinct terms")
+        if not isinstance(self.status, str) or self.status != "ok":
+            raise SpineError("bootstrap accepts only ok interaction rows")
 
 
 @dataclass(frozen=True)
@@ -283,7 +302,11 @@ def _validated_inputs(
     group_ids: Any,
     terms: Any,
     requests: Any,
-) -> tuple[np.ndarray, tuple[BootstrapQuantileTerm, ...], tuple[BootstrapIntervalRequest, ...]]:
+) -> tuple[
+    np.ndarray,
+    tuple[BootstrapQuantileTerm, ...],
+    tuple[BootstrapIntervalRequest | BootstrapInteractionRequest, ...],
+]:
     groups = _one_dimensional(group_ids, "group_ids")
     if groups.size == 0:
         raise SpineError("joint bootstrap requires the complete nonempty aligned frame")
@@ -295,9 +318,12 @@ def _validated_inputs(
     if not term_tuple or any(not isinstance(term, BootstrapQuantileTerm) for term in term_tuple):
         raise SpineError("at least one BootstrapQuantileTerm is required")
     if not request_tuple or any(
-        not isinstance(request, BootstrapIntervalRequest) for request in request_tuple
+        not isinstance(
+            request, (BootstrapIntervalRequest, BootstrapInteractionRequest)
+        )
+        for request in request_tuple
     ):
-        raise SpineError("at least one BootstrapIntervalRequest is required")
+        raise SpineError("at least one declared bootstrap request is required")
     if any(term.values.size != groups.size for term in term_tuple):
         raise SpineError("every bootstrap term must align to the complete group frame")
     term_ids = tuple(term.term_id for term in term_tuple)
@@ -308,14 +334,17 @@ def _validated_inputs(
         raise SpineError("bootstrap request ids must be unique")
     term_id_set = set(term_ids)
     for request in request_tuple:
-        _validated_status(request.status)
-        if request.target_term_id not in term_id_set:
-            raise SpineError("bootstrap request names an undeclared target term")
-        if (
-            request.baseline_term_id is not None
-            and request.baseline_term_id not in term_id_set
-        ):
-            raise SpineError("bootstrap request names an undeclared baseline term")
+        if isinstance(request, BootstrapIntervalRequest):
+            _validated_status(request.status)
+            if request.target_term_id not in term_id_set:
+                raise SpineError("bootstrap request names an undeclared target term")
+            if (
+                request.baseline_term_id is not None
+                and request.baseline_term_id not in term_id_set
+            ):
+                raise SpineError("bootstrap request names an undeclared baseline term")
+        elif any(term_id not in term_id_set for term_id in request.term_ids):
+            raise SpineError("bootstrap interaction names an undeclared term")
     return groups.copy(), term_tuple, request_tuple
 
 
@@ -379,14 +408,21 @@ def joint_bootstrap_intervals(
                     ) from exc
 
             for request_index, request in enumerate(request_tuple):
-                target_tick = term_statistics[request.target_term_id]
-                if request.baseline_term_id is None:
-                    statistic = target_tick
-                else:
-                    statistic = int(
-                        np.int64(target_tick)
-                        - np.int64(term_statistics[request.baseline_term_id])
+                if isinstance(request, BootstrapInteractionRequest):
+                    first, second, third, fourth = (
+                        np.int64(term_statistics[term_id])
+                        for term_id in request.term_ids
                     )
+                    statistic = int(first - second - third + fourth)
+                else:
+                    target_tick = term_statistics[request.target_term_id]
+                    if request.baseline_term_id is None:
+                        statistic = target_tick
+                    else:
+                        statistic = int(
+                            np.int64(target_tick)
+                            - np.int64(term_statistics[request.baseline_term_id])
+                        )
                 replicates[request_index, replicate_index] = statistic
 
         for request_index, request in enumerate(request_tuple):

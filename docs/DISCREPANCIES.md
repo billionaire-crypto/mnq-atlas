@@ -1005,3 +1005,45 @@ bytes of this append-only document against the historical SHA-256
 `7ec200bb1de83769b8ce07551fec4e0b81f5e90e20a4792c22ae47f285bed615`
 and permits only growth after that exact prefix. No frozen or accepted-calendar
 pin changes.
+
+---
+
+## D22 - Unit O ratification criteria and deterministic tie-break - `RESOLVED`
+
+The frozen corpus does not uniquely determine what the previously undefined
+phrase "a ratified Unit O outcome table and manifest" means. The resolution is
+therefore fixed before the in-progress corpus result becomes visible. It is
+fully specified in `docs/UNIT_O_RATIFICATION_PREREGISTRATION.md` and does not
+amend a frozen specification, preregistration, ledger entry, accepted calendar,
+closeout, or the byte-pinned historical `docs/UNIT_O.md` snapshot.
+
+**Ratification ruling.** Ratification is an exact-tree, exact-commit claim and
+requires all seven conditions C1-C7. C1-C6 are checked mechanically and fail
+closed. C7 is a human attestation: code cannot prove that nobody inspected an
+outcome before criteria were fixed or that an audit was genuinely independent.
+No partial, retroactive, or transferable ratification exists. A producing
+script's permanent `NON-ADMISSIBLE` stamp may be overridden only by an explicit
+certificate that records the audited basis; this C6 override is a judgment
+call, not a mechanical derivation.
+
+**User ruling - 2026-08-02.** The corpus run in progress when this entry was
+committed will be Phase 8's input; no further run is required. The pipeline is
+deterministic over a sealed corpus, and all analysis choices - quantiles, five
+contrasts, three estimands, thresholds, bootstrap entropy, and block lengths -
+were frozen and pinned on 2026-08-01 before any outcome existed. Another run
+would be byte-identical and add no information, so requiring it would be
+ceremony rather than protection. The already audited exclusion of the
+preserved first-run baseline is not reopened and is moot because the new run
+must reproduce it byte for byte in its scientific columns.
+
+**Tie-break fixed before visibility.** The in-progress run's 109 column hashes
+must equal the preserved baseline's corresponding hashes exactly; only the
+manifest may differ because `code_commit` changed. If any column hash differs,
+the run halts, the first mismatching session is located and classified under
+frozen specification section 16.6, and neither tree is usable until the cause
+is explained. No tree is selected over the other and nobody picks a winner.
+
+**Status:** `RESOLVED`. This resolution authorizes implementation of the
+append-only audit-verdict ledger, ratification certificates, fail-closed
+validator, and focused tests. It does not itself ratify a tree or authorize
+Phase 8 execution.

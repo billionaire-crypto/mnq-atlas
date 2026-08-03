@@ -22,6 +22,12 @@ from mnq_lab.phase8.diagnostics import (
     positivity_diagnostics,
     status_decision,
 )
+from mnq_lab.phase8.day_types import (
+    DAY_TYPES,
+    classify_calendar_day_type,
+    declared_day_type_rows,
+    evaluate_day_type_distribution,
+)
 from mnq_lab.phase8.inventory import declared_result_rows
 from mnq_lab.phase8.interactions import (
     DESCRIPTIVE_ONLY_LABEL,
@@ -46,6 +52,7 @@ from mnq_lab.phase8.uncertainty import (
 
 __all__ = [
     "CONTRAST_NAMES",
+    "DAY_TYPES",
     "ESTIMAND_NAMES",
     "OUTCOME_NAMES",
     "SESSION_PHASES",
@@ -61,9 +68,11 @@ __all__ = [
     "bootstrap_contract",
     "anchor_support_failure",
     "completion_diagnostics",
+    "classify_calendar_day_type",
     "contrast_support",
     "degenerate_baseline",
     "declared_result_rows",
+    "declared_day_type_rows",
     "declared_interaction_rows",
     "DESCRIPTIVE_ONLY_LABEL",
     "INTERACTION_STATISTICS",
@@ -72,6 +81,7 @@ __all__ = [
     "REFERENCE_CELL",
     "assemble_interaction_rows",
     "evaluate_interaction",
+    "evaluate_day_type_distribution",
     "interaction_bootstrap_inputs",
     "interaction_cells",
     "positivity_diagnostics",

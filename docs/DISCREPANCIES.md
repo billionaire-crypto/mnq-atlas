@@ -1296,3 +1296,65 @@ commit difference was harmless by construction.
 **Status:** `RESOLVED`. The validator may now implement commit-only fingerprint
 variance backed by exact scientific-byte identity. No certificate exists by
 virtue of this ruling alone.
+---
+
+## D27. Phase 8 Step 7 exact-bootstrap feasibility stop
+
+**Measured after CP-1 closed and before Step 7 artifact production.** The
+ratified Unit O tree was entered through `require_ratified_unit_o`. A 240-row
+slice containing 222 eligible anchors from two sessions was used only to time
+the frozen Phase 8 joint-bootstrap path. No tick, quantile or interval value
+was printed or interpreted. One term required 19,996 weighted-quantile
+evaluations, exactly four block lengths by 4,999 draws. An instrumented
+two-term run measured 18.927489 seconds inside the audited
+`weighted_quantile_ticks` helper, or 9.463745 seconds per distinct term across
+all frozen draws. The timing wrapper changed no value, weight, mask, draw,
+entropy, block length, request or result and was restored after the call.
+
+**Corrected lower-bound factorisation.** The primary absolute-distribution
+family alone requires at least 3,240 distinct statistic/mask/weight
+combinations:
+
+```text
+2 outcomes x 2 path estimands x 2 support kinds x 3 horizons
+x 3 statistics x 3 population estimands x 15 phase-volatility cells
+= 3,240
+```
+
+An earlier report stated the correct 3,240 total but omitted the three
+population estimands from its written product, whose displayed factors
+therefore multiplied to 1,080. The three estimands belong in the lower bound:
+`prospective_cell`, `common_session_paired` and
+`standardized_shared_population` assign distinct masks or weights even when
+the outcome and target cell agree. At the measured small-slice cost, 3,240
+terms require approximately 30,663 seconds, or 8.52 hours.
+
+**Why this is only a lower bound.** The 8.52-hour figure excludes every
+comparative baseline term, the 270 alternative-arm survival rows, the 216
+day-type terms, interaction terms, full-frame weight composition and the far
+larger real supports. `weighted_quantile` sorts its positive support, so the
+222-anchor measurement does not establish the cost of the materially larger
+real cell supports. The complete runtime is therefore expected to be higher;
+no unexecuted complexity projection is treated as a measurement.
+
+**Ruling and stop.** No frozen statistical parameter may change because the
+registered computation is expensive. The draw count remains 4,999 per block
+length; block lengths remain 1, 5, 10 and 20; the inverse-CDF definition,
+interval endpoints, masks, weights, entropy and no-retry rule remain fixed.
+Step 7 stopped before any Phase 8 artifact, result table or closeout was
+created.
+
+One implementation-only experiment is permitted before declaring the frozen
+design computationally out of reach: prepare each term's replicate-invariant
+value ordering once and reuse it across replicates. The experiment must first
+prove exact equality to the existing audited weighted-quantile implementation
+on named randomized witnesses including tied values, changing zero-weight
+rows and single-support cells. Positive-mass filtering and `side="left"`
+inverse-CDF selection must remain byte-exact; a plausible argument is not a
+proof. The experiment may not change or approximate any registered statistic.
+If exact identity cannot be proved, or the measured runtime remains
+impractical, Step 7 stops again and returns for a user decision.
+
+**Status:** `OPEN`. CP-1 is closed. Step 7 artifact production remains blocked
+on measured feasibility; this entry authorizes only the exact-semantics timing
+experiment above.

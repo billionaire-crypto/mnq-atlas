@@ -107,7 +107,7 @@ def test_truncated_regular_sessions_keep_the_frozen_type_and_quality_status(trad
 def test_unknown_active_calendar_combination_halts_without_a_default():
     row = _calendar_row(
         session_class="unscheduled_closure",
-        scheduled_rth_status="no_scheduled_rth",
+        scheduled_rth_status="full_rth",
     )
     with pytest.raises(SpineError, match="unknown active calendar combination"):
         classify_calendar_day_type(row, "ok")

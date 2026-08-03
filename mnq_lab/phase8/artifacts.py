@@ -20,6 +20,61 @@ PHASE8_TABLE_ORDER = (
     "day_type_descriptives",
     "interactions",
 )
+CONTRAST_COLUMNS = (
+    "row_id", "arm_id", "outcome_name", "path_estimand", "support_kind",
+    "horizon_minutes", "statistic", "contrast_name", "population_estimand",
+    "contrast_weighting", "target_phase", "target_vol_tercile",
+    "target_quantile_ticks", "target_quantile_valid", "baseline_quantile_ticks",
+    "baseline_quantile_valid", "contrast_ticks", "contrast_valid",
+    "n_anchors", "n_sessions", "weight_ess", "baseline_n_anchors",
+    "baseline_n_sessions", "baseline_weight_ess", "completion_target",
+    "completion_baseline", "completion_imbalance", "unsupported_target_mass",
+    "quarter_unsupported_target_mass", "max_single_anchor_weight_share",
+    "weight_cv", "status", "status_flags", "migration_diagnostics",
+)
+INTERVAL_COLUMNS = (
+    "row_id", "point_row_id", "mean_block_sessions", "draws", "confidence_level",
+    "ci_lower_ticks", "ci_upper_ticks", "interval_valid", "rng_root_entropy",
+    "rng_child_spawn_key", "historical_mixture_disclosure",
+    "conditioner_uncertainty_disclosure", "weight_ess_disclosure",
+)
+DAY_TYPE_COLUMNS = (
+    "row_id", "arm_id", "day_type", "outcome_name", "path_estimand",
+    "support_kind", "horizon_minutes", "statistic", "quantile_ticks",
+    "quantile_valid", "n_anchors", "n_sessions", "weight_ess",
+    "completion", "status", "status_flags",
+)
+INTERACTION_COLUMNS = (
+    "row_id", "arm_id", "outcome_name", "path_estimand", "support_kind",
+    "horizon_minutes", "population_estimand", "statistic", "phase",
+    "vol_rel_tercile", "reference_phase", "reference_vol_tercile",
+    "interaction_ticks", "interaction_valid", "common_n_sessions",
+    "cell_anchor_counts", "cell_session_counts", "cell_weight_ess",
+    "completion_diagnostics", "status", "status_flags", "panel_label",
+)
+PHASE8_TABLE_SCHEMAS = {
+    "contrasts": CONTRAST_COLUMNS,
+    "intervals": INTERVAL_COLUMNS,
+    "day_type_descriptives": DAY_TYPE_COLUMNS,
+    "interactions": INTERACTION_COLUMNS,
+}
+_INTEGER_COLUMNS = {
+    "horizon_minutes", "target_quantile_ticks", "baseline_quantile_ticks",
+    "contrast_ticks", "n_anchors", "n_sessions", "baseline_n_anchors",
+    "baseline_n_sessions", "quantile_ticks", "interaction_ticks",
+    "common_n_sessions", "mean_block_sessions", "draws", "ci_lower_ticks",
+    "ci_upper_ticks",
+}
+_FLOAT_COLUMNS = {
+    "weight_ess", "baseline_weight_ess", "completion_target",
+    "completion_baseline", "completion_imbalance", "unsupported_target_mass",
+    "quarter_unsupported_target_mass", "max_single_anchor_weight_share",
+    "weight_cv", "confidence_level",
+}
+_BOOLEAN_COLUMNS = {
+    name for schema in PHASE8_TABLE_SCHEMAS.values()
+    for name in schema if name.endswith("_valid")
+}
 
 
 def canonical_json_bytes(value: Any) -> bytes:
@@ -45,6 +100,10 @@ class Phase8Table:
         names = tuple(name for name, _ in self.columns)
         if len(set(names)) != len(names):
             raise SpineError("Phase 8 table contains a duplicate column")
+        if names != PHASE8_TABLE_SCHEMAS[self.name]:
+            raise SpineError(
+                f"Phase 8 {self.name} columns differ from the immutable schema"
+            )
         sizes: set[int] = set()
         for name, values in self.columns:
             if not isinstance(name, str) or not name:
@@ -52,6 +111,17 @@ class Phase8Table:
             array = np.asarray(values)
             if array.ndim != 1 or array.dtype.kind == "O":
                 raise SpineError("Phase 8 columns must be one-dimensional non-object arrays")
+            if name in _INTEGER_COLUMNS and array.dtype.kind not in {"i", "u"}:
+                raise SpineError(f"Phase 8 integer column {name!r} has the wrong dtype")
+            if name in _FLOAT_COLUMNS and array.dtype.kind != "f":
+                raise SpineError(f"Phase 8 float column {name!r} has the wrong dtype")
+            if name in _BOOLEAN_COLUMNS and array.dtype.kind != "b":
+                raise SpineError(f"Phase 8 validity column {name!r} has the wrong dtype")
+            if (
+                name not in _INTEGER_COLUMNS | _FLOAT_COLUMNS | _BOOLEAN_COLUMNS
+                and array.dtype.kind != "U"
+            ):
+                raise SpineError(f"Phase 8 label column {name!r} has the wrong dtype")
             sizes.add(array.size)
         if len(sizes) != 1:
             raise SpineError("Phase 8 table columns must have equal row counts")
@@ -296,6 +366,8 @@ def write_phase8_artifacts(
 
 
 __all__ = [
-    "CheckpointIdentity", "CheckpointStore", "PHASE8_TABLE_ORDER", "Phase8Table",
+    "CONTRAST_COLUMNS", "DAY_TYPE_COLUMNS", "INTERACTION_COLUMNS",
+    "INTERVAL_COLUMNS", "CheckpointIdentity", "CheckpointStore",
+    "PHASE8_TABLE_ORDER", "PHASE8_TABLE_SCHEMAS", "Phase8Table",
     "canonical_json_bytes", "write_phase8_artifacts",
 ]

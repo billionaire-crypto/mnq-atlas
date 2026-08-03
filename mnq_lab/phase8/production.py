@@ -19,7 +19,10 @@ import numpy as np
 from mnq_lab import SpineError
 from mnq_lab.conditioners.calendar import CALENDAR_SHA256, CALENDAR_VERSION
 from mnq_lab.constants import CONSTANTS_PATH, REPO_ROOT, SPEC_PATH
-from mnq_lab.phase8.artifacts import Phase8Table
+from mnq_lab.phase8.artifacts import (
+    CONTRAST_COLUMNS, DAY_TYPE_COLUMNS, INTERACTION_COLUMNS, INTERVAL_COLUMNS,
+    Phase8Table,
+)
 from mnq_lab.phase8.contrasts import (
     OUTCOME_NAMES, SESSION_PHASES, VOLATILITY_STATES, CellKey,
     contrast_support, degenerate_baseline, support_masks, weighted_quantile_ticks,
@@ -43,40 +46,6 @@ from mnq_lab.phase8.uncertainty import (
 )
 
 _INT32 = np.iinfo(np.int32)
-
-CONTRAST_COLUMNS = (
-    "row_id", "arm_id", "outcome_name", "path_estimand", "support_kind",
-    "horizon_minutes", "statistic", "contrast_name", "population_estimand",
-    "contrast_weighting", "target_phase", "target_vol_tercile",
-    "target_quantile_ticks", "target_quantile_valid", "baseline_quantile_ticks",
-    "baseline_quantile_valid", "contrast_ticks", "contrast_valid",
-    "n_anchors", "n_sessions", "weight_ess", "baseline_n_anchors",
-    "baseline_n_sessions", "baseline_weight_ess", "completion_target",
-    "completion_baseline", "completion_imbalance", "unsupported_target_mass",
-    "quarter_unsupported_target_mass", "max_single_anchor_weight_share",
-    "weight_cv", "status", "status_flags", "migration_diagnostics",
-)
-INTERVAL_COLUMNS = (
-    "row_id", "point_row_id", "mean_block_sessions", "draws", "confidence_level",
-    "ci_lower_ticks", "ci_upper_ticks", "interval_valid", "rng_root_entropy",
-    "rng_child_spawn_key", "historical_mixture_disclosure",
-    "conditioner_uncertainty_disclosure", "weight_ess_disclosure",
-)
-DAY_TYPE_COLUMNS = (
-    "row_id", "arm_id", "day_type", "outcome_name", "path_estimand",
-    "support_kind", "horizon_minutes", "statistic", "quantile_ticks",
-    "quantile_valid", "n_anchors", "n_sessions", "weight_ess",
-    "completion", "status", "status_flags",
-)
-INTERACTION_COLUMNS = (
-    "row_id", "arm_id", "outcome_name", "path_estimand", "support_kind",
-    "horizon_minutes", "population_estimand", "statistic", "phase",
-    "vol_rel_tercile", "reference_phase", "reference_vol_tercile",
-    "interaction_ticks", "interaction_valid", "common_n_sessions",
-    "cell_anchor_counts", "cell_session_counts", "cell_weight_ess",
-    "completion_diagnostics", "status", "status_flags", "panel_label",
-)
-
 
 def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()

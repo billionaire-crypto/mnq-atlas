@@ -1,0 +1,1459 @@
+{
+  "audit_entry": {
+    "path": "mnq_lab/ledger/audit_entries/2026-08-02-unit-o-first-run-v1.json",
+    "sha256": "82588e4fa978e5c8005d5272469e5ace4842c1df64212abeade72b7ae163aa9c"
+  },
+  "certificate_id": "2026-08-03-phase7-unit-o-first-run-v1-ratification",
+  "claim_boundary": "Schema and byte-integrity checks passed for C1, C2, C3, C5 and C6; some checked inputs are producer-authored attestations. C4 is a retrospective attestation because no producer-side gate outcomes exist. C2 visibility rests on a recorded timestamp corroborated by the run manifest filesystem mtime but not externally anchored. C7 is a human attestation; code cannot prove blindness, competence or genuine independence. Append-only is repository policy, not code-enforced.",
+  "conditions": {
+    "C1": {
+      "passed": true
+    },
+    "C2": {
+      "passed": true
+    },
+    "C3": {
+      "passed": true
+    },
+    "C4": {
+      "attested": true
+    },
+    "C5": {
+      "passed": true
+    },
+    "C6": {
+      "passed": true
+    },
+    "C7": {
+      "attested_closed": true
+    }
+  },
+  "criteria": {
+    "commit": "5996e8f9791bda01d2957b903ae026e75347c36b",
+    "committed_at_utc": "2026-08-02T19:32:39-07:00",
+    "d22_sha256": "cf27329a329df856290a945eec47ad19e52b0298110b1bfe9c1a75581d0386cf",
+    "document_sha256": "e97f11f00b3ea898ff121773c5ea3203b825e4774f5df9ba792175bf37a70f97"
+  },
+  "decision_date": "2026-08-03",
+  "environment_fingerprint": {
+    "branch": "phase-7b-outcome-layer",
+    "commit": "6dcbff89e0d7af8e812474537cef41fc6cf7add4",
+    "dirty": false,
+    "machine": "AMD64",
+    "numpy": "2.2.3",
+    "pandas": "3.0.1",
+    "pipeline_version": "spine-1.0.0",
+    "platform": "Windows-10-10.0.19045-SP0",
+    "python": "3.13.2",
+    "vcs": "git"
+  },
+  "gate_evidence": {
+    "all_gates_passed": true,
+    "fallback": {
+      "allowed": false,
+      "taken": false
+    },
+    "gate_records": [
+      {
+        "cause_class": "missing_bars",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "remove the 10:00 anchor bar",
+        "gate": "return.bar_absent",
+        "meaning": "declared anchor label is absent",
+        "passed": true
+      },
+      {
+        "cause_class": "missing_bars",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "set observed components to three",
+        "gate": "return.insufficient_components",
+        "meaning": "strict coverage rejects a partial bar",
+        "passed": true
+      },
+      {
+        "cause_class": "timestamps",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "place the next bar after the maintenance halt",
+        "gate": "return.spacing_break_scheduled",
+        "meaning": "session or weekend break resets state",
+        "passed": true
+      },
+      {
+        "cause_class": "missing_bars",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "remove an interior Globex bar",
+        "gate": "return.spacing_break_unscheduled",
+        "meaning": "an unexpected five-minute interval is absent",
+        "passed": true
+      },
+      {
+        "cause_class": "roll_mapping",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "change symbol code at a contract boundary",
+        "gate": "return.symbol_change",
+        "meaning": "a decoded-symbol change resets state",
+        "passed": true
+      },
+      {
+        "cause_class": "roll_mapping",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "set rollover true on the current bar",
+        "gate": "reset.roll_reset",
+        "meaning": "the first post-roll bar cannot bridge contracts",
+        "passed": true
+      },
+      {
+        "cause_class": "timestamps",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "insert a non-five-minute spacing",
+        "gate": "reset.gap_reset",
+        "meaning": "the first post-gap bar starts a new segment",
+        "passed": true
+      },
+      {
+        "cause_class": "timestamps",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "supply only 77 contiguous returns",
+        "gate": "ewma.warmup",
+        "meaning": "fewer than 78 contiguous returns are available",
+        "passed": true
+      },
+      {
+        "cause_class": "timestamps",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "supply only 77 contiguous returns",
+        "gate": "mad.warmup",
+        "meaning": "the exact 78-return MAD window is unavailable",
+        "passed": true
+      },
+      {
+        "cause_class": "aggregation",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "supply 78 equal returns",
+        "gate": "mad.zero_scale",
+        "meaning": "the admitted MAD window is constant",
+        "passed": true
+      },
+      {
+        "cause_class": "timestamps",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "supply 59 qualifying prior sessions",
+        "gate": "seasonal.warmup",
+        "meaning": "fewer than 60 qualifying prior sessions exist",
+        "passed": true
+      },
+      {
+        "cause_class": "missing_bars",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "remove every defined scale in the prior phase",
+        "gate": "seasonal.fallback_unavailable",
+        "meaning": "the prior phase has no defined scale fallback",
+        "passed": true
+      },
+      {
+        "cause_class": "source_revision",
+        "classification": "FATAL",
+        "failing_input": "delete one in-range calendar row",
+        "gate": "seasonal.calendar_classification_missing",
+        "meaning": "an in-range session lacks its accepted calendar row",
+        "passed": true
+      },
+      {
+        "cause_class": "aggregation",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "supply a zero seasonal profile",
+        "gate": "vol_rel.zero_scale",
+        "meaning": "the seasonal denominator is exactly zero",
+        "passed": true
+      },
+      {
+        "cause_class": "missing_bars",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "make the current scale undefined",
+        "gate": "vol_rel.upstream_undefined",
+        "meaning": "scale or seasonal input is unavailable",
+        "passed": true
+      },
+      {
+        "cause_class": "timestamps",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "supply 59 qualifying sessions",
+        "gate": "threshold.insufficient_history",
+        "meaning": "fewer than 60 qualifying prior sessions exist",
+        "passed": true
+      },
+      {
+        "cause_class": "aggregation",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "supply tied prior vol_rel values",
+        "gate": "threshold.degenerate_boundaries",
+        "meaning": "lower and upper frozen quantiles coincide",
+        "passed": true
+      },
+      {
+        "cause_class": "timestamps",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "request assignment on the 60th qualifying session",
+        "gate": "assignment.warmup",
+        "meaning": "defined current vol_rel lacks prior thresholds",
+        "passed": true
+      },
+      {
+        "cause_class": "missing_bars",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "remove the current anchor bar",
+        "gate": "assignment.upstream_undefined",
+        "meaning": "current vol_rel is unavailable",
+        "passed": true
+      },
+      {
+        "cause_class": "source_revision",
+        "classification": "FATAL",
+        "failing_input": "flip one source-column byte",
+        "gate": "store.hash_or_manifest",
+        "meaning": "sealed source bytes differ from their manifest",
+        "passed": true
+      },
+      {
+        "cause_class": "timestamps",
+        "classification": "FATAL",
+        "failing_input": "swap two adjacent labels",
+        "gate": "store.timestamp_order",
+        "meaning": "timestamps are not strictly increasing",
+        "passed": true
+      },
+      {
+        "cause_class": "duplicates",
+        "classification": "FATAL",
+        "failing_input": "duplicate one timestamp",
+        "gate": "store.duplicate_timestamp",
+        "meaning": "two rows share one UTC label",
+        "passed": true
+      },
+      {
+        "cause_class": "aggregation",
+        "classification": "FATAL",
+        "failing_input": "set high below close",
+        "gate": "store.ohlc_or_components",
+        "meaning": "bar aggregation invariants are corrupt",
+        "passed": true
+      },
+      {
+        "cause_class": "timestamps",
+        "classification": "FATAL",
+        "failing_input": "drop one arm's 10:00 anchor row",
+        "gate": "phase7.anchor_or_arm_support",
+        "meaning": "grid or arm supports differ",
+        "passed": true
+      },
+      {
+        "cause_class": "aggregation",
+        "classification": "FATAL",
+        "failing_input": "pair an ok return with gap_reset",
+        "gate": "phase7.impossible_status",
+        "meaning": "a closed status combination is inconsistent",
+        "passed": true
+      },
+      {
+        "cause_class": "source_revision",
+        "classification": "FATAL",
+        "failing_input": "change one frozen-input digest",
+        "gate": "artifact.protected_input",
+        "meaning": "a frozen or preregistered input changed",
+        "passed": true
+      },
+      {
+        "cause_class": "aggregation",
+        "classification": "FATAL",
+        "failing_input": "add one to the expected anchor row count",
+        "gate": "artifact.row_count",
+        "meaning": "an emitted table differs from declared cardinality",
+        "passed": true
+      },
+      {
+        "cause_class": "source_revision",
+        "classification": "FATAL",
+        "failing_input": "flip one written column byte",
+        "gate": "artifact.column_hash",
+        "meaning": "a written column no longer matches its manifest",
+        "passed": true
+      },
+      {
+        "cause_class": "source_revision",
+        "classification": "FATAL",
+        "failing_input": "remove the layer manifest",
+        "gate": "artifact.missing_manifest",
+        "meaning": "a staged layer is incomplete",
+        "passed": true
+      },
+      {
+        "cause_class": "source_revision",
+        "classification": "FATAL",
+        "failing_input": "place a file in the staging root",
+        "gate": "artifact.nonempty_root",
+        "meaning": "the immutable run target is already occupied",
+        "passed": true
+      },
+      {
+        "cause_class": "source_revision",
+        "classification": "FATAL",
+        "failing_input": "point output at the canonical store root",
+        "gate": "artifact.canonical_store_target",
+        "meaning": "an output target could overwrite the source store",
+        "passed": true
+      }
+    ],
+    "peak_memory_bytes": 1804214272,
+    "producing_code_sha256": "5c6b3b2d6e5b06533c07489018b7c74932ad32aa823304f535103d6cef31613a",
+    "thresholds": {
+      "free_memory_preflight_bytes": 4294967296,
+      "peak_memory_ceiling_bytes": 6442450944,
+      "scientific_column_count": 109
+    },
+    "tolerances": {}
+  },
+  "ledger_format": "unit_o_ratification_certificate_v1",
+  "non_admissible_override": {
+    "audit_entry": {
+      "path": "mnq_lab/ledger/audit_entries/2026-08-02-unit-o-first-run-v1.json",
+      "sha256": "82588e4fa978e5c8005d5272469e5ace4842c1df64212abeade72b7ae163aa9c"
+    },
+    "basis": "The user explicitly ruled on 2026-08-02 that data/exploration/derived/phase7-unit-o-first-run-v1 at run commit 6dcbff89e0d7af8e812474537cef41fc6cf7add4 will be Phase 8 input. This override is limited to that exact tree SHA-256 and run commit, is not generic or transferable, and does not alter the tree or either permanently NON-ADMISSIBLE manifest.",
+    "decider_identity": "Explicit user ruling recorded 2026-08-02",
+    "decision_date": "2026-08-02",
+    "scope_run_commit": "6dcbff89e0d7af8e812474537cef41fc6cf7add4",
+    "scope_tree_sha256": "cefe42e722b4ff09edac28ccece2b496c052fc438e0efcfde844821574fa8d8c",
+    "stamp": "NON-ADMISSIBLE DIAGNOSTIC ARTIFACTS"
+  },
+  "pinned_inputs": {
+    "REV6_FROZEN_SPEC.md": "70dae16c8b12fe26d38a7bfdabf0202066fe7149f790d0d2942279d9c3b8ff50",
+    "analysis_constants_v1.yaml": "1c95aa595c30c48b853303291a7dbaabceaf5b7331bca565a30863e8dcf138d4",
+    "canonical_source_store_manifest": "1cf6ec5ce7822ce1333984909b52d5c937e4ccc06e280030bcacda22620ffd73",
+    "docs/OUTCOME_LAYER_PREREGISTRATION.md": "4b5bc97fdfd4b0219c69e6a8adf76f18072091a9389700191d3ddcd10f8207c8",
+    "docs/PHASE8_PREREGISTRATION.md": "d07174ed0acc9e60ab6b255f4b33fc08141969c64e04f66e1e08c0aca98b4680"
+  },
+  "program_id": "mnq-atlas-001",
+  "reproduction": {
+    "environment_fingerprint": {
+      "branch": "phase-7b-outcome-layer",
+      "commit": "4f185eab998f33f64ae6705fbc494cd6e3e9f327",
+      "dirty": false,
+      "machine": "AMD64",
+      "numpy": "2.2.3",
+      "pandas": "3.0.1",
+      "pipeline_version": "spine-1.0.0",
+      "platform": "Windows-10-10.0.19045-SP0",
+      "python": "3.13.2",
+      "vcs": "git"
+    },
+    "scientific_columns": [
+      {
+        "column": "anchor_scales.arm_id",
+        "relative_path": "phase7/anchor_scales/00_arm_id.npy",
+        "sha256": "c3101e373eb5d9556a130f3da68cfc9accff733405226ff094ff0ba60465d53a"
+      },
+      {
+        "column": "anchor_scales.session_id",
+        "relative_path": "phase7/anchor_scales/01_session_id.npy",
+        "sha256": "b6b61de48ddc2e98a54b02d172d047c50d51908620598da6661f1a71b751dc5c"
+      },
+      {
+        "column": "anchor_scales.ts_event_ns",
+        "relative_path": "phase7/anchor_scales/02_ts_event_ns.npy",
+        "sha256": "1e78cef52bc0b6d353f97cef08a975cef37c135aab9765820e8fa8fcaebb5988"
+      },
+      {
+        "column": "anchor_scales.tau_ns",
+        "relative_path": "phase7/anchor_scales/03_tau_ns.npy",
+        "sha256": "6693a0c1f7145bdabcddbbf712020084df5053e51a7b105d28072f041a9923ce"
+      },
+      {
+        "column": "anchor_scales.observation_bucket_ct",
+        "relative_path": "phase7/anchor_scales/04_observation_bucket_ct.npy",
+        "sha256": "3098ebc1d66467e4324f89f18a8c38d92984d44691bafa2937218df8a6f344c1"
+      },
+      {
+        "column": "anchor_scales.session_phase",
+        "relative_path": "phase7/anchor_scales/05_session_phase.npy",
+        "sha256": "7a026afbdf364dcedc6f73982a83a1ac0602c1b36fc419153df677eb3e143092"
+      },
+      {
+        "column": "anchor_scales.symbol_code",
+        "relative_path": "phase7/anchor_scales/06_symbol_code.npy",
+        "sha256": "bba8c1e56689274628f3ba543beeb5007d8ab5a47a18be29978fae9c68a1ea13"
+      },
+      {
+        "column": "anchor_scales.observed_1m_components",
+        "relative_path": "phase7/anchor_scales/07_observed_1m_components.npy",
+        "sha256": "e6390bacdc87f48f26ac9533af403667d45e33ae4d5e3889afe62131d27e44c5"
+      },
+      {
+        "column": "anchor_scales.component_coverage_rate",
+        "relative_path": "phase7/anchor_scales/08_component_coverage_rate.npy",
+        "sha256": "dc3187897a5bed515e2123bfb30343d3fd900e0ff0e723a913750db3d27518b9"
+      },
+      {
+        "column": "anchor_scales.anchor_status",
+        "relative_path": "phase7/anchor_scales/09_anchor_status.npy",
+        "sha256": "dea923979799eccbde693e04c51883b7497f87e03c7b12ec743e6ef92404c212"
+      },
+      {
+        "column": "anchor_scales.return_status",
+        "relative_path": "phase7/anchor_scales/10_return_status.npy",
+        "sha256": "2ca0dcb9401b43ebe27b930581a5b06e80e5ec0aa220961b4c630972e75fc5e2"
+      },
+      {
+        "column": "anchor_scales.return_missing_reason",
+        "relative_path": "phase7/anchor_scales/11_return_missing_reason.npy",
+        "sha256": "ba16b31e9f1315ddf15789c2bd7240a72f4bff5fe4b5dacfd1881da98463104a"
+      },
+      {
+        "column": "anchor_scales.reset_reason",
+        "relative_path": "phase7/anchor_scales/12_reset_reason.npy",
+        "sha256": "bb2185121b6bb0e710b0d211669c55dc76c58a790eaa758c2d5e9d9580ebddd5"
+      },
+      {
+        "column": "anchor_scales.scheduled_break",
+        "relative_path": "phase7/anchor_scales/13_scheduled_break.npy",
+        "sha256": "98d224375bf7065d81ae4a2530fe67a166adbac44856ee3e2fcfbbd6f1aa88d5"
+      },
+      {
+        "column": "anchor_scales.contiguous_return_count",
+        "relative_path": "phase7/anchor_scales/14_contiguous_return_count.npy",
+        "sha256": "8c956fb65cd72b6bf23d018bfc4f9f925244730106d202e7f3c322cf702daf1d"
+      },
+      {
+        "column": "anchor_scales.scale_value",
+        "relative_path": "phase7/anchor_scales/15_scale_value.npy",
+        "sha256": "fb92079843cb1a5d3ce7d19f2b8b53c1b7caf4718a7ff3cd46183c9081859387"
+      },
+      {
+        "column": "anchor_scales.scale_valid",
+        "relative_path": "phase7/anchor_scales/16_scale_valid.npy",
+        "sha256": "cc2a1fc66f8f04c74172289e946cc4ad35c1e96e980c3ed93a948148ff51f77f"
+      },
+      {
+        "column": "anchor_scales.ewma_status",
+        "relative_path": "phase7/anchor_scales/17_ewma_status.npy",
+        "sha256": "e2bc98d6302cbea5ded5acbc11a8f03babb5eb75bdba4f34ab4495196f387b4d"
+      },
+      {
+        "column": "anchor_scales.mad_status",
+        "relative_path": "phase7/anchor_scales/18_mad_status.npy",
+        "sha256": "5a4fba2b4a5237c955682fe9b35bad445fe426fc7805376cfb89f5e5eba8fded"
+      },
+      {
+        "column": "assignments.arm_id",
+        "relative_path": "phase7/assignments/00_arm_id.npy",
+        "sha256": "a8b4be34d83d06bf7cf3668fdcf759902fa8a0757a38ea115cb70556f986fc18"
+      },
+      {
+        "column": "assignments.session_id",
+        "relative_path": "phase7/assignments/01_session_id.npy",
+        "sha256": "06a48033e86f4704d57e8d3f0ee02eebc36b1ef789e1946c2258eec88e1e60c1"
+      },
+      {
+        "column": "assignments.ts_event_ns",
+        "relative_path": "phase7/assignments/02_ts_event_ns.npy",
+        "sha256": "768b5830435e336a6d9a638b24aeada5f8aaebaf1c4f4924cb6bac20db340b0c"
+      },
+      {
+        "column": "assignments.tau_ns",
+        "relative_path": "phase7/assignments/03_tau_ns.npy",
+        "sha256": "d1ef8805cd53f729caaf952278aa2555e9adfaa487e732fd9e89617b0dcbb2ea"
+      },
+      {
+        "column": "assignments.observation_bucket_ct",
+        "relative_path": "phase7/assignments/04_observation_bucket_ct.npy",
+        "sha256": "584223758723a34d6880488f88f838207ee3f1e24b40cc8720e5e8432e05df0d"
+      },
+      {
+        "column": "assignments.session_phase",
+        "relative_path": "phase7/assignments/05_session_phase.npy",
+        "sha256": "f5ddc5c94c1e888cd302f15939c931e739995a47489ba7c9119827a475da024f"
+      },
+      {
+        "column": "assignments.scale_value",
+        "relative_path": "phase7/assignments/06_scale_value.npy",
+        "sha256": "d7c9366a67dd66f7d55e96b5cf9c509a5810f227ec4384abec76faa4bf11d30b"
+      },
+      {
+        "column": "assignments.scale_valid",
+        "relative_path": "phase7/assignments/07_scale_valid.npy",
+        "sha256": "e9eb2db03f2402294d978be06f867fdd7122dbd041fde528789f0dc7f495cbd0"
+      },
+      {
+        "column": "assignments.seasonal_profile",
+        "relative_path": "phase7/assignments/08_seasonal_profile.npy",
+        "sha256": "993221b5d829a23365a602bb0f55d91107dda66084c9a87678be51188397a325"
+      },
+      {
+        "column": "assignments.seasonal_valid",
+        "relative_path": "phase7/assignments/09_seasonal_valid.npy",
+        "sha256": "51e60a4964b0844999e443104f24934a7b7bef4781f27b603fb32c92b4c0047a"
+      },
+      {
+        "column": "assignments.vol_rel",
+        "relative_path": "phase7/assignments/10_vol_rel.npy",
+        "sha256": "4cec46ff3bbfc91e371a5bd2873f6291080f6c6a8a06be0d92d2b935bb9d5ba8"
+      },
+      {
+        "column": "assignments.vol_rel_valid",
+        "relative_path": "phase7/assignments/11_vol_rel_valid.npy",
+        "sha256": "a7d5d687657f344ab81743f1791024cb3d8d3655d7a08882ee1dc3443464e491"
+      },
+      {
+        "column": "assignments.vol_rel_status",
+        "relative_path": "phase7/assignments/12_vol_rel_status.npy",
+        "sha256": "7ca3d5de7f03a23476f0a0684ae0f58c69df9d9da53b49057ea4d770e088347f"
+      },
+      {
+        "column": "assignments.upstream_stage",
+        "relative_path": "phase7/assignments/13_upstream_stage.npy",
+        "sha256": "e6127f2a06052732823d4e059cbd4ca17684f2bd67b05320ea04fedd1adc4a48"
+      },
+      {
+        "column": "assignments.lower_threshold",
+        "relative_path": "phase7/assignments/14_lower_threshold.npy",
+        "sha256": "d9d3337da34d0187a28f4e8447c7faa6211d52dcf1328cb2cdceeea8c5d29d08"
+      },
+      {
+        "column": "assignments.upper_threshold",
+        "relative_path": "phase7/assignments/15_upper_threshold.npy",
+        "sha256": "019f2a7a1960923d1a53f1ff3e5ea0024b4a3178878ac9847a85b64fa47ef008"
+      },
+      {
+        "column": "assignments.threshold_status",
+        "relative_path": "phase7/assignments/16_threshold_status.npy",
+        "sha256": "124cb3b930a8fe3f0aa71e0d58a3abf4cd9e26ecb28149b6eaa86ea97305f2fc"
+      },
+      {
+        "column": "assignments.category_code",
+        "relative_path": "phase7/assignments/17_category_code.npy",
+        "sha256": "f0cb203cb6128809ac40ce6e51b226e9c90a56ba72943decfc5c945c6a7b19e1"
+      },
+      {
+        "column": "assignments.category_name",
+        "relative_path": "phase7/assignments/18_category_name.npy",
+        "sha256": "9cf29925eda3ec2d34f2733401f328eb0e18d8d4998061b27a1fbe13d2e018c8"
+      },
+      {
+        "column": "assignments.assignment_status",
+        "relative_path": "phase7/assignments/19_assignment_status.npy",
+        "sha256": "90eac749426b3cef62ad5a5d812582d9cb2ffd51a1c555dfe19fb48914df758b"
+      },
+      {
+        "column": "assignments.calendar_session_class",
+        "relative_path": "phase7/assignments/20_calendar_session_class.npy",
+        "sha256": "b8d66a68d1b5a243d5937b559126cce493f13b1c3b3da4597b0d771d2c76b875"
+      },
+      {
+        "column": "assignments.holiday_adjacent",
+        "relative_path": "phase7/assignments/21_holiday_adjacent.npy",
+        "sha256": "fc43868b059fb20e34cd8168ba803c540aad76540b4a2d3845b28859caa4126f"
+      },
+      {
+        "column": "assignments.data_quality_status",
+        "relative_path": "phase7/assignments/22_data_quality_status.npy",
+        "sha256": "17b2e266cadb5c821390408ca3e3f0678104cf30e71f9ad0f9b753ce755c56e0"
+      },
+      {
+        "column": "seasonal_profiles.arm_id",
+        "relative_path": "phase7/seasonal_profiles/00_arm_id.npy",
+        "sha256": "c3101e373eb5d9556a130f3da68cfc9accff733405226ff094ff0ba60465d53a"
+      },
+      {
+        "column": "seasonal_profiles.session_id",
+        "relative_path": "phase7/seasonal_profiles/01_session_id.npy",
+        "sha256": "b6b61de48ddc2e98a54b02d172d047c50d51908620598da6661f1a71b751dc5c"
+      },
+      {
+        "column": "seasonal_profiles.observation_bucket_ct",
+        "relative_path": "phase7/seasonal_profiles/02_observation_bucket_ct.npy",
+        "sha256": "3098ebc1d66467e4324f89f18a8c38d92984d44691bafa2937218df8a6f344c1"
+      },
+      {
+        "column": "seasonal_profiles.session_phase",
+        "relative_path": "phase7/seasonal_profiles/03_session_phase.npy",
+        "sha256": "7a026afbdf364dcedc6f73982a83a1ac0602c1b36fc419153df677eb3e143092"
+      },
+      {
+        "column": "seasonal_profiles.qualifying_prior_sessions",
+        "relative_path": "phase7/seasonal_profiles/04_qualifying_prior_sessions.npy",
+        "sha256": "011a760fa725aa36377e831ace91355961462fc6d157667b1dc090d3a453549c"
+      },
+      {
+        "column": "seasonal_profiles.bucket_n",
+        "relative_path": "phase7/seasonal_profiles/05_bucket_n.npy",
+        "sha256": "10a10cd2ee8e82685994ef46bd1165a0a175d28fb10d406a456bb26c23183b9d"
+      },
+      {
+        "column": "seasonal_profiles.bucket_median",
+        "relative_path": "phase7/seasonal_profiles/06_bucket_median.npy",
+        "sha256": "c0b7ab419c6c12fffe1028d08f532d377138d1bad6214cc57a67f819b5979e57"
+      },
+      {
+        "column": "seasonal_profiles.bucket_median_valid",
+        "relative_path": "phase7/seasonal_profiles/07_bucket_median_valid.npy",
+        "sha256": "7896d6bba29bff0bc89c98fb718d0c0626767e55ed24b259b4bd78fc47bd303e"
+      },
+      {
+        "column": "seasonal_profiles.phase_session_median",
+        "relative_path": "phase7/seasonal_profiles/08_phase_session_median.npy",
+        "sha256": "9962ccb2365f2699bd3e705e5672d342db367b58292bd2ecaff78d06f751b208"
+      },
+      {
+        "column": "seasonal_profiles.phase_session_median_valid",
+        "relative_path": "phase7/seasonal_profiles/09_phase_session_median_valid.npy",
+        "sha256": "7896d6bba29bff0bc89c98fb718d0c0626767e55ed24b259b4bd78fc47bd303e"
+      },
+      {
+        "column": "seasonal_profiles.shrink_weight",
+        "relative_path": "phase7/seasonal_profiles/10_shrink_weight.npy",
+        "sha256": "15a2cd37ca3ad4b8abedd00e8ec458ba9147986c1ca3e37ee25080f1dc801415"
+      },
+      {
+        "column": "seasonal_profiles.seasonal_profile",
+        "relative_path": "phase7/seasonal_profiles/11_seasonal_profile.npy",
+        "sha256": "c0b7ab419c6c12fffe1028d08f532d377138d1bad6214cc57a67f819b5979e57"
+      },
+      {
+        "column": "seasonal_profiles.seasonal_valid",
+        "relative_path": "phase7/seasonal_profiles/12_seasonal_valid.npy",
+        "sha256": "7896d6bba29bff0bc89c98fb718d0c0626767e55ed24b259b4bd78fc47bd303e"
+      },
+      {
+        "column": "seasonal_profiles.seasonal_status",
+        "relative_path": "phase7/seasonal_profiles/13_seasonal_status.npy",
+        "sha256": "03516910d8d42014f96f8b948afd9a2380a01db16d4cebc34013d5743b84d08b"
+      },
+      {
+        "column": "seasonal_profiles.calendar_version",
+        "relative_path": "phase7/seasonal_profiles/14_calendar_version.npy",
+        "sha256": "35c972e2867eda0d254f6b6ae148937577a8299aacb46623b71eef7c3aff6ad2"
+      },
+      {
+        "column": "seasonal_profiles.calendar_sha256",
+        "relative_path": "phase7/seasonal_profiles/15_calendar_sha256.npy",
+        "sha256": "44b17cb1e9817b94cbba8e80115dede4e27d4dc6a920fa273e983218bcb26102"
+      },
+      {
+        "column": "state_validity.metric",
+        "relative_path": "phase7/state_validity/00_metric.npy",
+        "sha256": "489e86ae82afa1f3b002ea3236bad64b483b17cc74883fc807836c5b933afa41"
+      },
+      {
+        "column": "state_validity.arm_id",
+        "relative_path": "phase7/state_validity/01_arm_id.npy",
+        "sha256": "3c97f61308f66342df260122302eb58c06c94e301542c841c4b35e45e7ad3a03"
+      },
+      {
+        "column": "state_validity.session_phase",
+        "relative_path": "phase7/state_validity/02_session_phase.npy",
+        "sha256": "3bb2b80b1395a632a322d33e4205fd6e14cb9bdf66dae921a2265ce1e552f593"
+      },
+      {
+        "column": "state_validity.detail",
+        "relative_path": "phase7/state_validity/03_detail.npy",
+        "sha256": "069dcf0492e6447fc30a5efe9fc44ed4be9326a3887c140e4b73a6453e9a2ced"
+      },
+      {
+        "column": "state_validity.comparison_arm_id",
+        "relative_path": "phase7/state_validity/04_comparison_arm_id.npy",
+        "sha256": "a9790f71b47fdac1b86e01b5f0097a2f2c24c48bd2d4b276c8e8cd47702756a4"
+      },
+      {
+        "column": "state_validity.category_code",
+        "relative_path": "phase7/state_validity/05_category_code.npy",
+        "sha256": "1776aaa1d1bcdf3dc18479b0f46882fe65936acf821f21ccb8ea46e525b8849b"
+      },
+      {
+        "column": "state_validity.category_to_code",
+        "relative_path": "phase7/state_validity/06_category_to_code.npy",
+        "sha256": "6f3ee81276f88d9ba059e1126007f539de304a7138b51d5aa09ac881b05bf4d8"
+      },
+      {
+        "column": "state_validity.session_id",
+        "relative_path": "phase7/state_validity/07_session_id.npy",
+        "sha256": "a5df06fad5ad09fc5fdc797263d0f8184899b28217170e1ce9ec0d38f8e44532"
+      },
+      {
+        "column": "state_validity.year",
+        "relative_path": "phase7/state_validity/08_year.npy",
+        "sha256": "24eca6a8b2617b7205725f131b3aae570add8fd38d2999291a253e4c945e8d15"
+      },
+      {
+        "column": "state_validity.horizon",
+        "relative_path": "phase7/state_validity/09_horizon.npy",
+        "sha256": "a5c22d6f9fd64214c9ce2b8ef11fd3e835a2ed2ff0157b27f413acb88a96a16e"
+      },
+      {
+        "column": "state_validity.count",
+        "relative_path": "phase7/state_validity/10_count.npy",
+        "sha256": "b6211195bfb0e82ce86f2896e075bd1a19bbd144ec56b895949c9c6541b89984"
+      },
+      {
+        "column": "state_validity.denominator",
+        "relative_path": "phase7/state_validity/11_denominator.npy",
+        "sha256": "95297bce3c8398b621b7fa8b050f43ce57fe852dccd01cf6aa509831da951d37"
+      },
+      {
+        "column": "state_validity.value",
+        "relative_path": "phase7/state_validity/12_value.npy",
+        "sha256": "f63e7a555a09b3012665f21eeae83b59b947aef7a9b7db35ecb4ca198b01be27"
+      },
+      {
+        "column": "state_validity.value_valid",
+        "relative_path": "phase7/state_validity/13_value_valid.npy",
+        "sha256": "d60fec8a2b71dbfaf23c8259bf17e66bf4bab5801712d6b1e929632620c5b413"
+      },
+      {
+        "column": "state_validity.status",
+        "relative_path": "phase7/state_validity/14_status.npy",
+        "sha256": "a2b54edda14206ccfac0ef557161dc67c1e7081e76c816d4f17de7f13c3609fa"
+      },
+      {
+        "column": "thresholds.arm_id",
+        "relative_path": "phase7/thresholds/00_arm_id.npy",
+        "sha256": "bcb3f7be38cb8f1e86f30a634be80124e146c1eb519f1c2872e74c2bad5a6d66"
+      },
+      {
+        "column": "thresholds.session_id",
+        "relative_path": "phase7/thresholds/01_session_id.npy",
+        "sha256": "f46e8d4651119dec0ae343c4de43ac886c67923b2f10244569e464153c84709f"
+      },
+      {
+        "column": "thresholds.session_phase",
+        "relative_path": "phase7/thresholds/02_session_phase.npy",
+        "sha256": "b12421203e0c6c00a52745c3734b81dcd684d03763e472b75ff9227a4479043b"
+      },
+      {
+        "column": "thresholds.history_kind",
+        "relative_path": "phase7/thresholds/03_history_kind.npy",
+        "sha256": "40ab595cf266c884cb8e3226e6168b5415c2cae5a224f6e9aa87f81f496eef46"
+      },
+      {
+        "column": "thresholds.qualifying_prior_sessions",
+        "relative_path": "phase7/thresholds/04_qualifying_prior_sessions.npy",
+        "sha256": "1e77a014dada5bc85ab4833553474e0ecbeb7067f299e7d786743eeed418b8da"
+      },
+      {
+        "column": "thresholds.lower_probability",
+        "relative_path": "phase7/thresholds/05_lower_probability.npy",
+        "sha256": "f6f1b29b356bb75a863ed07390baad851a7093b62d2c7cf5d9b257f07a4b00cb"
+      },
+      {
+        "column": "thresholds.upper_probability",
+        "relative_path": "phase7/thresholds/06_upper_probability.npy",
+        "sha256": "bd2ac5ed8af48189b1545ccce0b6d1d9fe65e6630d848a3613bb6a0caf04078e"
+      },
+      {
+        "column": "thresholds.lower_threshold",
+        "relative_path": "phase7/thresholds/07_lower_threshold.npy",
+        "sha256": "e30b9f11395607ea4647d76817b230e13f4240e8a9756efdb3a60f301151b686"
+      },
+      {
+        "column": "thresholds.upper_threshold",
+        "relative_path": "phase7/thresholds/08_upper_threshold.npy",
+        "sha256": "0a0454a1082205075731fb325a4a1ab2684ba9ee9a126a876377f79391f34ca5"
+      },
+      {
+        "column": "thresholds.threshold_valid",
+        "relative_path": "phase7/thresholds/09_threshold_valid.npy",
+        "sha256": "132bf9e31ba84b838585359aff18ec93646aae29997eb1aee2ce40d5738df71f"
+      },
+      {
+        "column": "thresholds.threshold_status",
+        "relative_path": "phase7/thresholds/10_threshold_status.npy",
+        "sha256": "c08e6bc5897daeacdfdb1fff4478c61824534cf69d4e42b2561a3c9d9b3be7c1"
+      },
+      {
+        "column": "unit_o.estimand",
+        "relative_path": "unit_o/00_estimand.npy",
+        "sha256": "d07cda0093fc349c0b18f2f33f7066517458dbca4f5170624c3a98309487563b"
+      },
+      {
+        "column": "unit_o.session_id",
+        "relative_path": "unit_o/01_session_id.npy",
+        "sha256": "ba3be8a4fd194bcceb58a36be37fc4115cec378e8c78609953e8c2a45467b478"
+      },
+      {
+        "column": "unit_o.ts_event_ns",
+        "relative_path": "unit_o/02_ts_event_ns.npy",
+        "sha256": "f0044db6fb86637cf13ec121d26d1f40677ea148dd336df1925ab1476fffd173"
+      },
+      {
+        "column": "unit_o.tau_ns",
+        "relative_path": "unit_o/03_tau_ns.npy",
+        "sha256": "3e298ca0dbeffe57a4b9985f19c6f725e5466365a3ae446de535b443b5e14664"
+      },
+      {
+        "column": "unit_o.observation_time_ct",
+        "relative_path": "unit_o/04_observation_time_ct.npy",
+        "sha256": "86f1b3f810ca1860fda8af98a5cbde67d4c0bee45054ef58ab988cd370feef8e"
+      },
+      {
+        "column": "unit_o.session_phase",
+        "relative_path": "unit_o/05_session_phase.npy",
+        "sha256": "818be44ce4b1410c3a3009cc4c6748a8f967ce452739ad0712316650ce38f24d"
+      },
+      {
+        "column": "unit_o.horizon_minutes",
+        "relative_path": "unit_o/06_horizon_minutes.npy",
+        "sha256": "cd752e10c6319b0ed5b8bc9b85540639ac973245fa3397ba8c44c7df85d89aac"
+      },
+      {
+        "column": "unit_o.anchor_symbol_code",
+        "relative_path": "unit_o/07_anchor_symbol_code.npy",
+        "sha256": "ae6a505d2ce1249d1027034f9a16b12f871d296fccce4d400b5d22bcb88396ce"
+      },
+      {
+        "column": "unit_o.anchor_close_ticks",
+        "relative_path": "unit_o/08_anchor_close_ticks.npy",
+        "sha256": "dedd13de3f23393c63349b2c03825a678d00a9da2caa56ce9ac656c5d9d45a82"
+      },
+      {
+        "column": "unit_o.anchor_close_valid",
+        "relative_path": "unit_o/09_anchor_close_valid.npy",
+        "sha256": "286c99230ebd7bf4e43ebbe59937633f47bbb0f0469abdea6f457b485663300d"
+      },
+      {
+        "column": "unit_o.n_required_bars",
+        "relative_path": "unit_o/10_n_required_bars.npy",
+        "sha256": "28cbb4fbdc51a4d17ca3cfa4e6efade083ae1b5b8128b66fcc1bb70687587075"
+      },
+      {
+        "column": "unit_o.n_present_bars",
+        "relative_path": "unit_o/11_n_present_bars.npy",
+        "sha256": "674852ec209ac3b7214be87c9225faa5ee4371a898e0c080ebc24f8fc088c2bd"
+      },
+      {
+        "column": "unit_o.n_fully_labeled_bars",
+        "relative_path": "unit_o/12_n_fully_labeled_bars.npy",
+        "sha256": "582dbcc01e06716672b6e8b0a4bd29d6f0b17cbc6704610b144fbc303259220e"
+      },
+      {
+        "column": "unit_o.window_fits_rth",
+        "relative_path": "unit_o/13_window_fits_rth.npy",
+        "sha256": "2629965dbaa1323b7dfe42d12db99c94c50d0c115d84198faceb7f5bd5d83cd2"
+      },
+      {
+        "column": "unit_o.common_support",
+        "relative_path": "unit_o/14_common_support.npy",
+        "sha256": "631e25382a61af38e241f592a2fccb80495a8df33e70e7f772e5524268d85a7f"
+      },
+      {
+        "column": "unit_o.outcome_status",
+        "relative_path": "unit_o/15_outcome_status.npy",
+        "sha256": "136b4a46b0b38377a9d3fcdf657e202319d7b052a0bdcf7dc12b41cdcdc46123"
+      },
+      {
+        "column": "unit_o.path_timestamp_missing",
+        "relative_path": "unit_o/16_path_timestamp_missing.npy",
+        "sha256": "c01432c617b6326f9b6b4dc1c06263007e764d5bc78b5b1f35c2a6123140061a"
+      },
+      {
+        "column": "unit_o.path_session_mismatch",
+        "relative_path": "unit_o/17_path_session_mismatch.npy",
+        "sha256": "a0cae05cb7b2ef8020a0d81a20a04251ac8186f144216ca5f19661728e10cf51"
+      },
+      {
+        "column": "unit_o.path_symbol_mismatch",
+        "relative_path": "unit_o/18_path_symbol_mismatch.npy",
+        "sha256": "a0cae05cb7b2ef8020a0d81a20a04251ac8186f144216ca5f19661728e10cf51"
+      },
+      {
+        "column": "unit_o.insufficient_components",
+        "relative_path": "unit_o/19_insufficient_components.npy",
+        "sha256": "bf1b4cdc75340e3c4ed68d4eaa94e681851bd2036894f1458ee83cd93a2b5b7f"
+      },
+      {
+        "column": "unit_o.downward_excursion_ticks",
+        "relative_path": "unit_o/20_downward_excursion_ticks.npy",
+        "sha256": "1545f589b053a9824b052e3fe0161821a5a1af52b75a87741721c21db7ef549c"
+      },
+      {
+        "column": "unit_o.upward_excursion_ticks",
+        "relative_path": "unit_o/21_upward_excursion_ticks.npy",
+        "sha256": "63a8adb32026a45c9fdc3efabec556c4724f93133924999bde4d2adcedfa3e80"
+      },
+      {
+        "column": "unit_o.signed_downward_extreme_ticks",
+        "relative_path": "unit_o/22_signed_downward_extreme_ticks.npy",
+        "sha256": "737ce3773fb5ea1e1aa64ae933451886c0b20f49c9df086335b8a6478b47ae03"
+      },
+      {
+        "column": "unit_o.signed_upward_extreme_ticks",
+        "relative_path": "unit_o/23_signed_upward_extreme_ticks.npy",
+        "sha256": "a56b4eacefc91d27e6b478fd7e600f02e3b39b95fbd58452966d1dc8c6a8170a"
+      },
+      {
+        "column": "unit_o.outcome_valid",
+        "relative_path": "unit_o/24_outcome_valid.npy",
+        "sha256": "50dac974bf6d1412220ed75065367ca5d13b29f4480e4b7afba8ceca58bf3f06"
+      }
+    ],
+    "tree_path": "data/exploration/derived/phase7-unit-o-first-run-v1.baseline-4f185ea",
+    "tree_sha256": "9f8082be2ef163fcad5741ab9926cf40f9cc6088e93960b59c604afa6b060701"
+  },
+  "run_commit": "6dcbff89e0d7af8e812474537cef41fc6cf7add4",
+  "run_completion_record": {
+    "path": "mnq_lab/ledger/run_completion_entries/2026-08-02-phase7-unit-o-first-run-v1.json",
+    "sha256": "59bf9df66c94f7b26d504c005491cd9b1b7c80bc6f6ee9db2ef91dee11969820"
+  },
+  "scientific_column_protocol": "npy-file-sha256-v1",
+  "scientific_columns": [
+    {
+      "column": "anchor_scales.arm_id",
+      "relative_path": "phase7/anchor_scales/00_arm_id.npy",
+      "sha256": "c3101e373eb5d9556a130f3da68cfc9accff733405226ff094ff0ba60465d53a"
+    },
+    {
+      "column": "anchor_scales.session_id",
+      "relative_path": "phase7/anchor_scales/01_session_id.npy",
+      "sha256": "b6b61de48ddc2e98a54b02d172d047c50d51908620598da6661f1a71b751dc5c"
+    },
+    {
+      "column": "anchor_scales.ts_event_ns",
+      "relative_path": "phase7/anchor_scales/02_ts_event_ns.npy",
+      "sha256": "1e78cef52bc0b6d353f97cef08a975cef37c135aab9765820e8fa8fcaebb5988"
+    },
+    {
+      "column": "anchor_scales.tau_ns",
+      "relative_path": "phase7/anchor_scales/03_tau_ns.npy",
+      "sha256": "6693a0c1f7145bdabcddbbf712020084df5053e51a7b105d28072f041a9923ce"
+    },
+    {
+      "column": "anchor_scales.observation_bucket_ct",
+      "relative_path": "phase7/anchor_scales/04_observation_bucket_ct.npy",
+      "sha256": "3098ebc1d66467e4324f89f18a8c38d92984d44691bafa2937218df8a6f344c1"
+    },
+    {
+      "column": "anchor_scales.session_phase",
+      "relative_path": "phase7/anchor_scales/05_session_phase.npy",
+      "sha256": "7a026afbdf364dcedc6f73982a83a1ac0602c1b36fc419153df677eb3e143092"
+    },
+    {
+      "column": "anchor_scales.symbol_code",
+      "relative_path": "phase7/anchor_scales/06_symbol_code.npy",
+      "sha256": "bba8c1e56689274628f3ba543beeb5007d8ab5a47a18be29978fae9c68a1ea13"
+    },
+    {
+      "column": "anchor_scales.observed_1m_components",
+      "relative_path": "phase7/anchor_scales/07_observed_1m_components.npy",
+      "sha256": "e6390bacdc87f48f26ac9533af403667d45e33ae4d5e3889afe62131d27e44c5"
+    },
+    {
+      "column": "anchor_scales.component_coverage_rate",
+      "relative_path": "phase7/anchor_scales/08_component_coverage_rate.npy",
+      "sha256": "dc3187897a5bed515e2123bfb30343d3fd900e0ff0e723a913750db3d27518b9"
+    },
+    {
+      "column": "anchor_scales.anchor_status",
+      "relative_path": "phase7/anchor_scales/09_anchor_status.npy",
+      "sha256": "dea923979799eccbde693e04c51883b7497f87e03c7b12ec743e6ef92404c212"
+    },
+    {
+      "column": "anchor_scales.return_status",
+      "relative_path": "phase7/anchor_scales/10_return_status.npy",
+      "sha256": "2ca0dcb9401b43ebe27b930581a5b06e80e5ec0aa220961b4c630972e75fc5e2"
+    },
+    {
+      "column": "anchor_scales.return_missing_reason",
+      "relative_path": "phase7/anchor_scales/11_return_missing_reason.npy",
+      "sha256": "ba16b31e9f1315ddf15789c2bd7240a72f4bff5fe4b5dacfd1881da98463104a"
+    },
+    {
+      "column": "anchor_scales.reset_reason",
+      "relative_path": "phase7/anchor_scales/12_reset_reason.npy",
+      "sha256": "bb2185121b6bb0e710b0d211669c55dc76c58a790eaa758c2d5e9d9580ebddd5"
+    },
+    {
+      "column": "anchor_scales.scheduled_break",
+      "relative_path": "phase7/anchor_scales/13_scheduled_break.npy",
+      "sha256": "98d224375bf7065d81ae4a2530fe67a166adbac44856ee3e2fcfbbd6f1aa88d5"
+    },
+    {
+      "column": "anchor_scales.contiguous_return_count",
+      "relative_path": "phase7/anchor_scales/14_contiguous_return_count.npy",
+      "sha256": "8c956fb65cd72b6bf23d018bfc4f9f925244730106d202e7f3c322cf702daf1d"
+    },
+    {
+      "column": "anchor_scales.scale_value",
+      "relative_path": "phase7/anchor_scales/15_scale_value.npy",
+      "sha256": "fb92079843cb1a5d3ce7d19f2b8b53c1b7caf4718a7ff3cd46183c9081859387"
+    },
+    {
+      "column": "anchor_scales.scale_valid",
+      "relative_path": "phase7/anchor_scales/16_scale_valid.npy",
+      "sha256": "cc2a1fc66f8f04c74172289e946cc4ad35c1e96e980c3ed93a948148ff51f77f"
+    },
+    {
+      "column": "anchor_scales.ewma_status",
+      "relative_path": "phase7/anchor_scales/17_ewma_status.npy",
+      "sha256": "e2bc98d6302cbea5ded5acbc11a8f03babb5eb75bdba4f34ab4495196f387b4d"
+    },
+    {
+      "column": "anchor_scales.mad_status",
+      "relative_path": "phase7/anchor_scales/18_mad_status.npy",
+      "sha256": "5a4fba2b4a5237c955682fe9b35bad445fe426fc7805376cfb89f5e5eba8fded"
+    },
+    {
+      "column": "assignments.arm_id",
+      "relative_path": "phase7/assignments/00_arm_id.npy",
+      "sha256": "a8b4be34d83d06bf7cf3668fdcf759902fa8a0757a38ea115cb70556f986fc18"
+    },
+    {
+      "column": "assignments.session_id",
+      "relative_path": "phase7/assignments/01_session_id.npy",
+      "sha256": "06a48033e86f4704d57e8d3f0ee02eebc36b1ef789e1946c2258eec88e1e60c1"
+    },
+    {
+      "column": "assignments.ts_event_ns",
+      "relative_path": "phase7/assignments/02_ts_event_ns.npy",
+      "sha256": "768b5830435e336a6d9a638b24aeada5f8aaebaf1c4f4924cb6bac20db340b0c"
+    },
+    {
+      "column": "assignments.tau_ns",
+      "relative_path": "phase7/assignments/03_tau_ns.npy",
+      "sha256": "d1ef8805cd53f729caaf952278aa2555e9adfaa487e732fd9e89617b0dcbb2ea"
+    },
+    {
+      "column": "assignments.observation_bucket_ct",
+      "relative_path": "phase7/assignments/04_observation_bucket_ct.npy",
+      "sha256": "584223758723a34d6880488f88f838207ee3f1e24b40cc8720e5e8432e05df0d"
+    },
+    {
+      "column": "assignments.session_phase",
+      "relative_path": "phase7/assignments/05_session_phase.npy",
+      "sha256": "f5ddc5c94c1e888cd302f15939c931e739995a47489ba7c9119827a475da024f"
+    },
+    {
+      "column": "assignments.scale_value",
+      "relative_path": "phase7/assignments/06_scale_value.npy",
+      "sha256": "d7c9366a67dd66f7d55e96b5cf9c509a5810f227ec4384abec76faa4bf11d30b"
+    },
+    {
+      "column": "assignments.scale_valid",
+      "relative_path": "phase7/assignments/07_scale_valid.npy",
+      "sha256": "e9eb2db03f2402294d978be06f867fdd7122dbd041fde528789f0dc7f495cbd0"
+    },
+    {
+      "column": "assignments.seasonal_profile",
+      "relative_path": "phase7/assignments/08_seasonal_profile.npy",
+      "sha256": "993221b5d829a23365a602bb0f55d91107dda66084c9a87678be51188397a325"
+    },
+    {
+      "column": "assignments.seasonal_valid",
+      "relative_path": "phase7/assignments/09_seasonal_valid.npy",
+      "sha256": "51e60a4964b0844999e443104f24934a7b7bef4781f27b603fb32c92b4c0047a"
+    },
+    {
+      "column": "assignments.vol_rel",
+      "relative_path": "phase7/assignments/10_vol_rel.npy",
+      "sha256": "4cec46ff3bbfc91e371a5bd2873f6291080f6c6a8a06be0d92d2b935bb9d5ba8"
+    },
+    {
+      "column": "assignments.vol_rel_valid",
+      "relative_path": "phase7/assignments/11_vol_rel_valid.npy",
+      "sha256": "a7d5d687657f344ab81743f1791024cb3d8d3655d7a08882ee1dc3443464e491"
+    },
+    {
+      "column": "assignments.vol_rel_status",
+      "relative_path": "phase7/assignments/12_vol_rel_status.npy",
+      "sha256": "7ca3d5de7f03a23476f0a0684ae0f58c69df9d9da53b49057ea4d770e088347f"
+    },
+    {
+      "column": "assignments.upstream_stage",
+      "relative_path": "phase7/assignments/13_upstream_stage.npy",
+      "sha256": "e6127f2a06052732823d4e059cbd4ca17684f2bd67b05320ea04fedd1adc4a48"
+    },
+    {
+      "column": "assignments.lower_threshold",
+      "relative_path": "phase7/assignments/14_lower_threshold.npy",
+      "sha256": "d9d3337da34d0187a28f4e8447c7faa6211d52dcf1328cb2cdceeea8c5d29d08"
+    },
+    {
+      "column": "assignments.upper_threshold",
+      "relative_path": "phase7/assignments/15_upper_threshold.npy",
+      "sha256": "019f2a7a1960923d1a53f1ff3e5ea0024b4a3178878ac9847a85b64fa47ef008"
+    },
+    {
+      "column": "assignments.threshold_status",
+      "relative_path": "phase7/assignments/16_threshold_status.npy",
+      "sha256": "124cb3b930a8fe3f0aa71e0d58a3abf4cd9e26ecb28149b6eaa86ea97305f2fc"
+    },
+    {
+      "column": "assignments.category_code",
+      "relative_path": "phase7/assignments/17_category_code.npy",
+      "sha256": "f0cb203cb6128809ac40ce6e51b226e9c90a56ba72943decfc5c945c6a7b19e1"
+    },
+    {
+      "column": "assignments.category_name",
+      "relative_path": "phase7/assignments/18_category_name.npy",
+      "sha256": "9cf29925eda3ec2d34f2733401f328eb0e18d8d4998061b27a1fbe13d2e018c8"
+    },
+    {
+      "column": "assignments.assignment_status",
+      "relative_path": "phase7/assignments/19_assignment_status.npy",
+      "sha256": "90eac749426b3cef62ad5a5d812582d9cb2ffd51a1c555dfe19fb48914df758b"
+    },
+    {
+      "column": "assignments.calendar_session_class",
+      "relative_path": "phase7/assignments/20_calendar_session_class.npy",
+      "sha256": "b8d66a68d1b5a243d5937b559126cce493f13b1c3b3da4597b0d771d2c76b875"
+    },
+    {
+      "column": "assignments.holiday_adjacent",
+      "relative_path": "phase7/assignments/21_holiday_adjacent.npy",
+      "sha256": "fc43868b059fb20e34cd8168ba803c540aad76540b4a2d3845b28859caa4126f"
+    },
+    {
+      "column": "assignments.data_quality_status",
+      "relative_path": "phase7/assignments/22_data_quality_status.npy",
+      "sha256": "17b2e266cadb5c821390408ca3e3f0678104cf30e71f9ad0f9b753ce755c56e0"
+    },
+    {
+      "column": "seasonal_profiles.arm_id",
+      "relative_path": "phase7/seasonal_profiles/00_arm_id.npy",
+      "sha256": "c3101e373eb5d9556a130f3da68cfc9accff733405226ff094ff0ba60465d53a"
+    },
+    {
+      "column": "seasonal_profiles.session_id",
+      "relative_path": "phase7/seasonal_profiles/01_session_id.npy",
+      "sha256": "b6b61de48ddc2e98a54b02d172d047c50d51908620598da6661f1a71b751dc5c"
+    },
+    {
+      "column": "seasonal_profiles.observation_bucket_ct",
+      "relative_path": "phase7/seasonal_profiles/02_observation_bucket_ct.npy",
+      "sha256": "3098ebc1d66467e4324f89f18a8c38d92984d44691bafa2937218df8a6f344c1"
+    },
+    {
+      "column": "seasonal_profiles.session_phase",
+      "relative_path": "phase7/seasonal_profiles/03_session_phase.npy",
+      "sha256": "7a026afbdf364dcedc6f73982a83a1ac0602c1b36fc419153df677eb3e143092"
+    },
+    {
+      "column": "seasonal_profiles.qualifying_prior_sessions",
+      "relative_path": "phase7/seasonal_profiles/04_qualifying_prior_sessions.npy",
+      "sha256": "011a760fa725aa36377e831ace91355961462fc6d157667b1dc090d3a453549c"
+    },
+    {
+      "column": "seasonal_profiles.bucket_n",
+      "relative_path": "phase7/seasonal_profiles/05_bucket_n.npy",
+      "sha256": "10a10cd2ee8e82685994ef46bd1165a0a175d28fb10d406a456bb26c23183b9d"
+    },
+    {
+      "column": "seasonal_profiles.bucket_median",
+      "relative_path": "phase7/seasonal_profiles/06_bucket_median.npy",
+      "sha256": "c0b7ab419c6c12fffe1028d08f532d377138d1bad6214cc57a67f819b5979e57"
+    },
+    {
+      "column": "seasonal_profiles.bucket_median_valid",
+      "relative_path": "phase7/seasonal_profiles/07_bucket_median_valid.npy",
+      "sha256": "7896d6bba29bff0bc89c98fb718d0c0626767e55ed24b259b4bd78fc47bd303e"
+    },
+    {
+      "column": "seasonal_profiles.phase_session_median",
+      "relative_path": "phase7/seasonal_profiles/08_phase_session_median.npy",
+      "sha256": "9962ccb2365f2699bd3e705e5672d342db367b58292bd2ecaff78d06f751b208"
+    },
+    {
+      "column": "seasonal_profiles.phase_session_median_valid",
+      "relative_path": "phase7/seasonal_profiles/09_phase_session_median_valid.npy",
+      "sha256": "7896d6bba29bff0bc89c98fb718d0c0626767e55ed24b259b4bd78fc47bd303e"
+    },
+    {
+      "column": "seasonal_profiles.shrink_weight",
+      "relative_path": "phase7/seasonal_profiles/10_shrink_weight.npy",
+      "sha256": "15a2cd37ca3ad4b8abedd00e8ec458ba9147986c1ca3e37ee25080f1dc801415"
+    },
+    {
+      "column": "seasonal_profiles.seasonal_profile",
+      "relative_path": "phase7/seasonal_profiles/11_seasonal_profile.npy",
+      "sha256": "c0b7ab419c6c12fffe1028d08f532d377138d1bad6214cc57a67f819b5979e57"
+    },
+    {
+      "column": "seasonal_profiles.seasonal_valid",
+      "relative_path": "phase7/seasonal_profiles/12_seasonal_valid.npy",
+      "sha256": "7896d6bba29bff0bc89c98fb718d0c0626767e55ed24b259b4bd78fc47bd303e"
+    },
+    {
+      "column": "seasonal_profiles.seasonal_status",
+      "relative_path": "phase7/seasonal_profiles/13_seasonal_status.npy",
+      "sha256": "03516910d8d42014f96f8b948afd9a2380a01db16d4cebc34013d5743b84d08b"
+    },
+    {
+      "column": "seasonal_profiles.calendar_version",
+      "relative_path": "phase7/seasonal_profiles/14_calendar_version.npy",
+      "sha256": "35c972e2867eda0d254f6b6ae148937577a8299aacb46623b71eef7c3aff6ad2"
+    },
+    {
+      "column": "seasonal_profiles.calendar_sha256",
+      "relative_path": "phase7/seasonal_profiles/15_calendar_sha256.npy",
+      "sha256": "44b17cb1e9817b94cbba8e80115dede4e27d4dc6a920fa273e983218bcb26102"
+    },
+    {
+      "column": "state_validity.metric",
+      "relative_path": "phase7/state_validity/00_metric.npy",
+      "sha256": "489e86ae82afa1f3b002ea3236bad64b483b17cc74883fc807836c5b933afa41"
+    },
+    {
+      "column": "state_validity.arm_id",
+      "relative_path": "phase7/state_validity/01_arm_id.npy",
+      "sha256": "3c97f61308f66342df260122302eb58c06c94e301542c841c4b35e45e7ad3a03"
+    },
+    {
+      "column": "state_validity.session_phase",
+      "relative_path": "phase7/state_validity/02_session_phase.npy",
+      "sha256": "3bb2b80b1395a632a322d33e4205fd6e14cb9bdf66dae921a2265ce1e552f593"
+    },
+    {
+      "column": "state_validity.detail",
+      "relative_path": "phase7/state_validity/03_detail.npy",
+      "sha256": "069dcf0492e6447fc30a5efe9fc44ed4be9326a3887c140e4b73a6453e9a2ced"
+    },
+    {
+      "column": "state_validity.comparison_arm_id",
+      "relative_path": "phase7/state_validity/04_comparison_arm_id.npy",
+      "sha256": "a9790f71b47fdac1b86e01b5f0097a2f2c24c48bd2d4b276c8e8cd47702756a4"
+    },
+    {
+      "column": "state_validity.category_code",
+      "relative_path": "phase7/state_validity/05_category_code.npy",
+      "sha256": "1776aaa1d1bcdf3dc18479b0f46882fe65936acf821f21ccb8ea46e525b8849b"
+    },
+    {
+      "column": "state_validity.category_to_code",
+      "relative_path": "phase7/state_validity/06_category_to_code.npy",
+      "sha256": "6f3ee81276f88d9ba059e1126007f539de304a7138b51d5aa09ac881b05bf4d8"
+    },
+    {
+      "column": "state_validity.session_id",
+      "relative_path": "phase7/state_validity/07_session_id.npy",
+      "sha256": "a5df06fad5ad09fc5fdc797263d0f8184899b28217170e1ce9ec0d38f8e44532"
+    },
+    {
+      "column": "state_validity.year",
+      "relative_path": "phase7/state_validity/08_year.npy",
+      "sha256": "24eca6a8b2617b7205725f131b3aae570add8fd38d2999291a253e4c945e8d15"
+    },
+    {
+      "column": "state_validity.horizon",
+      "relative_path": "phase7/state_validity/09_horizon.npy",
+      "sha256": "a5c22d6f9fd64214c9ce2b8ef11fd3e835a2ed2ff0157b27f413acb88a96a16e"
+    },
+    {
+      "column": "state_validity.count",
+      "relative_path": "phase7/state_validity/10_count.npy",
+      "sha256": "b6211195bfb0e82ce86f2896e075bd1a19bbd144ec56b895949c9c6541b89984"
+    },
+    {
+      "column": "state_validity.denominator",
+      "relative_path": "phase7/state_validity/11_denominator.npy",
+      "sha256": "95297bce3c8398b621b7fa8b050f43ce57fe852dccd01cf6aa509831da951d37"
+    },
+    {
+      "column": "state_validity.value",
+      "relative_path": "phase7/state_validity/12_value.npy",
+      "sha256": "f63e7a555a09b3012665f21eeae83b59b947aef7a9b7db35ecb4ca198b01be27"
+    },
+    {
+      "column": "state_validity.value_valid",
+      "relative_path": "phase7/state_validity/13_value_valid.npy",
+      "sha256": "d60fec8a2b71dbfaf23c8259bf17e66bf4bab5801712d6b1e929632620c5b413"
+    },
+    {
+      "column": "state_validity.status",
+      "relative_path": "phase7/state_validity/14_status.npy",
+      "sha256": "a2b54edda14206ccfac0ef557161dc67c1e7081e76c816d4f17de7f13c3609fa"
+    },
+    {
+      "column": "thresholds.arm_id",
+      "relative_path": "phase7/thresholds/00_arm_id.npy",
+      "sha256": "bcb3f7be38cb8f1e86f30a634be80124e146c1eb519f1c2872e74c2bad5a6d66"
+    },
+    {
+      "column": "thresholds.session_id",
+      "relative_path": "phase7/thresholds/01_session_id.npy",
+      "sha256": "f46e8d4651119dec0ae343c4de43ac886c67923b2f10244569e464153c84709f"
+    },
+    {
+      "column": "thresholds.session_phase",
+      "relative_path": "phase7/thresholds/02_session_phase.npy",
+      "sha256": "b12421203e0c6c00a52745c3734b81dcd684d03763e472b75ff9227a4479043b"
+    },
+    {
+      "column": "thresholds.history_kind",
+      "relative_path": "phase7/thresholds/03_history_kind.npy",
+      "sha256": "40ab595cf266c884cb8e3226e6168b5415c2cae5a224f6e9aa87f81f496eef46"
+    },
+    {
+      "column": "thresholds.qualifying_prior_sessions",
+      "relative_path": "phase7/thresholds/04_qualifying_prior_sessions.npy",
+      "sha256": "1e77a014dada5bc85ab4833553474e0ecbeb7067f299e7d786743eeed418b8da"
+    },
+    {
+      "column": "thresholds.lower_probability",
+      "relative_path": "phase7/thresholds/05_lower_probability.npy",
+      "sha256": "f6f1b29b356bb75a863ed07390baad851a7093b62d2c7cf5d9b257f07a4b00cb"
+    },
+    {
+      "column": "thresholds.upper_probability",
+      "relative_path": "phase7/thresholds/06_upper_probability.npy",
+      "sha256": "bd2ac5ed8af48189b1545ccce0b6d1d9fe65e6630d848a3613bb6a0caf04078e"
+    },
+    {
+      "column": "thresholds.lower_threshold",
+      "relative_path": "phase7/thresholds/07_lower_threshold.npy",
+      "sha256": "e30b9f11395607ea4647d76817b230e13f4240e8a9756efdb3a60f301151b686"
+    },
+    {
+      "column": "thresholds.upper_threshold",
+      "relative_path": "phase7/thresholds/08_upper_threshold.npy",
+      "sha256": "0a0454a1082205075731fb325a4a1ab2684ba9ee9a126a876377f79391f34ca5"
+    },
+    {
+      "column": "thresholds.threshold_valid",
+      "relative_path": "phase7/thresholds/09_threshold_valid.npy",
+      "sha256": "132bf9e31ba84b838585359aff18ec93646aae29997eb1aee2ce40d5738df71f"
+    },
+    {
+      "column": "thresholds.threshold_status",
+      "relative_path": "phase7/thresholds/10_threshold_status.npy",
+      "sha256": "c08e6bc5897daeacdfdb1fff4478c61824534cf69d4e42b2561a3c9d9b3be7c1"
+    },
+    {
+      "column": "unit_o.estimand",
+      "relative_path": "unit_o/00_estimand.npy",
+      "sha256": "d07cda0093fc349c0b18f2f33f7066517458dbca4f5170624c3a98309487563b"
+    },
+    {
+      "column": "unit_o.session_id",
+      "relative_path": "unit_o/01_session_id.npy",
+      "sha256": "ba3be8a4fd194bcceb58a36be37fc4115cec378e8c78609953e8c2a45467b478"
+    },
+    {
+      "column": "unit_o.ts_event_ns",
+      "relative_path": "unit_o/02_ts_event_ns.npy",
+      "sha256": "f0044db6fb86637cf13ec121d26d1f40677ea148dd336df1925ab1476fffd173"
+    },
+    {
+      "column": "unit_o.tau_ns",
+      "relative_path": "unit_o/03_tau_ns.npy",
+      "sha256": "3e298ca0dbeffe57a4b9985f19c6f725e5466365a3ae446de535b443b5e14664"
+    },
+    {
+      "column": "unit_o.observation_time_ct",
+      "relative_path": "unit_o/04_observation_time_ct.npy",
+      "sha256": "86f1b3f810ca1860fda8af98a5cbde67d4c0bee45054ef58ab988cd370feef8e"
+    },
+    {
+      "column": "unit_o.session_phase",
+      "relative_path": "unit_o/05_session_phase.npy",
+      "sha256": "818be44ce4b1410c3a3009cc4c6748a8f967ce452739ad0712316650ce38f24d"
+    },
+    {
+      "column": "unit_o.horizon_minutes",
+      "relative_path": "unit_o/06_horizon_minutes.npy",
+      "sha256": "cd752e10c6319b0ed5b8bc9b85540639ac973245fa3397ba8c44c7df85d89aac"
+    },
+    {
+      "column": "unit_o.anchor_symbol_code",
+      "relative_path": "unit_o/07_anchor_symbol_code.npy",
+      "sha256": "ae6a505d2ce1249d1027034f9a16b12f871d296fccce4d400b5d22bcb88396ce"
+    },
+    {
+      "column": "unit_o.anchor_close_ticks",
+      "relative_path": "unit_o/08_anchor_close_ticks.npy",
+      "sha256": "dedd13de3f23393c63349b2c03825a678d00a9da2caa56ce9ac656c5d9d45a82"
+    },
+    {
+      "column": "unit_o.anchor_close_valid",
+      "relative_path": "unit_o/09_anchor_close_valid.npy",
+      "sha256": "286c99230ebd7bf4e43ebbe59937633f47bbb0f0469abdea6f457b485663300d"
+    },
+    {
+      "column": "unit_o.n_required_bars",
+      "relative_path": "unit_o/10_n_required_bars.npy",
+      "sha256": "28cbb4fbdc51a4d17ca3cfa4e6efade083ae1b5b8128b66fcc1bb70687587075"
+    },
+    {
+      "column": "unit_o.n_present_bars",
+      "relative_path": "unit_o/11_n_present_bars.npy",
+      "sha256": "674852ec209ac3b7214be87c9225faa5ee4371a898e0c080ebc24f8fc088c2bd"
+    },
+    {
+      "column": "unit_o.n_fully_labeled_bars",
+      "relative_path": "unit_o/12_n_fully_labeled_bars.npy",
+      "sha256": "582dbcc01e06716672b6e8b0a4bd29d6f0b17cbc6704610b144fbc303259220e"
+    },
+    {
+      "column": "unit_o.window_fits_rth",
+      "relative_path": "unit_o/13_window_fits_rth.npy",
+      "sha256": "2629965dbaa1323b7dfe42d12db99c94c50d0c115d84198faceb7f5bd5d83cd2"
+    },
+    {
+      "column": "unit_o.common_support",
+      "relative_path": "unit_o/14_common_support.npy",
+      "sha256": "631e25382a61af38e241f592a2fccb80495a8df33e70e7f772e5524268d85a7f"
+    },
+    {
+      "column": "unit_o.outcome_status",
+      "relative_path": "unit_o/15_outcome_status.npy",
+      "sha256": "136b4a46b0b38377a9d3fcdf657e202319d7b052a0bdcf7dc12b41cdcdc46123"
+    },
+    {
+      "column": "unit_o.path_timestamp_missing",
+      "relative_path": "unit_o/16_path_timestamp_missing.npy",
+      "sha256": "c01432c617b6326f9b6b4dc1c06263007e764d5bc78b5b1f35c2a6123140061a"
+    },
+    {
+      "column": "unit_o.path_session_mismatch",
+      "relative_path": "unit_o/17_path_session_mismatch.npy",
+      "sha256": "a0cae05cb7b2ef8020a0d81a20a04251ac8186f144216ca5f19661728e10cf51"
+    },
+    {
+      "column": "unit_o.path_symbol_mismatch",
+      "relative_path": "unit_o/18_path_symbol_mismatch.npy",
+      "sha256": "a0cae05cb7b2ef8020a0d81a20a04251ac8186f144216ca5f19661728e10cf51"
+    },
+    {
+      "column": "unit_o.insufficient_components",
+      "relative_path": "unit_o/19_insufficient_components.npy",
+      "sha256": "bf1b4cdc75340e3c4ed68d4eaa94e681851bd2036894f1458ee83cd93a2b5b7f"
+    },
+    {
+      "column": "unit_o.downward_excursion_ticks",
+      "relative_path": "unit_o/20_downward_excursion_ticks.npy",
+      "sha256": "1545f589b053a9824b052e3fe0161821a5a1af52b75a87741721c21db7ef549c"
+    },
+    {
+      "column": "unit_o.upward_excursion_ticks",
+      "relative_path": "unit_o/21_upward_excursion_ticks.npy",
+      "sha256": "63a8adb32026a45c9fdc3efabec556c4724f93133924999bde4d2adcedfa3e80"
+    },
+    {
+      "column": "unit_o.signed_downward_extreme_ticks",
+      "relative_path": "unit_o/22_signed_downward_extreme_ticks.npy",
+      "sha256": "737ce3773fb5ea1e1aa64ae933451886c0b20f49c9df086335b8a6478b47ae03"
+    },
+    {
+      "column": "unit_o.signed_upward_extreme_ticks",
+      "relative_path": "unit_o/23_signed_upward_extreme_ticks.npy",
+      "sha256": "a56b4eacefc91d27e6b478fd7e600f02e3b39b95fbd58452966d1dc8c6a8170a"
+    },
+    {
+      "column": "unit_o.outcome_valid",
+      "relative_path": "unit_o/24_outcome_valid.npy",
+      "sha256": "50dac974bf6d1412220ed75065367ca5d13b29f4480e4b7afba8ceca58bf3f06"
+    }
+  ],
+  "tree": {
+    "path": "data/exploration/derived/phase7-unit-o-first-run-v1",
+    "run_manifest_sha256": "39d14712086e074b950316b4ef032299c06a398eea885d49ccfbeb65a272e84e",
+    "tree_sha256": "cefe42e722b4ff09edac28ccece2b496c052fc438e0efcfde844821574fa8d8c",
+    "unit_o_manifest_sha256": "c063fe6885d2933cac97c1979185bc3d33d2fe600ff77e826ee9e9f7c1316513"
+  },
+  "unit": "Unit O"
+}

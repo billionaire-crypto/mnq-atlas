@@ -1,0 +1,28 @@
+{
+  "audited_commit": "6dcbff89e0d7af8e812474537cef41fc6cf7add4",
+  "audited_tree": "data/exploration/derived/phase7-unit-o-first-run-v1",
+  "auditor_identity": "Claude independent audit session",
+  "date": "2026-08-02",
+  "entry_id": "2026-08-02-unit-o-first-run-v1-audit",
+  "evidence_hashes": {
+    "data/exploration/derived/phase7-unit-o-first-run-v1/phase7/manifest.json": "e9d0443cfb5d4b5594b51f8b4c480c312f46ddb0ec4b54797d4b8787d8c5daed",
+    "data/exploration/derived/phase7-unit-o-first-run-v1/run_manifest.json": "39d14712086e074b950316b4ef032299c06a398eea885d49ccfbeb65a272e84e",
+    "data/exploration/derived/phase7-unit-o-first-run-v1/unit_o/manifest.json": "c063fe6885d2933cac97c1979185bc3d33d2fe600ff77e826ee9e9f7c1316513",
+    "docs/UNIT_O.md": "59dc13ef23e02b269cbacceb3561a1054c23c91c03429d99ef4a81e212e8aac6",
+    "mnq_lab/ledger/run_completion_entries/2026-08-02-phase7-unit-o-first-run-v1.json": "59bf9df66c94f7b26d504c005491cd9b1b7c80bc6f6ee9db2ef91dee11969820",
+    "tests/test_outcome_excursions.py": "c79ca27e6230bc192b6599534f53c513e054bc32d60bdf49124f23c1e1779285",
+    "tests/test_unit_o_closeout.py": "a0341ec2f5eccb10266c9de08595ff043d1ae6e1560909d5f3086cf79a1589af"
+  },
+  "findings": [
+    "Initial verdict OPEN; final verdict CLOSED after UO-1 through UO-4 were corrected.",
+    "UO-1 CLOSED: the decoded-symbol mutation lacked an executable witness; a nonempty killing mutation was added.",
+    "UO-2 CLOSED: a full-file pin had been reintroduced on the append-only discrepancies document; historical-prefix protection was restored.",
+    "UO-3 CLOSED: a malformed 62-character historical hash was corrected to a lowercase 64-character SHA-256.",
+    "UO-4 CLOSED: a test name claimed more than its ancestry mechanism proved; the name was narrowed to the exercised contract."
+  ],
+  "ledger_format": "unit_audit_verdict_v1",
+  "producer_identity": "Codex implementation session",
+  "program_id": "mnq-atlas-001",
+  "unit": "Unit O",
+  "verdict": "CLOSED"
+}

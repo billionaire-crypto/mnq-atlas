@@ -30,6 +30,7 @@ __all__ = [
     "weighted_quantile_prepared",
     "weighted_quantiles",
     "weighted_quantiles_prepared",
+    "weighted_quantiles_prepared_batch_fast",
     "weighted_quantiles_prepared_fast",
 ]
 
@@ -428,6 +429,91 @@ def weighted_quantiles_prepared_fast(
             "weighted inverse-CDF selection escaped the positive-mass support"
         )
     return support[indices].astype(np.float64, copy=False)
+
+
+def weighted_quantiles_prepared_batch_fast(
+    prepared: PreparedWeightedQuantileValues,
+    weights: Any,
+    quantiles: Any,
+) -> np.ndarray:
+    """Evaluate many replicate weight rows with exact per-row accumulation."""
+    probabilities = _as_quantile_vector(quantiles)
+    if not isinstance(prepared, PreparedWeightedQuantileValues):
+        raise SpineError(
+            "prepared values must come from prepare_weighted_quantile_values"
+        )
+    _reject_embedded_bools(weights, "weights")
+    try:
+        raw_weights = np.asarray(weights)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise SpineError(f"weights cannot be converted to a numeric array: {exc}") from exc
+    if raw_weights.ndim != 2 or raw_weights.shape[0] == 0:
+        raise SpineError("batched weights must be a nonempty two-dimensional array")
+    if raw_weights.shape[1] != prepared.source_size:
+        raise SpineError(
+            "values and weights must have equal length; "
+            f"got {prepared.source_size} and {raw_weights.shape[1]}"
+        )
+    if raw_weights.dtype.kind not in _REAL_DTYPE_KINDS:
+        raise SpineError("weights must have a real integer or floating dtype")
+    if raw_weights.dtype.kind == "u" and bool(
+        np.any(raw_weights > _MAX_EXACT_BINARY64_INTEGER)
+    ):
+        raise SpineError("weights contains an integer greater than 2**53")
+    if raw_weights.dtype.kind == "i" and bool(
+        np.any(raw_weights < -_MAX_EXACT_BINARY64_INTEGER)
+        or np.any(raw_weights > _MAX_EXACT_BINARY64_INTEGER)
+    ):
+        raise SpineError("weights contains an integer outside [-2**53, 2**53]")
+    weight_matrix = raw_weights.astype(np.float64, copy=False)
+    if not bool(np.isfinite(weight_matrix).all()):
+        raise SpineError("weights contains a non-finite value")
+    if bool(np.any(weight_matrix < 0.0)):
+        raise SpineError("weights contains a negative value")
+
+    ordered_weights = weight_matrix[:, prepared.order]
+    group_ends = np.r_[prepared.group_starts[1:], prepared.source_size]
+    group_lengths = group_ends - prepared.group_starts
+    masses = np.empty(
+        (weight_matrix.shape[0], prepared.group_starts.size),
+        dtype=np.float64,
+    )
+    singletons = group_lengths == 1
+    masses[:, singletons] = ordered_weights[
+        :, prepared.group_starts[singletons]
+    ]
+    for index in np.flatnonzero(~singletons):
+        start = int(prepared.group_starts[index])
+        end = int(group_ends[index])
+        canonical_weights = np.sort(
+            ordered_weights[:, start:end], axis=1, kind="mergesort"
+        )
+        masses[:, index] = np.cumsum(
+            canonical_weights, axis=1, dtype=np.float64
+        )[:, -1]
+
+    output = np.empty(
+        (weight_matrix.shape[0], probabilities.size), dtype=np.float64
+    )
+    for row_index, row_masses in enumerate(masses):
+        positive = row_masses > 0.0
+        support = prepared.support[positive]
+        if support.size == 0:
+            raise SpineError("weights must have strictly positive total mass")
+        cumulative = np.cumsum(row_masses[positive], dtype=np.float64)
+        total = cumulative[-1]
+        if not np.isfinite(total):
+            raise SpineError("canonical binary64 weight accumulation is non-finite")
+        if not total > 0.0:
+            raise SpineError("weights must have strictly positive total mass")
+        thresholds = probabilities * total
+        indices = np.searchsorted(cumulative, thresholds, side="left")
+        if bool(np.any(indices >= support.size)):
+            raise SpineError(
+                "weighted inverse-CDF selection escaped the positive-mass support"
+            )
+        output[row_index] = support[indices]
+    return output
 
 
 def weighted_quantile(values: Any, weights: Any, q: Any) -> float:

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass
 import hashlib
 from numbers import Integral
+import os
 from pathlib import Path
 from typing import Any, Hashable
 
@@ -21,6 +23,7 @@ from mnq_lab.phase8.contrasts import (
     prepare_weighted_quantile_ticks,
     statistic_probability,
     weighted_quantile_ticks,
+    weighted_quantiles_ticks_prepared_batch_fast,
     weighted_quantiles_ticks_prepared_fast,
 )
 from mnq_lab.phase8.diagnostics import StatusDecision, resolve_status
@@ -46,6 +49,11 @@ WEIGHT_ESS_DISCLOSURE = (
 
 _INT32_INFO = np.iinfo(np.int32)
 _INT64_INFO = np.iinfo(np.int64)
+# Eight Windows worker processes peaked at about 2.27 GB on the ratified
+# realistic-support benchmark. Sixteen improved throughput but consumed about
+# 4.37 GB before the complete production inventory was resident, leaving too
+# little margin under the frozen 6 GiB ceiling.
+_MAX_TERM_WORKERS = max(1, min(8, os.cpu_count() or 1))
 
 __all__ = [
     "BLOCK_LENGTHS",
@@ -499,11 +507,29 @@ def joint_bootstrap_intervals_oracle(
 
 def _term_digest(term: BootstrapQuantileTerm) -> bytes:
     digest = hashlib.sha256()
-    for array in (term.values, term.eligibility_mask, term.weights):
+    eligible_rows = np.flatnonzero(term.eligibility_mask)
+    for array in (
+        eligible_rows,
+        term.values[eligible_rows],
+        term.weights[eligible_rows],
+    ):
         digest.update(str(array.dtype).encode("ascii"))
         digest.update(np.asarray(array.shape, dtype=np.int64).tobytes())
         digest.update(array.tobytes(order="C"))
     return digest.digest()
+
+
+def _terms_have_identical_support(
+    left: BootstrapQuantileTerm,
+    right: BootstrapQuantileTerm,
+) -> bool:
+    left_rows = np.flatnonzero(left.eligibility_mask)
+    right_rows = np.flatnonzero(right.eligibility_mask)
+    return (
+        np.array_equal(left_rows, right_rows)
+        and np.array_equal(left.values[left_rows], right.values[right_rows])
+        and np.array_equal(left.weights[left_rows], right.weights[right_rows])
+    )
 
 
 def _term_evaluation_groups(
@@ -516,11 +542,7 @@ def _term_evaluation_groups(
         matched = None
         for candidate in buckets.get(digest, []):
             exemplar = candidate[0]
-            if (
-                np.array_equal(term.values, exemplar.values)
-                and np.array_equal(term.eligibility_mask, exemplar.eligibility_mask)
-                and np.array_equal(term.weights, exemplar.weights)
-            ):
+            if _terms_have_identical_support(term, exemplar):
                 matched = candidate
                 break
         if matched is None:
@@ -615,9 +637,9 @@ def _generate_session_plan_matrices(
     # Preserve the original small-fixture witness while avoiding a complete
     # row-frame scan for the 472,212-row production input.
     plan_groups = groups if groups.size <= 4_096 else session_labels
-    matrices: list[np.ndarray] = []
     immediate_preflight = groups.size <= 4_096
-    for block_length, child in zip(contract.block_lengths, children, strict=True):
+
+    def generate_one(block_length: int, child: np.random.SeedSequence) -> np.ndarray:
         rng = np.random.Generator(np.random.PCG64(child))
         matrix = np.empty(
             (contract.draws_per_block_length, session_count), dtype=dtype
@@ -625,9 +647,14 @@ def _generate_session_plan_matrices(
         for replicate_index in range(contract.draws_per_block_length):
             try:
                 plan = stationary_group_resample(plan_groups, block_length, rng)
-                multiplicities = apply_group_multiplicities(
-                    session_labels, unit_session_weights, plan
-                )
+                if immediate_preflight:
+                    multiplicities = apply_group_multiplicities(
+                        session_labels, unit_session_weights, plan
+                    )
+                else:
+                    multiplicities = np.asarray(
+                        plan.multiplicities, dtype=np.float64
+                    )
             except SpineError as exc:
                 raise SpineError(
                     f"Phase 8 block length {block_length}, replicate "
@@ -666,8 +693,17 @@ def _generate_session_plan_matrices(
                         "failed: weights must have strictly positive total mass"
                     )
         matrix.setflags(write=False)
-        matrices.append(matrix)
-    return tuple(matrices)
+        return matrix
+
+    pairs = tuple(zip(contract.block_lengths, children, strict=True))
+    if immediate_preflight:
+        return tuple(generate_one(block_length, child) for block_length, child in pairs)
+    with ThreadPoolExecutor(max_workers=len(pairs)) as executor:
+        futures = tuple(
+            executor.submit(generate_one, block_length, child)
+            for block_length, child in pairs
+        )
+        return tuple(future.result() for future in futures)
 
 
 def _evaluate_compiled_terms(
@@ -680,6 +716,43 @@ def _evaluate_compiled_terms(
         term_id: np.empty(draws, dtype=np.int64)
         for term_id in evaluation.term_ids
     }
+    if evaluation.eligible_values.size > 64:
+        bytes_per_draw = max(1, evaluation.eligible_values.size * 8)
+        batch_size = max(
+            1,
+            min(512, (32 * 1024 * 1024) // bytes_per_draw),
+        )
+        for start in range(0, draws, batch_size):
+            end = min(draws, start + batch_size)
+            with np.errstate(over="ignore", invalid="ignore"):
+                composed = np.multiply(
+                    evaluation.eligible_base_weights[np.newaxis, :],
+                    session_multiplicities[
+                        start:end, evaluation.eligible_session_indices
+                    ],
+                    dtype=np.float64,
+                )
+            if not bool(np.isfinite(composed).all()):
+                raise SpineError(
+                    f"Phase 8 block length {block_length}, replicate batch "
+                    f"{start}:{end}, term {evaluation.term_ids[0]!r} produced "
+                    "non-finite composed weights"
+                )
+            try:
+                ticks = weighted_quantiles_ticks_prepared_batch_fast(
+                    evaluation.prepared,
+                    composed,
+                    evaluation.statistics,
+                )
+            except SpineError as exc:
+                raise SpineError(
+                    f"Phase 8 block length {block_length}, replicate batch "
+                    f"{start}:{end}, term {evaluation.term_ids[0]!r} failed: {exc}"
+                ) from exc
+            for statistic_index, term_id in enumerate(evaluation.term_ids):
+                outputs[term_id][start:end] = ticks[:, statistic_index]
+        return outputs
+
     for replicate_index in range(draws):
         with np.errstate(over="ignore", invalid="ignore"):
             composed = np.multiply(
@@ -720,6 +793,19 @@ def _evaluate_compiled_terms(
     return outputs
 
 
+def _evaluate_compiled_chunk(
+    evaluations: tuple[_CompiledTermEvaluation, ...],
+    session_multiplicities: np.ndarray,
+    block_length: int,
+) -> tuple[dict[Hashable, np.ndarray], ...]:
+    return tuple(
+        _evaluate_compiled_terms(
+            evaluation, session_multiplicities, block_length
+        )
+        for evaluation in evaluations
+    )
+
+
 def joint_bootstrap_intervals(
     group_ids: Any,
     terms: Any,
@@ -745,67 +831,111 @@ def joint_bootstrap_intervals(
     }
     root = np.random.SeedSequence(contract.root_entropy)
     children = root.spawn(len(contract.block_lengths))
-
-    for block_index, (block_length, child) in enumerate(
-        zip(contract.block_lengths, children, strict=True)
-    ):
-        term_replicates: dict[Hashable, np.ndarray] = {}
-        for evaluation in compiled:
-            term_replicates.update(
-                _evaluate_compiled_terms(
-                    evaluation,
-                    plan_matrices[block_index],
-                    block_length,
-                )
-            )
-        request_replicates = np.empty(
-            (len(request_tuple), contract.draws_per_block_length),
-            dtype=np.int64,
+    use_processes = groups.size > 4_096 and len(compiled) > 1
+    process_executor = None
+    chunks: tuple[tuple[_CompiledTermEvaluation, ...], ...] = ()
+    if use_processes:
+        worker_count = min(_MAX_TERM_WORKERS, len(compiled))
+        chunk_size = (len(compiled) + worker_count - 1) // worker_count
+        chunks = tuple(
+            compiled[start : start + chunk_size]
+            for start in range(0, len(compiled), chunk_size)
         )
-        for request_index, request in enumerate(request_tuple):
-            if isinstance(request, BootstrapInteractionRequest):
-                first, second, third, fourth = (
-                    term_replicates[term_id] for term_id in request.term_ids
+        process_executor = ProcessPoolExecutor(max_workers=len(chunks))
+
+    try:
+        for block_index, (block_length, child) in enumerate(
+            zip(contract.block_lengths, children, strict=True)
+        ):
+            term_replicates: dict[Hashable, np.ndarray] = {}
+            if len(compiled) == 1:
+                evaluated = (
+                    _evaluate_compiled_terms(
+                        compiled[0], plan_matrices[block_index], block_length
+                    ),
                 )
-                request_replicates[request_index] = (
-                    first - second - third + fourth
+            elif process_executor is not None:
+                futures = tuple(
+                    process_executor.submit(
+                        _evaluate_compiled_chunk,
+                        chunk,
+                        plan_matrices[block_index],
+                        block_length,
+                    )
+                    for chunk in chunks
+                )
+                evaluated = tuple(
+                    output
+                    for future in futures
+                    for output in future.result()
                 )
             else:
-                target = term_replicates[request.target_term_id]
-                request_replicates[request_index] = (
-                    target
-                    if request.baseline_term_id is None
-                    else target - term_replicates[request.baseline_term_id]
-                )
-
-        for request_index, request in enumerate(request_tuple):
-            try:
-                raw_interval = percentile_interval(
-                    request_replicates[request_index], contract.confidence_level
-                )
-            except SpineError as exc:
-                raise SpineError(
-                    f"Phase 8 block length {block_length}, request "
-                    f"{request.request_id!r} interval failed: {exc}"
-                ) from exc
-            lower, upper = _interval_pair(raw_interval)
-            intervals_by_request[request.request_id].append(
-                BootstrapIntervalRow(
-                    request_id=request.request_id,
-                    mean_block_sessions=block_length,
-                    draws=contract.draws_per_block_length,
-                    confidence_level=contract.confidence_level,
-                    ci_lower_ticks=lower,
-                    ci_upper_ticks=upper,
-                    interval_valid=True,
-                    is_primary=block_length == contract.primary_block_length,
-                    rng_root_entropy=contract.root_entropy,
-                    rng_child_spawn_key=tuple(child.spawn_key),
-                    historical_mixture_disclosure=HISTORICAL_MIXTURE_DISCLOSURE,
-                    conditioner_uncertainty_disclosure=CONDITIONER_UNCERTAINTY_DISCLOSURE,
-                    weight_ess_disclosure=WEIGHT_ESS_DISCLOSURE,
-                )
+                with ThreadPoolExecutor(
+                    max_workers=min(_MAX_TERM_WORKERS, len(compiled))
+                ) as executor:
+                    futures = tuple(
+                        executor.submit(
+                            _evaluate_compiled_terms,
+                            evaluation,
+                            plan_matrices[block_index],
+                            block_length,
+                        )
+                        for evaluation in compiled
+                    )
+                    evaluated = tuple(future.result() for future in futures)
+            for term_output in evaluated:
+                term_replicates.update(term_output)
+            request_replicates = np.empty(
+                (len(request_tuple), contract.draws_per_block_length),
+                dtype=np.int64,
             )
+            for request_index, request in enumerate(request_tuple):
+                if isinstance(request, BootstrapInteractionRequest):
+                    first, second, third, fourth = (
+                        term_replicates[term_id] for term_id in request.term_ids
+                    )
+                    request_replicates[request_index] = (
+                        first - second - third + fourth
+                    )
+                else:
+                    target = term_replicates[request.target_term_id]
+                    request_replicates[request_index] = (
+                        target
+                        if request.baseline_term_id is None
+                        else target - term_replicates[request.baseline_term_id]
+                    )
+
+            for request_index, request in enumerate(request_tuple):
+                try:
+                    raw_interval = percentile_interval(
+                        request_replicates[request_index], contract.confidence_level
+                    )
+                except SpineError as exc:
+                    raise SpineError(
+                        f"Phase 8 block length {block_length}, request "
+                        f"{request.request_id!r} interval failed: {exc}"
+                    ) from exc
+                lower, upper = _interval_pair(raw_interval)
+                intervals_by_request[request.request_id].append(
+                    BootstrapIntervalRow(
+                        request_id=request.request_id,
+                        mean_block_sessions=block_length,
+                        draws=contract.draws_per_block_length,
+                        confidence_level=contract.confidence_level,
+                        ci_lower_ticks=lower,
+                        ci_upper_ticks=upper,
+                        interval_valid=True,
+                        is_primary=block_length == contract.primary_block_length,
+                        rng_root_entropy=contract.root_entropy,
+                        rng_child_spawn_key=tuple(child.spawn_key),
+                        historical_mixture_disclosure=HISTORICAL_MIXTURE_DISCLOSURE,
+                        conditioner_uncertainty_disclosure=CONDITIONER_UNCERTAINTY_DISCLOSURE,
+                        weight_ess_disclosure=WEIGHT_ESS_DISCLOSURE,
+                    )
+                )
+    finally:
+        if process_executor is not None:
+            process_executor.shutdown(wait=True, cancel_futures=False)
 
     results: list[RequestBootstrapResult] = []
     for request in request_tuple:

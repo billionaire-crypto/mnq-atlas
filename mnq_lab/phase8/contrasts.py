@@ -14,6 +14,7 @@ from mnq_lab.core.weights import (
     prepare_weighted_quantile_values,
     weighted_quantile,
     weighted_quantile_prepared,
+    weighted_quantiles_prepared_batch_fast,
     weighted_quantiles_prepared_fast,
 )
 
@@ -55,6 +56,7 @@ __all__ = [
     "tick_contrast",
     "weighted_quantile_ticks",
     "weighted_quantiles_ticks_prepared_fast",
+    "weighted_quantiles_ticks_prepared_batch_fast",
 ]
 
 
@@ -294,6 +296,35 @@ def weighted_quantiles_ticks_prepared_fast(
         probabilities,
     )
     return tuple(_exact_tick_quantile(value) for value in raw)
+
+
+def weighted_quantiles_ticks_prepared_batch_fast(
+    prepared: PreparedTickQuantileValues,
+    weights: Any,
+    statistics: Any,
+) -> np.ndarray:
+    """Evaluate one exact statistic tuple for several replicate weight rows."""
+    if not isinstance(prepared, PreparedTickQuantileValues):
+        raise SpineError("fast tick quantiles require prepared signed int32 values")
+    try:
+        names = tuple(statistics)
+    except TypeError as exc:
+        raise SpineError("statistics must be a finite sequence") from exc
+    if not names:
+        raise SpineError("statistics must contain at least one frozen statistic")
+    probabilities = tuple(statistic_probability(name) for name in names)
+    raw = weighted_quantiles_prepared_batch_fast(
+        prepared.prepared,
+        weights,
+        probabilities,
+    )
+    output = np.empty(raw.shape, dtype=np.int64)
+    for row_index in range(raw.shape[0]):
+        for statistic_index in range(raw.shape[1]):
+            output[row_index, statistic_index] = _exact_tick_quantile(
+                raw[row_index, statistic_index]
+            )
+    return output
 
 
 def tick_contrast(

@@ -56,6 +56,14 @@ def test_input_manifest_is_not_opened_until_ratification_passes(monkeypatch):
 
 def test_worker_count_and_explicit_start_method_reach_process_executor(monkeypatch):
     monkeypatch.setattr(uncertainty_module, "DRAWS_PER_BLOCK_LENGTH", 1)
+    monkeypatch.setattr(
+        uncertainty_module,
+        "percentile_interval",
+        lambda replicate_statistics, confidence_level: (
+            replicate_statistics[0],
+            replicate_statistics[0],
+        ),
+    )
     groups = np.repeat(np.arange(6, dtype=np.int32), 700)
     values = np.tile(np.arange(700, dtype=np.int32), 6)
     terms = []
@@ -101,3 +109,42 @@ def test_invalid_worker_and_start_method_halt_before_bootstrap():
     with pytest.raises(SpineError, match="process start method"):
         RunnerOperatingConfig(process_start_method="platform-default")
 
+
+def test_checkpoint_chunks_reuse_one_frozen_19996_plan_set(monkeypatch):
+    monkeypatch.setattr(uncertainty_module, "DRAWS_PER_BLOCK_LENGTH", 999)
+    groups = np.repeat(np.arange(3, dtype=np.int32), 2)
+    mask = np.ones(groups.size, dtype=np.bool_)
+    weights = np.full(groups.size, 1 / groups.size)
+    terms = tuple(
+        BootstrapQuantileTerm(
+            f"shared-plan-{index}",
+            np.arange(groups.size, dtype=np.int32) + index,
+            mask,
+            weights,
+            "q50",
+        )
+        for index in range(2)
+    )
+    requests = tuple(
+        BootstrapIntervalRequest(f"shared-request-{index}", term.term_id, None, _ok())
+        for index, term in enumerate(terms)
+    )
+    calls = 0
+    original = uncertainty_module.stationary_group_resample
+
+    def count_plan(*args):
+        nonlocal calls
+        calls += 1
+        return original(*args)
+
+    monkeypatch.setattr(uncertainty_module, "stationary_group_resample", count_plan)
+    plans = uncertainty_module._prepare_joint_plan_matrices(groups, terms)
+    first = uncertainty_module._joint_bootstrap_intervals_with_plan_matrices(
+        groups, terms[:1], requests[:1], plans
+    )
+    second = uncertainty_module._joint_bootstrap_intervals_with_plan_matrices(
+        groups, terms[1:], requests[1:], plans
+    )
+    assert calls == 4 * 999
+    assert first.requests[0].request_id == "shared-request-0"
+    assert second.requests[0].request_id == "shared-request-1"

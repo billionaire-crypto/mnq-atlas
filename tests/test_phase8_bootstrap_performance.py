@@ -126,6 +126,26 @@ def test_three_statistics_collapse_to_one_distinct_support_evaluation():
     assert distinct_bootstrap_evaluations(terms) == 5
 
 
+def test_distinct_evaluations_ignore_values_outside_the_declared_support():
+    mask = np.asarray([True, False, True, False], dtype=np.bool_)
+    weights = np.asarray([0.5, 0.0, 0.5, 0.0])
+    first = BootstrapQuantileTerm(
+        "outside-first",
+        np.asarray([1, -2_000_000_000, 9, 2_000_000_000], dtype=np.int32),
+        mask,
+        weights,
+        "q50",
+    )
+    second = BootstrapQuantileTerm(
+        "outside-second",
+        np.asarray([1, 777, 9, -888], dtype=np.int32),
+        mask,
+        weights,
+        "q90",
+    )
+    assert distinct_bootstrap_evaluations((first, second)) == 1
+
+
 def test_optimized_engine_passes_only_eligible_rows_to_quantile_evaluation(
     monkeypatch,
 ):

@@ -487,6 +487,8 @@ def evaluate_ratification_certificate(
             "reproduction evidence",
         )
         comparison = _resolve_repo_path(repo, reproduction["tree_path"], "comparison tree path")
+        if comparison == tree:
+            raise SpineError("reproduction must be a distinct rerun tree")
         if reproduction["tree_sha256"] != _tree_sha256(comparison):
             raise SpineError("comparison tree identity differs")
         if reproduction["environment_fingerprint"] != certificate["environment_fingerprint"]:

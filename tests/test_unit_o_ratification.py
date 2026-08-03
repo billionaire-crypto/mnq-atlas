@@ -343,6 +343,22 @@ def test_c5_refuses_certificate_hashes_that_do_not_match_tree_bytes(tmp_path):
     assert "C5" in evaluate_ratification_certificate(certificate, repo_root=repo).failures
 
 
+def test_c5_refuses_self_comparison_disguised_as_a_rerun(tmp_path):
+    repo, tree, certificate = _build_case(tmp_path)
+    columns = ratification._scientific_columns(tree)
+    _mutate_certificate(
+        certificate,
+        lambda value: value["reproduction"].update(
+            {
+                "tree_path": tree.relative_to(repo).as_posix(),
+                "tree_sha256": ratification._tree_sha256(tree),
+                "scientific_columns": columns,
+            }
+        ),
+    )
+    assert "C5" in evaluate_ratification_certificate(certificate, repo_root=repo).failures
+
+
 def test_certificate_for_a_different_tree_or_commit_is_refused(tmp_path):
     repo, tree, certificate = _build_case(tmp_path)
     other = repo / "artifacts/other"

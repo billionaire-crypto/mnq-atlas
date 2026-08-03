@@ -117,7 +117,7 @@ def test_interaction_literals_and_inventory_are_exact_with_seven_eight_split():
         and spec.path_estimand == "fully_labeled_1m_grid"
         and spec.support_kind == "horizon_specific"
         and spec.horizon_minutes == 15
-        and spec.population_estimand == "prospective_cell"
+        and spec.population_estimand == "common_session_paired"
     )
     assert len(fixed_slice) == 30
     for statistic in INTERACTION_STATISTICS:
@@ -316,7 +316,7 @@ def test_lattice_assembly_emits_every_row_and_rejects_one_missing_cell():
         and spec.path_estimand == "fully_labeled_1m_grid"
         and spec.support_kind == "horizon_specific"
         and spec.horizon_minutes == 15
-        and spec.population_estimand == "prospective_cell"
+        and spec.population_estimand == "common_session_paired"
     )
     support_by_target = {}
     evaluations = {}

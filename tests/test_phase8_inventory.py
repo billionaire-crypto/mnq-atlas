@@ -48,7 +48,7 @@ def test_primary_arm_has_the_complete_hard_counted_inventory():
     # 2 outcomes x 2 path estimands x 2 support kinds x 3 horizons x
     # 3 statistics x 3 population estimands x 15 target cells x
     # (1 absolute weighting + 4 contrasts x 2 comparative weightings).
-    assert len(primary) == 14_580
+    assert len(primary) == 29_160
     assert {row.outcome_name for row in primary} == {
         "downward_excursion_ticks",
         "upward_excursion_ticks",

@@ -12,7 +12,7 @@ import numpy as np
 from mnq_lab import SpineError
 from mnq_lab.constants import load_completion_thresholds, load_constants
 from mnq_lab.core.weights import session_equal_weights, weight_ess
-from mnq_lab.phase8.contrasts import CellKey
+from mnq_lab.phase8.contrasts import CellKey, contrast_support
 from mnq_lab.phase8.estimands import ESTIMAND_NAMES
 
 STATUS_PRECEDENCE = (
@@ -441,6 +441,8 @@ def _positivity_thresholds(path: Path | None) -> PositivityThresholds:
 def positivity_diagnostics(
     *,
     strata: Any,
+    target: CellKey,
+    contrast_name: Any,
     population_estimand: Any,
     quarter_unsupported_target_mass: Any = 0.0,
     constants_path: Path | None = None,
@@ -456,8 +458,14 @@ def positivity_diagnostics(
     if not inputs or any(not isinstance(item, PositivityStratumInput) for item in inputs):
         raise SpineError("strata must contain PositivityStratumInput values")
     keys = tuple(item.stratum for item in inputs)
-    if len(set(keys)) != len(keys):
-        raise SpineError("positivity strata must be unique")
+    declared = contrast_support(target, contrast_name).baseline_cells
+    if not declared:
+        raise SpineError("positivity baseline support is not applicable to absolute_distribution")
+    if keys != declared:
+        raise SpineError(
+            "positivity strata must exactly equal the declared comparison support "
+            "in structural order"
+        )
 
     if isinstance(quarter_unsupported_target_mass, (bool, np.bool_)) or not isinstance(
         quarter_unsupported_target_mass, Real

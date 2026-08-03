@@ -216,3 +216,34 @@ def test_alternative_status_row_requires_and_carries_its_phase7_migration_diagno
         migration_by_arm={alternative.arm_id: migration},
     )
     assert assembled[0].migration_diagnostics is migration
+
+
+@pytest.mark.parametrize(
+    ("migration", "message"),
+    [
+        pytest.param(object(), "wrong type", id="non-migration-object"),
+        pytest.param(
+            _migration_summary(ALTERNATIVE_ARM_IDS[1]),
+            "arm keys differ",
+            id="migration-from-a-different-alternative-arm",
+        ),
+    ],
+)
+def test_alternative_status_row_rejects_planted_wrong_migration_evidence(
+    migration, message
+):
+    alternative = next(
+        row for row in declared_result_rows() if row.arm_id == ALTERNATIVE_ARM_IDS[0]
+    )
+    ok = status_decision(
+        degenerate_baseline=False,
+        insufficient_anchors=False,
+        insufficient_completion=False,
+        insufficient_overlap=False,
+    )
+    with pytest.raises(SpineError, match=message):
+        assemble_status_rows(
+            (alternative,),
+            {alternative: ok},
+            migration_by_arm={alternative.arm_id: migration},
+        )

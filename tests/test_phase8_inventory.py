@@ -6,6 +6,7 @@ import pytest
 
 from mnq_lab import SpineError
 from mnq_lab.conditioners.arms import ARM_CONFIGS
+from mnq_lab.conditioners.assignments import MigrationCell, MigrationSummary
 from mnq_lab.phase8.contrasts import CellKey
 from mnq_lab.phase8.diagnostics import status_decision
 from mnq_lab.phase8.inventory import (
@@ -174,3 +175,44 @@ def test_status_row_assembly_preserves_declaration_order_and_statuses_every_cell
     )
     assert tuple(row.spec for row in assembled) == declared
     assert all(row.status.status == "ok" for row in assembled)
+
+
+def _migration_summary(arm_id):
+    counts = {(0, 1): 1, (1, -1): 2, (-1, 2): 3}
+    cells = tuple(
+        MigrationCell(left, right, counts.get((left, right), 0))
+        for left in (-1, 0, 1, 2)
+        for right in (-1, 0, 1, 2)
+    )
+    return MigrationSummary(
+        PRIMARY_ARM_ID,
+        arm_id,
+        cells,
+        common_defined=1,
+        changed_defined=1,
+        changed_fraction=1.0,
+        primary_defined_alternative_undefined=2,
+        primary_undefined_alternative_defined=3,
+    )
+
+
+def test_alternative_status_row_requires_and_carries_its_phase7_migration_diagnostic():
+    alternative = next(
+        row for row in declared_result_rows() if row.arm_id == ALTERNATIVE_ARM_IDS[0]
+    )
+    ok = status_decision(
+        degenerate_baseline=False,
+        insufficient_anchors=False,
+        insufficient_completion=False,
+        insufficient_overlap=False,
+    )
+    with pytest.raises(SpineError, match="missing Phase 7 migration diagnostic"):
+        assemble_status_rows((alternative,), {alternative: ok})
+
+    migration = _migration_summary(alternative.arm_id)
+    assembled = assemble_status_rows(
+        (alternative,),
+        {alternative: ok},
+        migration_by_arm={alternative.arm_id: migration},
+    )
+    assert assembled[0].migration_diagnostics is migration

@@ -1126,3 +1126,57 @@ issued, and this disclosure may not be removed.
 
 **Status:** `RESOLVED`. Authorizes the validator correction and the honest
 relabelling. It ratifies no tree and authorizes no Phase 8 execution.
+---
+
+## D24 - Phase 8 contrast-table path-estimand key - `RESOLVED`
+
+**The ambiguity.** Phase 8 preregistration section 14.1 declares one contrast
+row per arm, outcome, support kind, horizon, quantile, contrast, population
+estimand, contrast weighting, target phase and target state, and its literal
+column list omits the Unit O path estimand. Sections 5.3 and 8 require Phase 8
+eligibility and completion to be evaluated for the named path estimand, while
+section 14.3 explicitly includes path estimand in the day-type row key. The
+frozen corpus therefore does not uniquely determine whether the contrast table
+collapses the two path estimands or carries them as distinct rows.
+
+**Evidence.** The independent P8-B audit verified from the Unit O manifest that
+its first key column is `estimand`. Unit O therefore supplies distinct outcome
+rows for `fully_labeled_1m_grid` and `observed_bar_path`. Without a
+path-estimand contrast-table key, those two declared inputs would create pairs
+of Phase 8 rows identical on every section 14.1 key column but potentially
+different in value. An immutable tidy table could not represent that result
+without duplicate keys or silently collapsing one path estimand.
+
+**Ruling.** `path_estimand` is a Phase 8 contrast-table row axis. In the section
+14.1 schema it is placed immediately after `outcome_name`. The unique row-key
+prefix is therefore:
+
+```text
+arm_id, outcome_name, path_estimand, support_kind, horizon_minutes, statistic,
+contrast_name, population_estimand, contrast_weighting,
+target_phase, target_vol_tercile
+```
+
+The full primary inventory is consequently 29,160 rows: two outcomes by two
+path estimands by two support kinds by three horizons by three statistics by
+three population estimands by fifteen target cells by the nine declared
+contrast/weighting combinations. The existing implementation and inventory are
+retained; no result was computed and no outcome value was inspected to make
+this ruling.
+
+**Timing and correction disclosure.** This ambiguity was resolved during P8-B
+implementation, not before it. The tests-first oracle initially asserted
+14,580 primary rows at commit `49767d2`, then was revised to 29,160 at commit
+`10e718f` before production implementation. The revision was initially
+described too strongly as contract-derived. It becomes binding only through
+this recorded ruling. The P8-B audit correctly returned `OPEN` until the
+omitted schema column and the timing of the decision were made explicit.
+
+**Governance.** This appended resolution does not edit the byte-pinned Phase 8
+preregistration, any frozen specification, YAML value, ledger entry, accepted
+calendar, closeout or historical discrepancy text. It fixes the executable
+contrast-table key before Step 5 and before any real Phase 8 outcome is
+consumed.
+
+**Status:** `RESOLVED`. The `path_estimand` axis and 29,160-row primary
+inventory are now explicit; P8-C may build only against this settled key.

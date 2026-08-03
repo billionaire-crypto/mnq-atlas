@@ -109,9 +109,17 @@ def test_extreme_but_not_total_year_concentration_has_no_invented_cutoff():
     assert result.breaches == ()
 
 
-def _supported_stratum(*, target_mass=1.0):
+POSITIVITY_TARGET = CellKey("midday", "mid")
+POSITIVITY_CONTRAST = "vol_effect_given_phase"
+POSITIVITY_BASELINE_CELLS = (
+    CellKey("midday", "low"),
+    CellKey("midday", "high"),
+)
+
+
+def _supported_stratum(index, *, target_mass=0.5):
     return PositivityStratumInput(
-        stratum=CellKey("open", "low"),
+        stratum=POSITIVITY_BASELINE_CELLS[index],
         target_weights=np.asarray([target_mass], dtype=np.float64),
         baseline_session_ids=tuple(range(50)),
     )
@@ -119,7 +127,9 @@ def _supported_stratum(*, target_mass=1.0):
 
 def test_positivity_inclusive_maxima_pass_at_exactly_point_zero_two_and_point_zero_five():
     result = positivity_diagnostics(
-        strata=(_supported_stratum(),),
+        strata=(_supported_stratum(0), _supported_stratum(1)),
+        target=POSITIVITY_TARGET,
+        contrast_name=POSITIVITY_CONTRAST,
         population_estimand="standardized_shared_population",
         quarter_unsupported_target_mass=0.05,
     )
@@ -144,11 +154,14 @@ def test_positivity_inclusive_minima_do_not_breach_at_thirty_anchors_and_twenty_
     result = positivity_diagnostics(
         strata=(
             PositivityStratumInput(
-                stratum=CellKey("open", "low"),
+                stratum=POSITIVITY_BASELINE_CELLS[0],
                 target_weights=np.asarray([1.0]),
                 baseline_session_ids=baseline_sessions,
             ),
+            _supported_stratum(1, target_mass=0.0),
         ),
+        target=POSITIVITY_TARGET,
+        contrast_name=POSITIVITY_CONTRAST,
         population_estimand="prospective_cell",
     )
 
@@ -168,11 +181,14 @@ def test_positivity_weight_cv_equality_at_two_passes_inclusively():
     result = positivity_diagnostics(
         strata=(
             PositivityStratumInput(
-                stratum=CellKey("open", "low"),
+                stratum=POSITIVITY_BASELINE_CELLS[0],
                 target_weights=np.asarray([1.0]),
                 baseline_session_ids=baseline_sessions,
             ),
+            _supported_stratum(1, target_mass=0.0),
         ),
+        target=POSITIVITY_TARGET,
+        contrast_name=POSITIVITY_CONTRAST,
         population_estimand="prospective_cell",
     )
 
@@ -183,13 +199,15 @@ def test_positivity_weight_cv_equality_at_two_passes_inclusively():
 def test_positivity_unsupported_target_mass_equality_does_not_add_a_boundary_breach():
     result = positivity_diagnostics(
         strata=(
-            _supported_stratum(target_mass=0.95),
+            _supported_stratum(0, target_mass=0.95),
             PositivityStratumInput(
-                stratum=CellKey("morning", "low"),
+                stratum=POSITIVITY_BASELINE_CELLS[1],
                 target_weights=np.asarray([0.05]),
                 baseline_session_ids=(),
             ),
         ),
+        target=POSITIVITY_TARGET,
+        contrast_name=POSITIVITY_CONTRAST,
         population_estimand="prospective_cell",
     )
 
@@ -203,11 +221,14 @@ def test_positivity_uses_session_equal_weights_inside_the_stratum():
     result = positivity_diagnostics(
         strata=(
             PositivityStratumInput(
-                stratum=CellKey("open", "low"),
+                stratum=POSITIVITY_BASELINE_CELLS[0],
                 target_weights=np.asarray([1.0]),
                 baseline_session_ids=(0, 0, 0, *range(1, 50)),
             ),
+            _supported_stratum(1, target_mass=0.0),
         ),
+        target=POSITIVITY_TARGET,
+        contrast_name=POSITIVITY_CONTRAST,
         population_estimand="prospective_cell",
     )
 
@@ -223,13 +244,15 @@ def test_positivity_uses_session_equal_weights_inside_the_stratum():
 def test_positivity_unsupported_mass_uses_target_weight_not_baseline_frequency():
     result = positivity_diagnostics(
         strata=(
-            _supported_stratum(target_mass=0.8),
+            _supported_stratum(0, target_mass=0.8),
             PositivityStratumInput(
-                stratum=CellKey("morning", "low"),
+                stratum=POSITIVITY_BASELINE_CELLS[1],
                 target_weights=np.asarray([0.2]),
                 baseline_session_ids=tuple(range(19)),
             ),
         ),
+        target=POSITIVITY_TARGET,
+        contrast_name=POSITIVITY_CONTRAST,
         population_estimand="prospective_cell",
     )
 
@@ -246,11 +269,14 @@ def test_positivity_empty_support_is_invalid_not_zero_cv():
     result = positivity_diagnostics(
         strata=(
             PositivityStratumInput(
-                stratum=CellKey("open", "low"),
+                stratum=POSITIVITY_BASELINE_CELLS[0],
                 target_weights=np.asarray([1.0]),
                 baseline_session_ids=(),
             ),
+            _supported_stratum(1, target_mass=0.0),
         ),
+        target=POSITIVITY_TARGET,
+        contrast_name=POSITIVITY_CONTRAST,
         population_estimand="prospective_cell",
     )
 
@@ -267,11 +293,14 @@ def test_positivity_cv_breach_is_not_repaired_or_clipped():
     result = positivity_diagnostics(
         strata=(
             PositivityStratumInput(
-                stratum=CellKey("open", "low"),
+                stratum=POSITIVITY_BASELINE_CELLS[0],
                 target_weights=np.asarray([1.0]),
                 baseline_session_ids=(0,) * 1000 + tuple(range(1, 50)),
             ),
+            _supported_stratum(1, target_mass=0.0),
         ),
+        target=POSITIVITY_TARGET,
+        contrast_name=POSITIVITY_CONTRAST,
         population_estimand="prospective_cell",
     )
 
@@ -316,9 +345,32 @@ def test_missing_positivity_threshold_has_no_fallback(tmp_path):
     )
     with pytest.raises(SpineError, match="exactly the keys"):
         positivity_diagnostics(
-            strata=(_supported_stratum(),),
+            strata=(_supported_stratum(0), _supported_stratum(1)),
+            target=POSITIVITY_TARGET,
+            contrast_name=POSITIVITY_CONTRAST,
             population_estimand="prospective_cell",
             constants_path=constants,
+        )
+
+
+def test_positivity_rejects_a_planted_mismatched_comparison_set():
+    with pytest.raises(SpineError, match="declared comparison support"):
+        positivity_diagnostics(
+            strata=(
+                PositivityStratumInput(
+                    stratum=CellKey("open", "low"),
+                    target_weights=np.asarray([0.5]),
+                    baseline_session_ids=tuple(range(50)),
+                ),
+                PositivityStratumInput(
+                    stratum=CellKey("close", "high"),
+                    target_weights=np.asarray([0.5]),
+                    baseline_session_ids=tuple(range(50)),
+                ),
+            ),
+            target=POSITIVITY_TARGET,
+            contrast_name=POSITIVITY_CONTRAST,
+            population_estimand="prospective_cell",
         )
 
 

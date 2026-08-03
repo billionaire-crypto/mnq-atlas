@@ -8,6 +8,7 @@ resolves the one canonical exploration input and one derived-artifact root.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import gc
 import hashlib
 import json
 import os
@@ -22,8 +23,7 @@ from mnq_lab import SpineError
 from mnq_lab.conditioners.arms import ARM_CONFIGS
 from mnq_lab.conditioners.artifacts import (
     ANCHOR_SCALE_SCHEMA,
-    build_phase7_artifact_bundle,
-    write_phase7_artifacts,
+    write_phase7_artifacts_streaming,
 )
 from mnq_lab.conditioners.calendar import (
     CALENDAR_SHA256,
@@ -54,6 +54,7 @@ from mnq_lab.conditioners.state_validity import (
     NON_OK_STATUS_ORDER,
     ArmStateDiagnostic,
     StateAnchorDiagnostic,
+    StateValidityPanel,
     build_state_validity_panel,
 )
 from mnq_lab.conditioners.status import (
@@ -85,6 +86,8 @@ from mnq_lab.spine.timemodel import TimeModel
 
 RUN_SCHEMA_VERSION = "phase7-unit-o-mechanical-shakedown-v1"
 RUN_MANIFEST_NAME = "run_manifest.json"
+PEAK_MEMORY_CEILING_BYTES = 6_442_450_944
+FREE_MEMORY_PREFLIGHT_BYTES = 4_294_967_296
 CANONICAL_STORE_ROOT = store_path(REPO_ROOT / "data", Corpus.EXPLORATION, "5m")
 OUTPUT_ROOT = (
     REPO_ROOT
@@ -178,10 +181,9 @@ GATE_CLASSIFICATION = (
 @dataclass(frozen=True)
 class Phase7Product:
     grid_rows: int
-    scale_tables: Mapping[str, ScaleAnchorTable]
+    anchor_scale_columns: Mapping[str, np.ndarray]
     pipeline: Phase7ConditionerPipeline
-    bundle: Any
-    completion_frame: Any
+    state_validity: StateValidityPanel
     completion_diagnostic: dict[str, Any]
     phase7_status_counts: dict[str, dict[str, int]]
     row_counts: dict[str, int]
@@ -660,17 +662,25 @@ def _build_phase7_product(
         pipeline, runtime, completion_frame
     )
     panel = build_state_validity_panel(pipeline, diagnostics, arm_diagnostics)
-    bundle = build_phase7_artifact_bundle(anchor_columns, pipeline, panel)
     row_counts = {
         "declared_grid": int(len(grid)),
-        **{name: table.row_count for name, table in bundle.tables.items()},
+        "anchor_scales": len(next(iter(anchor_columns.values()))),
+        "seasonal_profiles": sum(
+            len(table.rows) for table in pipeline.seasonal_profiles.values()
+        ),
+        "thresholds": sum(
+            len(table.rows) for table in pipeline.threshold_tables.values()
+        ),
+        "assignments": sum(
+            len(table.rows) for table in pipeline.assignment_tables.values()
+        ),
+        "state_validity": len(panel.rows),
     }
     return Phase7Product(
         grid_rows=int(len(grid)),
-        scale_tables=tables,
+        anchor_scale_columns=anchor_columns,
         pipeline=pipeline,
-        bundle=bundle,
-        completion_frame=completion_frame,
+        state_validity=panel,
         completion_diagnostic=_completion_diagnostic(completion_frame, time_model),
         phase7_status_counts=_phase7_status_counts(anchor_columns, pipeline),
         row_counts=row_counts,
@@ -798,9 +808,11 @@ def _begin_stage(
 ) -> dict[str, Any]:
     _require_absent(stage_root, "shakedown staging root")
     stage_root.mkdir(parents=True)
-    write_phase7_artifacts(
+    write_phase7_artifacts_streaming(
         stage_root / "phase7",
-        product.bundle,
+        product.anchor_scale_columns,
+        product.pipeline,
+        product.state_validity,
         source_build_id=str(store.manifest["build_id"]),
         environment=environment,
     )
@@ -894,7 +906,8 @@ def _finalize_staged_run(
     final_root: Path,
     *,
     store: BarStore,
-    product: Phase7Product,
+    phase7_row_counts: Mapping[str, int],
+    phase7_status_counts: Mapping[str, Mapping[str, int]],
     outcome_row_count: int,
     staged: Mapping[str, Any],
     stage_seconds: Mapping[str, float],
@@ -908,12 +921,16 @@ def _finalize_staged_run(
     verified = _validate_artifact_tree(
         stage_root,
         expected_source_manifest_sha256=source_manifest_sha,
-        expected_phase7_rows=product.row_counts,
+        expected_phase7_rows=phase7_row_counts,
         expected_outcome_rows=outcome_row_count,
     )
     unit_manifest = _load_canonical_manifest(stage_root / "unit_o" / "manifest.json")
-    row_counts = dict(product.row_counts)
+    row_counts = dict(phase7_row_counts)
     row_counts["unit_o"] = int(outcome_row_count)
+    peak_memory_bytes = max(
+        int(peak_memory_bytes),
+        _enforce_peak_memory_ceiling("finalization validation"),
+    )
     manifest = {
         "schema_version": RUN_SCHEMA_VERSION,
         "admissibility": "NON-ADMISSIBLE DIAGNOSTIC ARTIFACTS",
@@ -928,7 +945,9 @@ def _finalize_staged_run(
         "source_trade_date_last": int(store.manifest["trade_date_last"]),
         "row_counts": row_counts,
         "year_diagnostic_rows": int(staged["completion_diagnostic_rows"]),
-        "phase7_status_counts": product.phase7_status_counts,
+        "phase7_status_counts": {
+            name: dict(counts) for name, counts in phase7_status_counts.items()
+        },
         "unit_o_status_counts": unit_manifest["status_counts"],
         "artifact_manifest_sha256": {
             "phase7": verified["phase7_manifest_sha256"],
@@ -942,7 +961,7 @@ def _finalize_staged_run(
     }
     _validate_run_manifest(
         manifest,
-        expected_year_rows=len(product.completion_diagnostic["rows"]),
+        expected_year_rows=int(staged["completion_diagnostic_rows"]),
     )
     manifest_path = stage_root / RUN_MANIFEST_NAME
     manifest_path.write_bytes(_canonical_json_bytes(manifest))
@@ -1002,6 +1021,73 @@ def _peak_process_memory_bytes() -> int:
     return maximum * (1024 if sys.platform != "darwin" else 1)
 
 
+def _free_physical_memory_bytes() -> int:
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        class _MemoryStatusEx(ctypes.Structure):
+            _fields_ = [
+                ("dw_length", wintypes.DWORD),
+                ("dw_memory_load", wintypes.DWORD),
+                ("ull_total_phys", ctypes.c_ulonglong),
+                ("ull_avail_phys", ctypes.c_ulonglong),
+                ("ull_total_page_file", ctypes.c_ulonglong),
+                ("ull_avail_page_file", ctypes.c_ulonglong),
+                ("ull_total_virtual", ctypes.c_ulonglong),
+                ("ull_avail_virtual", ctypes.c_ulonglong),
+                ("ull_avail_extended_virtual", ctypes.c_ulonglong),
+            ]
+
+        memory_status = _MemoryStatusEx()
+        memory_status.dw_length = ctypes.sizeof(memory_status)
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        global_memory_status_ex = kernel32.GlobalMemoryStatusEx
+        global_memory_status_ex.argtypes = [ctypes.POINTER(_MemoryStatusEx)]
+        global_memory_status_ex.restype = wintypes.BOOL
+        ctypes.set_last_error(0)
+        ok = global_memory_status_ex(ctypes.byref(memory_status))
+        if not ok:
+            error_code = ctypes.get_last_error()
+            raise SpineError(
+                "cannot read free physical memory "
+                f"(Windows error {error_code})"
+            )
+        available = int(memory_status.ull_avail_phys)
+    else:
+        try:
+            available_pages = int(os.sysconf("SC_AVPHYS_PAGES"))
+            page_size = int(os.sysconf("SC_PAGE_SIZE"))
+        except (AttributeError, OSError, TypeError, ValueError) as exc:
+            raise SpineError("cannot read free physical memory") from exc
+        available = available_pages * page_size
+    if available <= 0:
+        raise SpineError("free physical memory must be a positive byte count")
+    return available
+
+
+def _enforce_peak_memory_ceiling(stage: str) -> int:
+    if not isinstance(stage, str) or not stage:
+        raise SpineError("memory checkpoint stage must be a nonempty string")
+    peak = _peak_process_memory_bytes()
+    if peak > PEAK_MEMORY_CEILING_BYTES:
+        raise SpineError(
+            f"shakedown peak memory {peak} exceeds the fixed "
+            f"{PEAK_MEMORY_CEILING_BYTES}-byte ceiling after {stage}"
+        )
+    return peak
+
+
+def _enforce_free_memory_preflight() -> int:
+    available = _free_physical_memory_bytes()
+    if available < FREE_MEMORY_PREFLIGHT_BYTES:
+        raise SpineError(
+            f"free-physical-memory preflight found {available} bytes, below the "
+            f"fixed {FREE_MEMORY_PREFLIGHT_BYTES}-byte minimum"
+        )
+    return available
+
+
 def run_shakedown() -> dict[str, Any]:
     """Execute the one authorized exploration-only mechanical shakedown."""
     output_root = _validate_output_root(OUTPUT_ROOT)
@@ -1011,7 +1097,8 @@ def run_shakedown() -> dict[str, Any]:
     environment = environment_fingerprint(REPO_ROOT)
     if not environment.get("commit") or environment.get("dirty") is not False:
         raise SpineError("shakedown requires a clean committed worktree")
-    _peak_process_memory_bytes()
+    _enforce_peak_memory_ceiling("preflight")
+    _enforce_free_memory_preflight()
 
     started = time.perf_counter()
     timings: dict[str, float] = {}
@@ -1023,38 +1110,53 @@ def run_shakedown() -> dict[str, Any]:
     bars = validate_exploration_store(store)
     calendar = load_accepted_calendar()
     timings["source_validation"] = time.perf_counter() - mark
+    _enforce_peak_memory_ceiling("source validation")
 
     mark = time.perf_counter()
     product = _build_phase7_product(store, bars, calendar)
     timings["phase7_compute"] = time.perf_counter() - mark
+    _enforce_peak_memory_ceiling("Phase 7 compute")
 
     mark = time.perf_counter()
     staged = _begin_stage(staging_root, store, product, environment=environment)
     _validate_phase7_tree(staging_root / "phase7", product.row_counts)
     timings["phase7_write_and_verify"] = time.perf_counter() - mark
+    phase7_row_counts = dict(product.row_counts)
+    phase7_status_counts = {
+        name: dict(counts) for name, counts in product.phase7_status_counts.items()
+    }
+    del product, bars, calendar
+    gc.collect()
+    _enforce_peak_memory_ceiling("Phase 7 write and release")
 
     mark = time.perf_counter()
     outcomes = build_outcome_table(store)
     timings["unit_o_compute"] = time.perf_counter() - mark
+    _enforce_peak_memory_ceiling("Unit O compute")
 
     mark = time.perf_counter()
     _complete_stage(staging_root, store, outcomes, environment=environment)
+    outcome_row_count = outcomes.row_count
+    del outcomes
+    gc.collect()
+    _enforce_peak_memory_ceiling("Unit O write and release")
     _validate_artifact_tree(
         staging_root,
         expected_source_manifest_sha256=_sha256_file(store.root / "manifest.json"),
-        expected_phase7_rows=product.row_counts,
-        expected_outcome_rows=outcomes.row_count,
+        expected_phase7_rows=phase7_row_counts,
+        expected_outcome_rows=outcome_row_count,
     )
     timings["unit_o_write_and_full_verify"] = time.perf_counter() - mark
     timings["total"] = time.perf_counter() - started
-    peak_memory = _peak_process_memory_bytes()
+    peak_memory = _enforce_peak_memory_ceiling("full artifact validation")
 
     return _finalize_staged_run(
         staging_root,
         output_root,
         store=store,
-        product=product,
-        outcome_row_count=outcomes.row_count,
+        phase7_row_counts=phase7_row_counts,
+        phase7_status_counts=phase7_status_counts,
+        outcome_row_count=outcome_row_count,
         staged=staged,
         stage_seconds=timings,
         peak_memory_bytes=peak_memory,

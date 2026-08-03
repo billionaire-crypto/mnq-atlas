@@ -5,9 +5,14 @@ from __future__ import annotations
 from dataclasses import replace
 from types import MappingProxyType
 
+import pytest
+import numpy as np
+
+from mnq_lab import SpineError
 from mnq_lab.conditioners.artifacts import (
     build_phase7_artifact_bundle,
     write_phase7_artifacts,
+    write_phase7_artifacts_streaming,
 )
 from mnq_lab.conditioners.assignments import ThresholdTable
 from mnq_lab.conditioners.pipeline import Phase7ConditionerPipeline
@@ -79,18 +84,17 @@ def _mutated_seasonal_pipeline(
 def test_complete_phase7_artifact_tree_is_byte_identical_and_can_fail(tmp_path):
     _, _, _, compact_pipeline = synthetic_pipeline(65)
     legacy_pipeline = _legacy_clone(compact_pipeline)
-    compact_bundle = build_phase7_artifact_bundle(
-        _anchor_columns(), compact_pipeline, _panel()
-    )
     legacy_bundle = build_phase7_artifact_bundle(
         _anchor_columns(), legacy_pipeline, _panel()
     )
     compact_root = tmp_path / "compact"
     legacy_root = tmp_path / "legacy"
     environment = _environment()
-    write_phase7_artifacts(
+    write_phase7_artifacts_streaming(
         compact_root,
-        compact_bundle,
+        _anchor_columns(),
+        compact_pipeline,
+        _panel(),
         source_build_id="dependency-identity-fixture",
         environment=environment,
     )
@@ -106,13 +110,12 @@ def test_complete_phase7_artifact_tree_is_byte_identical_and_can_fail(tmp_path):
     assert compact_files == legacy_files
 
     mutant_pipeline = _mutated_seasonal_pipeline(compact_pipeline)
-    mutant_bundle = build_phase7_artifact_bundle(
-        _anchor_columns(), mutant_pipeline, _panel()
-    )
     mutant_root = tmp_path / "mutant"
-    write_phase7_artifacts(
+    write_phase7_artifacts_streaming(
         mutant_root,
-        mutant_bundle,
+        _anchor_columns(),
+        mutant_pipeline,
+        _panel(),
         source_build_id="dependency-identity-fixture",
         environment=environment,
     )
@@ -124,3 +127,20 @@ def test_complete_phase7_artifact_tree_is_byte_identical_and_can_fail(tmp_path):
         for name in compact_files
         if "seasonal_profiles" in name or name == "manifest.json"
     )
+
+
+def test_streaming_writer_rejects_one_short_anchor_column(tmp_path):
+    _, _, _, pipeline = synthetic_pipeline(65)
+    columns = dict(_anchor_columns())
+    target = tuple(columns)[1]
+    columns[target] = np.concatenate([columns[target], columns[target]])
+
+    with pytest.raises(SpineError, match="streamed columns must remain aligned"):
+        write_phase7_artifacts_streaming(
+            tmp_path / "misaligned",
+            columns,
+            pipeline,
+            _panel(),
+            source_build_id="misaligned-column-fixture",
+            environment=_environment(),
+        )

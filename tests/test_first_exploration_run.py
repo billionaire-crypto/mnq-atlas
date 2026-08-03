@@ -120,20 +120,23 @@ def test_adapter_emits_full_grid_for_every_scale_arm(tmp_path):
     grid_rows = 78
 
     assert product.grid_rows == grid_rows
-    assert tuple(product.scale_tables) == SCALE_SOURCE_ARMS
-    assert all(len(table.rows) == grid_rows for table in product.scale_tables.values())
-    assert product.bundle.tables["anchor_scales"].row_count == 5 * grid_rows
-    assert product.bundle.tables["seasonal_profiles"].row_count == 5 * grid_rows
-    assert product.bundle.tables["assignments"].row_count == 10 * grid_rows
-    assert product.bundle.tables["thresholds"].row_count == 10 * 5
+    assert tuple(product.pipeline.seasonal_profiles) == SCALE_SOURCE_ARMS
+    assert all(
+        len(table.rows) == grid_rows
+        for table in product.pipeline.seasonal_profiles.values()
+    )
+    assert product.row_counts["anchor_scales"] == 5 * grid_rows
+    assert product.row_counts["seasonal_profiles"] == 5 * grid_rows
+    assert product.row_counts["assignments"] == 10 * grid_rows
+    assert product.row_counts["thresholds"] == 10 * 5
+    assert not hasattr(product, "bundle")
 
 
 def test_missing_anchor_is_retained_and_cannot_become_a_scale(tmp_path):
     _, product = _product(tmp_path, missing=("10:00",))
-    table = product.bundle.tables["anchor_scales"]
-    tau_ns = np.asarray(table.columns["tau_ns"])
-    statuses = np.asarray(table.columns["anchor_status"])
-    valid = np.asarray(table.columns["scale_valid"])
+    tau_ns = np.asarray(product.anchor_scale_columns["tau_ns"])
+    statuses = np.asarray(product.anchor_scale_columns["anchor_status"])
+    valid = np.asarray(product.anchor_scale_columns["scale_valid"])
     missing = statuses == "anchor_bar_missing"
 
     assert int(missing.sum()) == len(SCALE_SOURCE_ARMS)
@@ -143,10 +146,14 @@ def test_missing_anchor_is_retained_and_cannot_become_a_scale(tmp_path):
 
 def test_partial_regular_session_gets_a_data_quality_flag_without_reclassification(tmp_path):
     _, product = _product(tmp_path, missing=("10:00",))
-    assignments = product.bundle.tables["assignments"].columns
+    assignments = tuple(
+        row
+        for table in product.pipeline.assignment_tables.values()
+        for row in table.rows
+    )
 
-    assert set(np.asarray(assignments["calendar_session_class"])) == {"regular"}
-    assert set(np.asarray(assignments["data_quality_status"])) == {
+    assert {row.calendar_session_class for row in assignments} == {"regular"}
+    assert {row.data_quality_status for row in assignments} == {
         "unresolved_truncated_session"
     }
 
@@ -250,7 +257,8 @@ def test_final_manifest_is_last_and_labels_outputs_non_admissible(tmp_path):
         stage,
         final,
         store=store,
-        product=product,
+        phase7_row_counts=product.row_counts,
+        phase7_status_counts=product.phase7_status_counts,
         outcome_row_count=outcomes.row_count,
         staged=staged,
         stage_seconds={"phase7": 1.0, "unit_o": 1.0, "total": 2.0},

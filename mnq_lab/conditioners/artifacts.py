@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import gc
 import hashlib
 import json
 from pathlib import Path
@@ -36,6 +37,7 @@ __all__ = [
     "Phase7ArtifactBundle",
     "build_phase7_artifact_bundle",
     "write_phase7_artifacts",
+    "write_phase7_artifacts_streaming",
 ]
 
 
@@ -296,18 +298,13 @@ def _validate_calendar_identity(calendar_version: str | None, calendar_sha256: s
         raise SpineError("seasonal-dependent Phase 7 artifacts require the accepted calendar")
 
 
-def write_phase7_artifacts(
+def _prepare_artifact_root(
     root: Path,
-    bundle: Phase7ArtifactBundle,
     *,
     source_build_id: str,
-    calendar_version: str | None = CALENDAR_VERSION,
-    calendar_sha256: str | None = CALENDAR_SHA256,
-    environment: Mapping[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Write a complete deterministic Phase 7 artifact bundle."""
-    if not isinstance(bundle, Phase7ArtifactBundle):
-        raise SpineError("write_phase7_artifacts requires a validated bundle")
+    calendar_version: str | None,
+    calendar_sha256: str | None,
+) -> Path:
     if not isinstance(source_build_id, str) or not source_build_id:
         raise SpineError("source_build_id must be a nonempty string")
     _validate_calendar_identity(calendar_version, calendar_sha256)
@@ -317,29 +314,141 @@ def write_phase7_artifacts(
     if root.exists() and any(root.iterdir()):
         raise SpineError("Phase 7 artifact output directory must be absent or empty")
     root.mkdir(parents=True, exist_ok=True)
+    return root
 
-    table_manifest: dict[str, Any] = {}
-    for table_name, table in bundle.tables.items():
-        table_root = root / table_name
-        table_root.mkdir()
-        column_manifest: dict[str, Any] = {}
-        for position, (column_name, array) in enumerate(table.columns.items()):
-            filename = f"{position:02d}_{column_name}.npy"
-            path = table_root / filename
-            np.save(path, np.ascontiguousarray(array), allow_pickle=False)
-            column_manifest[column_name] = {
-                "file": f"{table_name}/{filename}",
-                "dtype": str(array.dtype),
-                "rows": table.row_count,
-                "bytes": path.stat().st_size,
-                "sha256": _sha256_file(path),
-            }
-        table_manifest[table_name] = {
-            "column_order": list(table.columns),
-            "row_count": table.row_count,
-            "columns": column_manifest,
+
+def _write_artifact_table(root: Path, table: ArtifactTable) -> dict[str, Any]:
+    table_root = root / table.name
+    table_root.mkdir()
+    column_manifest: dict[str, Any] = {}
+    for position, (column_name, array) in enumerate(table.columns.items()):
+        filename = f"{position:02d}_{column_name}.npy"
+        path = table_root / filename
+        np.save(path, np.ascontiguousarray(array), allow_pickle=False)
+        column_manifest[column_name] = {
+            "file": f"{table.name}/{filename}",
+            "dtype": str(array.dtype),
+            "rows": table.row_count,
+            "bytes": path.stat().st_size,
+            "sha256": _sha256_file(path),
         }
+    return {
+        "column_order": list(table.columns),
+        "row_count": table.row_count,
+        "columns": column_manifest,
+    }
 
+
+def _write_streamed_column(
+    table_root: Path,
+    *,
+    table_name: str,
+    position: int,
+    column_name: str,
+    array: np.ndarray,
+    row_count: int,
+) -> dict[str, Any]:
+    if array.ndim != 1 or len(array) != row_count:
+        raise SpineError(f"{table_name} streamed columns must remain aligned")
+    filename = f"{position:02d}_{column_name}.npy"
+    path = table_root / filename
+    np.save(path, np.ascontiguousarray(array), allow_pickle=False)
+    return {
+        "file": f"{table_name}/{filename}",
+        "dtype": str(array.dtype),
+        "rows": row_count,
+        "bytes": path.stat().st_size,
+        "sha256": _sha256_file(path),
+    }
+
+
+def _write_streamed_anchor_table(
+    root: Path,
+    columns: Mapping[str, Any],
+) -> dict[str, Any]:
+    table_name = "anchor_scales"
+    schema = _SCHEMAS[table_name]
+    if tuple(columns) != tuple(name for name, _ in schema):
+        raise SpineError("anchor scale columns differ from the frozen schema")
+    row_count = len(columns[schema[0][0]])
+    if row_count <= 0:
+        raise SpineError("anchor_scales must contain aligned nonempty columns")
+    table_root = root / table_name
+    table_root.mkdir()
+    column_manifest: dict[str, Any] = {}
+    for position, (column_name, dtype) in enumerate(schema):
+        array = _canonical_array(columns[column_name], dtype)
+        if str(array.dtype) != str(np.dtype(dtype)):
+            raise SpineError(
+                f"{table_name}.{column_name} has dtype {array.dtype}, expected {dtype}"
+            )
+        column_manifest[column_name] = _write_streamed_column(
+            table_root,
+            table_name=table_name,
+            position=position,
+            column_name=column_name,
+            array=array,
+            row_count=row_count,
+        )
+        del array
+        gc.collect()
+    return {
+        "column_order": [name for name, _ in schema],
+        "row_count": row_count,
+        "columns": column_manifest,
+    }
+
+
+def _write_streamed_record_table(
+    root: Path,
+    name: str,
+    records: Iterable[Any],
+) -> dict[str, Any]:
+    rows = tuple(records)
+    if not rows:
+        raise SpineError(f"{name} must contain aligned nonempty columns")
+    schema = _SCHEMAS[name]
+    row_count = len(rows)
+    table_root = root / name
+    table_root.mkdir()
+    column_manifest: dict[str, Any] = {}
+    for position, (column_name, dtype) in enumerate(schema):
+        array = _canonical_array(
+            (getattr(row, column_name) for row in rows),
+            dtype,
+        )
+        if str(array.dtype) != str(np.dtype(dtype)):
+            raise SpineError(
+                f"{name}.{column_name} has dtype {array.dtype}, expected {dtype}"
+            )
+        column_manifest[column_name] = _write_streamed_column(
+            table_root,
+            table_name=name,
+            position=position,
+            column_name=column_name,
+            array=array,
+            row_count=row_count,
+        )
+        del array
+        gc.collect()
+    del rows
+    gc.collect()
+    return {
+        "column_order": [column_name for column_name, _ in schema],
+        "row_count": row_count,
+        "columns": column_manifest,
+    }
+
+
+def _finish_artifact_manifest(
+    root: Path,
+    table_manifest: Mapping[str, Any],
+    *,
+    source_build_id: str,
+    calendar_version: str,
+    calendar_sha256: str,
+    environment: Mapping[str, Any] | None,
+) -> dict[str, Any]:
     env = dict(environment) if environment is not None else environment_fingerprint(REPO_ROOT)
     manifest = {
         "artifact_schema_version": PHASE7_ARTIFACT_SCHEMA_VERSION,
@@ -358,11 +467,11 @@ def write_phase7_artifacts(
         "dirty_worktree": env.get("dirty"),
         "environment_fingerprint": env,
         "arm_order": [config.arm_id for config in ARM_CONFIGS],
-        "table_order": list(bundle.tables),
+        "table_order": list(table_manifest),
         "table_schema_versions": {
-            name: f"phase7-{name.replace('_', '-')}-v1" for name in bundle.tables
+            name: f"phase7-{name.replace('_', '-')}-v1" for name in table_manifest
         },
-        "tables": table_manifest,
+        "tables": dict(table_manifest),
         "registry_comparison_policies": _comparison_policies(),
         "semantic_determinism": "exact discrete; float64 atol=0 rtol=1e-12",
         "byte_identity_scope": "matching complete environment fingerprint only",
@@ -370,3 +479,122 @@ def write_phase7_artifacts(
     manifest_path = root / "manifest.json"
     manifest_path.write_bytes(_canonical_json_bytes(manifest))
     return manifest
+
+
+def _write_table_stream(
+    root: Path,
+    tables: Iterable[ArtifactTable],
+) -> dict[str, Any]:
+    table_manifest: dict[str, Any] = {}
+    for table in tables:
+        if table.name in table_manifest:
+            raise SpineError(f"duplicate Phase 7 artifact table {table.name!r}")
+        table_manifest[table.name] = _write_artifact_table(root, table)
+        del table
+        gc.collect()
+    if tuple(table_manifest) != tuple(_SCHEMAS):
+        raise SpineError("Phase 7 streamed tables differ from the frozen table order")
+    return table_manifest
+
+
+def _stream_artifact_record_sets(
+    pipeline: Phase7ConditionerPipeline,
+    state_validity: StateValidityPanel,
+) -> Iterable[tuple[str, tuple[Any, ...]]]:
+    yield (
+        "seasonal_profiles",
+        tuple(
+            row
+            for arm_id in SCALE_SOURCE_ARMS
+            for row in pipeline.seasonal_profiles[arm_id].rows
+        ),
+    )
+    yield (
+        "thresholds",
+        tuple(
+            row
+            for config in ARM_CONFIGS
+            for row in pipeline.threshold_tables[config.arm_id].rows
+        ),
+    )
+    yield (
+        "assignments",
+        tuple(
+            row
+            for config in ARM_CONFIGS
+            for row in pipeline.assignment_tables[config.arm_id].rows
+        ),
+    )
+    yield "state_validity", state_validity.rows
+
+
+def write_phase7_artifacts(
+    root: Path,
+    bundle: Phase7ArtifactBundle,
+    *,
+    source_build_id: str,
+    calendar_version: str | None = CALENDAR_VERSION,
+    calendar_sha256: str | None = CALENDAR_SHA256,
+    environment: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Write a complete deterministic Phase 7 artifact bundle."""
+    if not isinstance(bundle, Phase7ArtifactBundle):
+        raise SpineError("write_phase7_artifacts requires a validated bundle")
+    root = _prepare_artifact_root(
+        root,
+        source_build_id=source_build_id,
+        calendar_version=calendar_version,
+        calendar_sha256=calendar_sha256,
+    )
+    table_manifest = _write_table_stream(root, bundle.tables.values())
+    return _finish_artifact_manifest(
+        root,
+        table_manifest,
+        source_build_id=source_build_id,
+        calendar_version=calendar_version,
+        calendar_sha256=calendar_sha256,
+        environment=environment,
+    )
+
+
+def write_phase7_artifacts_streaming(
+    root: Path,
+    anchor_scale_columns: Mapping[str, Any],
+    pipeline: Phase7ConditionerPipeline,
+    state_validity: StateValidityPanel,
+    *,
+    source_build_id: str,
+    calendar_version: str | None = CALENDAR_VERSION,
+    calendar_sha256: str | None = CALENDAR_SHA256,
+    environment: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Materialize, write, and release each frozen Phase 7 table in order."""
+    if not isinstance(pipeline, Phase7ConditionerPipeline):
+        raise SpineError("artifacts require a validated Phase 7 pipeline")
+    if not isinstance(state_validity, StateValidityPanel):
+        raise SpineError("artifacts require a validated state-validity panel")
+    root = _prepare_artifact_root(
+        root,
+        source_build_id=source_build_id,
+        calendar_version=calendar_version,
+        calendar_sha256=calendar_sha256,
+    )
+    table_manifest: dict[str, Any] = {
+        "anchor_scales": _write_streamed_anchor_table(root, anchor_scale_columns)
+    }
+    for table_name, rows in _stream_artifact_record_sets(pipeline, state_validity):
+        table_manifest[table_name] = _write_streamed_record_table(
+            root, table_name, rows
+        )
+        del rows
+        gc.collect()
+    if tuple(table_manifest) != tuple(_SCHEMAS):
+        raise SpineError("Phase 7 streamed tables differ from the frozen table order")
+    return _finish_artifact_manifest(
+        root,
+        table_manifest,
+        source_build_id=source_build_id,
+        calendar_version=calendar_version,
+        calendar_sha256=calendar_sha256,
+        environment=environment,
+    )

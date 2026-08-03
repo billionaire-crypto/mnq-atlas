@@ -1246,3 +1246,53 @@ any real Phase 8 outcome is consumed.
 
 **Status:** `RESOLVED`. P8-D may retain the four-cell-common implementation and
 remove only the two false population-estimand labels from its inventory.
+---
+
+## D26. C5 rests on scientific-byte identity, not a hand-drawn code boundary
+
+**Observed before the D23 amendment was implemented.** D23 proposed requiring
+an empty git diff between the reproduction commits over "the scientific
+modules." The executed diff between baseline commit
+`4f185eab998f33f64ae6705fbc494cd6e3e9f327` and run commit
+`6dcbff89e0d7af8e812474537cef41fc6cf7add4` is not empty when the broad
+`mnq_lab/conditioners` directory is treated as scientific code:
+`mnq_lab/conditioners/artifacts.py` changed in the streaming-under-six-GiB
+commit. That file is an artifact-serialization layer, but excluding it would
+require a manually judged module boundary that D23 did not declare.
+
+**Ruling - Option B.** C5 does not use a source-module diff. It accepts two
+distinct run trees when their complete environment fingerprints are identical,
+or when the fingerprints have exactly the same keys and values except for the
+`commit` field, and when all 109 scientific columns are raw-byte identical
+under the frozen `npy-file-sha256-v1` protocol. A difference in `python`,
+`numpy`, `pandas`, `platform`, `machine`, `branch`, `dirty`, `vcs`,
+`pipeline_version`, any additional field or any missing field fails C5. Both
+commit values remain full lowercase commit hashes and each tree remains bound
+to the commit recorded by its own manifests.
+
+**Why Option B.** The 109/109 scientific-column byte match directly answers
+whether the two completed runs produced the same scientific values. A module
+list is a weaker proxy and introduces a new discretionary boundary requiring
+defence on every later run. The artifact serializer changed, so source code was
+not identical; C5 therefore provides no structural proof that computation code
+was unchanged.
+
+**Claim boundary.** This is empirical reproduction evidence decided post hoc:
+two runs at different commits produced byte-identical scientific columns. It
+does not prove source-code identity, causal independence, blindness, auditor
+competence or future reproducibility. C4 remains an attestation because neither
+tree contains producer-side gate outcomes. C2 visibility remains a recorded
+timestamp corroborated by filesystem metadata but not anchored to an external
+authority. C7 remains a human attestation, and append-only remains repository
+policy rather than a code-enforced property.
+
+**Timing and correction disclosure.** The earlier instruction to require an
+empty scientific-module diff was issued before that diff was executed. The
+executed counterexample made the proposed rule unsatisfiable for the exact run
+D23 intended to admit. Replacing that proxy with the already required
+scientific-byte comparison corrects the rule openly; it does not claim that the
+commit difference was harmless by construction.
+
+**Status:** `RESOLVED`. The validator may now implement commit-only fingerprint
+variance backed by exact scientific-byte identity. No certificate exists by
+virtue of this ruling alone.

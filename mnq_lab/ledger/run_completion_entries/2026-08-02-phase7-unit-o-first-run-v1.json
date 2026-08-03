@@ -1,0 +1,10 @@
+{
+  "entry_id": "2026-08-02-phase7-unit-o-first-run-v1",
+  "ledger_format": "run_completion_record_v1",
+  "recorder_identity": "Codex Session B; finalized filesystem evidence",
+  "run_commit": "6dcbff89e0d7af8e812474537cef41fc6cf7add4",
+  "run_manifest_sha256": "39d14712086e074b950316b4ef032299c06a398eea885d49ccfbeb65a272e84e",
+  "tree_path": "data/exploration/derived/phase7-unit-o-first-run-v1",
+  "tree_sha256": "cefe42e722b4ff09edac28ccece2b496c052fc438e0efcfde844821574fa8d8c",
+  "visible_at_utc": "2026-08-03T02:40:01.7757028Z"
+}

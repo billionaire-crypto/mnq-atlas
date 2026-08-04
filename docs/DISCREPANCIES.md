@@ -1400,3 +1400,68 @@ or authorized from this result.
 improvement, but Step 7 artifact production remains blocked. No Phase 8 result
 table, artifact manifest or closeout was created; the feasibility question
 returns for user decision.
+---
+
+## D29. Step 7 feasibility decision: rented hardware, no frozen parameter changed
+
+**The question D28 returned.** D27 and D28 both closed with Step 7 artifact
+production blocked, and D28 ended by returning the feasibility question for a
+user decision. This entry records the answer. It is written while the
+authorized run is already executing. That ordering is stated plainly here
+rather than concealed, and no part of this entry is backdated.
+
+**Measured evidence for the decision.** A Task A preflight executed on the
+user's laptop over 4,325 candidate terms was independently reconciled before
+the decision. Reported figures: sequential total 464,026.262118 s, or
+128.896 h; average 7.715308 s per distinct term; inventory-planning phase
+44 min 43 s; measured speedups 4.87144x at eight workers and 6.54920x at
+sixteen; cost-model residuals spanning 0.840825778 to 1.139897429; benchmark
+cell of 7,284 anchors across 354 sessions, eight evaluations in 138.122147 s.
+The sequential total is a cost-model projection across terms of differing
+support, not a flat product of the per-term average and the term count; the
+residual range above is that model's stated fit quality.
+
+Applying the measured speedups and adding the 0.745 h inventory phase gives
+128.896/4.87144 = 26.46 h, so 27.2 h at eight workers with a 23.0 to 30.9 h
+range, and 128.896/6.54920 = 19.68 h, so 20.4 h at sixteen workers with a
+17.3 to 23.2 h range.
+
+These figures were reported and audited in session and were not carried into
+this repository at the time. That was a provenance gap: the numbers that
+justified the decision existed only in conversation, where they cannot be
+recomputed or challenged by a later reader. This entry closes that gap by
+recording them.
+
+**Decision.** The measured runtime materially exceeds the ten-hour target. The
+user elected to proceed on rented hardware rather than reduce, approximate or
+prefilter any registered quantity.
+
+**Nothing frozen changed.** The draw count remains 4,999 per block length.
+Block lengths remain 1, 5, 10 and 20. The registered entropy, confidence
+level, interval endpoints, inverse-CDF definition, masks, weights, resampler
+and no-retry rule are untouched. The only altered values are operating
+parameters that cannot enter a result: worker count, aggregate memory ceiling
+and launch minimum available memory. This decision therefore honours the D27
+ruling that no frozen statistical parameter may change because the registered
+computation is expensive. Speed was obtained from hardware, not from the
+design.
+
+**Run identity.** Code commit `9fb8ae0`, clean worktree. Launched 01:40 UTC on
+2026-08-04 with 128 workers, a 68,719,476,736-byte aggregate memory ceiling
+and a 34,359,738,368-byte launch minimum available memory. Host: 128 threads,
+251 GiB RAM, AMD EPYC 7773X, rented. Output root `phase8-first-run-v1`;
+checkpoint root `phase8-first-run-v1.checkpoint`.
+
+**Unmeasured on this host.** The 44 min 43 s inventory-planning figure and both
+runtime projections were measured at eight and sixteen workers on the user's
+laptop. Neither the inventory phase nor the complete run has been timed at 128
+workers on the rented host, whose single-core clock is slower. No projection
+for this configuration exists and none is inferred here. Elapsed time observed
+on this host is therefore an observation, not a departure from an established
+expectation.
+
+**Status:** `RESOLVED` as to authorization only. D27 and D28 remain the record
+of the feasibility stop, and the question each returned is answered here. The
+run is in progress. No Phase 8 result table, artifact manifest, closeout or
+ratification exists, none is authorized by this entry, and nothing in this
+entry interprets, accepts or ranks a measured value.

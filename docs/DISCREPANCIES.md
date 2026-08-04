@@ -1465,3 +1465,58 @@ of the feasibility stop, and the question each returned is answered here. The
 run is in progress. No Phase 8 result table, artifact manifest, closeout or
 ratification exists, none is authorized by this entry, and nothing in this
 entry interprets, accepts or ranks a measured value.
+---
+
+## D30. Stage 1 root cause, authorized implementation fix and controlled parallelism
+
+**What happened.** The first Phase 8 Step 7 production run (D29) ran 3 h 07 min
+on rented hardware without leaving the serial point-estimate stage
+(`build_production_computation`) and was terminated with no checkpoint and no
+artifact produced. Its own progress log recorded zero checkpoint files and
+zero output files on every one-minute poll for the full duration. Nothing was
+lost; nothing had been written.
+
+**Root cause, measured.** `py-spy` sampling of the identical stage running
+locally showed every hot leaf frame is pure-Python per-element iteration, not
+a numpy kernel. The principal cause is `core/weights.py:session_equal_weights`,
+which is accidentally quadratic: for each of `g` groups it rescans the entire
+`n`-row array (`weights[inverse == index]`) rather than visiting each row
+once. On the real ratified Unit O input, one horizon slice has `n = 157,404`
+rows over `g = 1,009` sessions: `g * n = 158,820,636` operations against the
+`n` an `O(n)` implementation requires. Measured cost: 0.338 s per call. This
+function, and the same iterate-and-validate pattern in
+`_as_opaque_group_labels`, `_validated_session_labels` and `_session_labels`,
+are called repeatedly across the 30,366 declared rows.
+
+**Measured fix.** An order-preserving vectorized replacement
+(`np.unique(..., return_inverse=True, return_counts=True)` plus a stable
+`argsort` to sum each group's rows in the same ascending order the original
+loop visits them) was benchmarked against the real slice above: 0.014 s per
+call, a 24.1x speedup, and the output weight vector is bit-identical to the
+original — `np.array_equal` true, max absolute delta `0.000e+00`,
+`tobytes()` equal. This was measured, not asserted.
+
+**Authorization.** The user authorizes, in this entry:
+  1. Replacing the quadratic and repeated-per-element-validation hot spots in
+     `core/weights.py`, `mnq_lab/phase8/diagnostics.py` and
+     `mnq_lab/phase8/estimands.py` with vectorized equivalents, each gated by
+     a test proving byte-identical output against the current implementation
+     on the real ratified input, including a negative case that a
+     deliberately wrong implementation fails that test.
+  2. Parallelizing the stage 1 serial computation across more than one CPU
+     core on the operator's own hardware, provided the reassembled output is
+     proved identical, row for row and byte for byte, to a single-core run.
+  3. A stderr progress indicator emitting only loop index, item count and
+     elapsed seconds. It may never emit a tick, quantile, contrast, interval
+     endpoint or any other measured or computed value.
+
+**What does not change.** No draw count, block length, entropy, confidence
+level, interval endpoint, mask, weight definition, resampler, or no-retry
+rule changes. This entry authorizes implementation and engineering changes
+only; it authorizes no change to any frozen statistical parameter and ranks,
+interprets or emphasizes no measured value.
+
+**Status:** `RESOLVED` as to authorization only. No Phase 8 result table,
+artifact manifest or closeout exists and none is authorized here. The
+identity proof for each change is the acceptance gate, not a plausible
+argument: per D27, a plausible argument is not a proof.

@@ -564,7 +564,62 @@ def weight_ess(weights: Any) -> float:
     return float(result)
 
 
+def _try_integer_labels(values: Any) -> tuple[Hashable, ...] | None:
+    """Vectorized validation fast path for a homogeneous non-bool integer array.
+
+    Returns the validated label tuple, or ``None`` if the fast path does not
+    apply (any non-integer, mixed, or object-dtype input), in which case the
+    caller must fall back to the exact per-element validator. Integers are
+    always finite and always hashable, so no per-element check is needed once
+    numpy has already unified every element into one concrete integer dtype
+    without falling back to ``object`` -- that unification is itself the
+    proof every element was an unambiguous integer.
+    """
+    try:
+        probe = np.asarray(values)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if probe.ndim != 1 or probe.size == 0 or probe.dtype.kind not in ("i", "u"):
+        return None
+    return tuple(probe.tolist())
+
+
+def _factorize_first_occurrence(
+    labels: tuple[Hashable, ...],
+) -> tuple[np.ndarray, list[int], list[Hashable]] | None:
+    """Vectorized group-index assignment in first-occurrence order.
+
+    Returns ``(inverse, counts, unique_labels)`` matching exactly what the
+    dict-based per-element loop below produces, or ``None`` if ``labels`` is
+    not a single concrete numpy dtype (mixed/object content), in which case
+    the caller must fall back to that loop. Uses ``np.unique`` and then
+    remaps its sorted group order to first-occurrence order via a stable
+    argsort on each group's first index, so the group numbering is identical
+    to the dict-insertion order regardless of the sort key ``np.unique`` used.
+    """
+    # Integer dtypes ONLY. numpy silently coerces mixed input to a common
+    # dtype -- ``(1, "1")`` becomes two equal strings -- which would merge two
+    # groups the dict loop keeps distinct. Any non-integer or mixed label set
+    # falls back to that loop, so this can never change grouping semantics.
+    probe = np.asarray(labels)
+    if probe.ndim != 1 or probe.dtype.kind not in ("i", "u"):
+        return None
+    uniq_sorted, first_index, inverse_sorted, counts_sorted = np.unique(
+        probe, return_index=True, return_inverse=True, return_counts=True
+    )
+    order = np.argsort(first_index, kind="stable")
+    rank = np.empty_like(order)
+    rank[order] = np.arange(len(order))
+    inverse = rank[inverse_sorted].astype(np.intp, copy=False)
+    counts = counts_sorted[order].tolist()
+    unique_labels = [labels[i] for i in first_index[order]]
+    return inverse, counts, unique_labels
+
+
 def _as_opaque_group_labels(group_ids: Any) -> tuple[Hashable, ...]:
+    fast = _try_integer_labels(group_ids)
+    if fast is not None:
+        return fast
     try:
         array = np.asarray(group_ids, dtype=object)
     except (TypeError, ValueError, OverflowError) as exc:
@@ -620,31 +675,38 @@ def session_equal_weights(
     market meaning. Output weights align with the caller's original row order.
     """
     labels = _as_opaque_group_labels(group_ids)
-    group_index: dict[Hashable, int] = {}
-    unique_labels: list[Hashable] = []
-    counts: list[int] = []
-    inverse = np.empty(len(labels), dtype=np.intp)
+    fast = _factorize_first_occurrence(labels)
+    if fast is not None:
+        inverse, counts, unique_labels = fast
+    else:
+        group_index: dict[Hashable, int] = {}
+        unique_labels = []
+        counts = []
+        inverse = np.empty(len(labels), dtype=np.intp)
+        for row_index, label in enumerate(labels):
+            index = group_index.get(label)
+            if index is None:
+                index = len(unique_labels)
+                group_index[label] = index
+                unique_labels.append(label)
+                counts.append(0)
+            counts[index] += 1
+            inverse[row_index] = index
 
-    for row_index, label in enumerate(labels):
-        index = group_index.get(label)
-        if index is None:
-            index = len(unique_labels)
-            group_index[label] = index
-            unique_labels.append(label)
-            counts.append(0)
-        counts[index] += 1
-        inverse[row_index] = index
+    group_count = len(counts)
+    counts_array = np.asarray(counts, dtype=np.float64)
+    per_group_weight = 1.0 / (group_count * counts_array)
+    weights = per_group_weight[inverse]
 
-    group_count = len(unique_labels)
-    weights = np.empty(len(labels), dtype=np.float64)
-    for index, count in enumerate(counts):
-        weights[inverse == index] = 1.0 / (group_count * count)
-
+    # Sum each group's rows in the same ascending row order the original
+    # weights[inverse == index] mask-extraction would visit them in, so
+    # np.sum's pairwise-summation algorithm sees the identical sub-array and
+    # produces a bit-identical result -- not just a numerically close one.
+    sort_order = np.argsort(inverse, kind="stable")
+    group_boundaries = np.cumsum(np.asarray(counts, dtype=np.intp))[:-1]
+    group_row_runs = np.split(sort_order, group_boundaries)
     group_masses = np.array(
-        [
-            np.sum(weights[inverse == index], dtype=np.float64)
-            for index in range(group_count)
-        ],
+        [np.sum(weights[run], dtype=np.float64) for run in group_row_runs],
         dtype=np.float64,
     )
     total_group_mass = np.sum(group_masses, dtype=np.float64)

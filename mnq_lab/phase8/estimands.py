@@ -284,15 +284,25 @@ def _base_cell_weights(
     quarter_masses: tuple[tuple[str, float], ...],
 ) -> tuple[np.ndarray, float]:
     weights = np.zeros(len(session_ids), dtype=np.float64)
+    # Select the masked session labels by array indexing instead of rebuilding
+    # a 157,404-element Python tuple once per quarter, per cell, per cache key.
+    # Restricted to integer labels: numpy coerces a mixed sequence to a common
+    # dtype, so ``(1, "1")`` would become two equal strings and change the
+    # grouping. Any other label type falls back to the original generator.
+    session_array = np.asarray(session_ids)
+    if session_array.ndim != 1 or session_array.dtype.kind not in ("i", "u"):
+        session_array = None
+
+    def _selected_labels(mask: np.ndarray) -> Any:
+        if session_array is not None:
+            return session_array[mask]
+        return tuple(
+            session_id for session_id, keep in zip(session_ids, mask) if keep
+        )
+
     if not quarter_masses:
         if bool(np.any(cell_mask)):
-            selected, _ = session_equal_weights(
-                tuple(
-                    session_id
-                    for session_id, keep in zip(session_ids, cell_mask)
-                    if keep
-                )
-            )
+            selected, _ = session_equal_weights(_selected_labels(cell_mask))
             weights[cell_mask] = selected
         return weights, 0.0
 
@@ -304,11 +314,7 @@ def _base_cell_weights(
             unsupported_mass += target_mass
             continue
         selected, _ = session_equal_weights(
-            tuple(
-                session_id
-                for session_id, keep in zip(session_ids, quarter_mask)
-                if keep
-            )
+            _selected_labels(quarter_mask)
         )
         weights[quarter_mask] = selected * target_mass
     return weights, unsupported_mass

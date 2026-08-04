@@ -25,6 +25,8 @@ import numpy as np
 from mnq_lab import SpineError
 from mnq_lab.constants import REPO_ROOT
 from mnq_lab.ledger.ratification import require_ratified_unit_o
+from mnq_lab.phase8 import progress as _progress
+from mnq_lab.phase8.production import _contrast_worker_count as _stage1_worker_count
 from mnq_lab.phase8.artifacts import (
     CheckpointIdentity,
     CheckpointStore,
@@ -36,6 +38,10 @@ RATIFIED_INPUT_ROOT = (
     REPO_ROOT / "data/exploration/derived/phase7-unit-o-first-run-v1"
 )
 PHASE8_OUTPUT_ROOT = REPO_ROOT / "data/exploration/derived/phase8-first-run-v1"
+# A real log file beside the output root. The first production attempt wrote
+# to a shell redirect that stayed empty for three hours, so progress must land
+# in a file this package owns and flushes itself.
+PHASE8_PROGRESS_LOG = REPO_ROOT / "data/exploration/derived/phase8-first-run-v1.progress.log"
 DEFAULT_AGGREGATE_MEMORY_CEILING_BYTES = int(5.5 * 1024**3)
 DEFAULT_LAUNCH_MINIMUM_AVAILABLE_BYTES = 7 * 1024**3
 
@@ -347,8 +353,11 @@ def execute_checkpointed_chunks(
         memory_gate.preflight()
         memory_gate.start()
     completed_now = 0
+    chunk_progress = _progress.get_sink().phase(
+        _progress.PHASE_BOOTSTRAP_CHUNKS, len(declared)
+    )
     try:
-        for chunk in declared:
+        for chunk_position, chunk in enumerate(declared, start=1):
             if not checkpoint.has_chunk(chunk.index):
                 columns = dict(compute_chunk(chunk))
                 emitted = tuple(str(value) for value in np.asarray(columns.get("row_id", ())))
@@ -358,8 +367,9 @@ def execute_checkpointed_chunks(
                 completed_now += 1
                 if memory_gate is not None:
                     memory_gate.sample()
-                if interrupt_after_chunks is not None and completed_now >= interrupt_after_chunks:
-                    raise RuntimeError("named interruption")
+            chunk_progress.advance(chunk_position)
+            if interrupt_after_chunks is not None and completed_now >= interrupt_after_chunks:
+                raise RuntimeError("named interruption")
         pieces = tuple(checkpoint.read_chunk(chunk.index) for chunk in declared)
         names = tuple(pieces[0]) if pieces else ()
         if any(tuple(piece) != names for piece in pieces):
@@ -384,6 +394,11 @@ def run_phase8(
     process_start_method: str | None = None,
 ) -> Mapping[str, Any]:
     """Run and checkpoint the complete Step 7 inventory from the fixed input."""
+    if not _progress.is_configured():
+        raise SpineError(
+            "Phase 8 production progress is not configured; "
+            "launch with: python -m mnq_lab.phase8.runner"
+        )
     config = RunnerOperatingConfig(
         workers=max(1, os.cpu_count() or 1) if workers is None else workers,
         aggregate_memory_ceiling_bytes=aggregate_memory_ceiling_bytes,
@@ -422,12 +437,25 @@ def run_phase8(
         phase7_manifest=guarded.phase7_manifest,
         input_manifest_sha256=guarded.manifest_sha256,
     )
+    sink = _progress.get_sink()
+    sink.banner(
+        contrast_rows=29_430,
+        day_type_rows=216,
+        interaction_rows=720,
+        workers=config.workers,
+        stage1_workers=_stage1_worker_count(),
+        aggregate_memory_ceiling_bytes=config.aggregate_memory_ceiling_bytes,
+        distinct_bootstrap_terms=None,
+    )
     gate.start()
     try:
         computation = build_production_computation(production_inputs)
         gate.sample()
     finally:
         gate.stop()
+    # Realized distinct term count is not knowable until Stage 1 finishes; the
+    # banner printed "pending" and the measured value is emitted here.
+    sink.realized_terms(computation.distinct_term_count)
 
     contract = bootstrap_contract()
     contract_hash = hashlib.sha256(canonical_json_bytes(asdict(contract))).hexdigest()
@@ -444,10 +472,14 @@ def run_phase8(
     if checkpoint.has_plan_matrices():
         plan_bundle = checkpoint.read_plan_matrices(contract)
     else:
+        plan_progress = sink.phase(
+            _progress.PHASE_BOOTSTRAP_PLANS, len(BLOCK_LENGTHS)
+        )
         gate.start()
         try:
             plan_bundle = _prepare_joint_plan_matrices(computation.group_ids)
             checkpoint.write_plan_matrices(plan_bundle)
+            plan_progress.advance(len(BLOCK_LENGTHS))
             gate.sample()
         finally:
             gate.stop()
@@ -526,6 +558,7 @@ def run_phase8(
     provenance = production_provenance(production_inputs, environment)
     operating = {
         "workers": config.workers,
+        "stage1_workers": _stage1_worker_count(),
         "process_start_method": config.process_start_method,
         "aggregate_memory_ceiling_bytes": config.aggregate_memory_ceiling_bytes,
         "launch_minimum_available_bytes": config.launch_minimum_available_bytes,
@@ -536,19 +569,26 @@ def run_phase8(
         },
         "realized_distinct_bootstrap_terms": computation.distinct_term_count,
     }
-    return write_phase8_artifacts(
+    artifact_progress = sink.phase(_progress.PHASE_ARTIFACTS, 1)
+    manifest = write_phase8_artifacts(
         PHASE8_OUTPUT_ROOT,
         tables,
         provenance=provenance,
         operating=operating,
         limitations=LIMITATIONS,
     )
+    artifact_progress.advance(1)
+    return manifest
 
 
 def main() -> None:
     if not getattr(sys.modules.get("__main__"), "__spec__", None):
         raise SpineError("launch Phase 8 only with: python -m mnq_lab.phase8.runner")
-    run_phase8()
+    _progress.configure(log_path=PHASE8_PROGRESS_LOG, stdout=True)
+    try:
+        run_phase8()
+    finally:
+        _progress.reset()
 
 
 if __name__ == "__main__":

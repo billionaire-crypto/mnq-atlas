@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -42,6 +43,7 @@ from mnq_lab.phase8.interactions import (
 from mnq_lab.phase8.inventory import (
     ALTERNATIVE_ARM_IDS, PRIMARY_ARM_ID, ResultRowSpec, declared_result_rows,
 )
+from mnq_lab.phase8 import progress as _progress
 from mnq_lab.phase8.preflight import BootstrapTermKey, TermSupportRecord, build_term_support_record
 from mnq_lab.phase8.uncertainty import (
     BootstrapIntervalRequest, BootstrapQuantileTerm, bootstrap_contract,
@@ -197,48 +199,6 @@ class BootstrapTermRecipe:
         )
 
 
-_PROGRESS_MINIMUM_TOTAL = 1_000
-_PROGRESS_EVERY = 250
-
-
-class _Progress:
-    """Stage progress on stderr: counts and timings only, never a value.
-
-    Emitting a measured quantity here would put a tick, quantile, contrast or
-    interval endpoint into an operator log, so this class is deliberately
-    incapable of receiving one -- it accepts an item count and nothing else.
-
-    Silent below ``_PROGRESS_MINIMUM_TOTAL`` items so the small fixtures used
-    throughout the test suite produce no output.
-    """
-
-    def __init__(self, stage: str, total: int) -> None:
-        self.stage = stage
-        self.total = int(total)
-        self.started = time.perf_counter()
-        self.enabled = self.total >= _PROGRESS_MINIMUM_TOTAL
-        if self.enabled:
-            self._emit(0)
-
-    def _emit(self, done: int) -> None:
-        elapsed = time.perf_counter() - self.started
-        rate = done / elapsed if elapsed > 0.0 and done > 0 else 0.0
-        remaining = (self.total - done) / rate if rate > 0.0 else float("nan")
-        percent = 100.0 * done / self.total if self.total else 100.0
-        print(
-            f"[phase8] {self.stage} {done}/{self.total} ({percent:.1f}%) "
-            f"elapsed={elapsed:.1f}s rate={rate:.1f}/s eta={remaining:.0f}s",
-            file=sys.stderr,
-            flush=True,
-        )
-
-    def advance(self, done: int) -> None:
-        if not self.enabled:
-            return
-        if done % _PROGRESS_EVERY == 0 or done == self.total:
-            self._emit(done)
-
-
 class _TermRegistry:
     def __init__(self) -> None:
         self._payloads: dict[str, list[tuple[np.ndarray, np.ndarray, np.ndarray]]] = {}
@@ -251,6 +211,28 @@ class _TermRegistry:
             raise SpineError("an ok point row cannot register an empty bootstrap term")
         local_values = np.asarray(values[rows], dtype=np.int32)
         local_weights = np.asarray(weights[rows], dtype=np.float64)
+        return self.register_payload(rows, local_values, local_weights, statistic)
+
+    def register_payload(
+        self,
+        rows: np.ndarray,
+        local_values: np.ndarray,
+        local_weights: np.ndarray,
+        statistic: str,
+    ) -> Hashable:
+        """Assign a term identifier from an already-compacted payload.
+
+        This is the ONLY place a term identifier is minted. ``payload_index``
+        disambiguates a digest collision by position within that digest's
+        bucket, so it is meaningful only relative to the registry that
+        assigned it. A worker registry cannot mint a globally valid
+        identifier: two workers would each assign index 0 to different
+        payloads under the same digest and produce one identifier for two
+        distinct terms. Workers therefore return opaque local handles and
+        the parent registers every payload here, in declared order.
+        """
+        if rows.size == 0:
+            raise SpineError("an ok point row cannot register an empty bootstrap term")
         digest = hashlib.sha256()
         for array in (rows, local_values, local_weights):
             digest.update(str(array.dtype).encode("ascii"))
@@ -259,7 +241,8 @@ class _TermRegistry:
         hexdigest = digest.hexdigest()
         bucket = self._payloads.setdefault(hexdigest, [])
         payload_index = None
-        for index, (known_rows, known_values, known_weights) in enumerate(bucket):
+        for index, payload in enumerate(bucket):
+            known_rows, known_values, known_weights = payload
             if (
                 np.array_equal(rows, known_rows)
                 and np.array_equal(local_values, known_values)
@@ -366,53 +349,88 @@ def _slice(inputs: ProductionInputs, path_estimand: str, horizon: int) -> tuple[
     )
 
 
-def build_production_computation(inputs: ProductionInputs) -> ProductionComputation:
-    """Compute all point inventories and construct only status-ok interval requests."""
-    declared = declared_result_rows()
-    contrast_rows: list[dict[str, Any]] = []
-    day_rows: list[dict[str, Any]] = []
-    interaction_rows: list[dict[str, Any]] = []
-    registry = _TermRegistry()
-    requests: list[Any] = []
-    census: list[TermSupportRecord] = []
-    census_seen: set[str] = set()
-    primary = inputs.arms[PRIMARY_ARM_ID]
-    migrations = {arm: _migration(primary, inputs.arms[arm]) for arm in ALTERNATIVE_ARM_IDS}
-    cells = tuple(CellKey(phase, state) for phase in SESSION_PHASES for state in VOLATILITY_STATES)
+@dataclass(frozen=True)
+class _CensusEntry:
+    identity: str
+    key: BootstrapTermKey
+    support_sessions: tuple[Hashable, ...]
+    status: str
+
+
+@dataclass(frozen=True)
+class _ContrastEntry:
+    index: int
+    row: dict[str, Any]
+    census: tuple[_CensusEntry, ...]
+    request: tuple[Any, ...] | None
+
+
+@dataclass(frozen=True)
+class _ContrastPartition:
+    entries: tuple[_ContrastEntry, ...]
+    # Opaque worker-local handle -> raw compact payload. A handle is NOT a
+    # term identifier and is meaningless outside its own partition; only the
+    # parent's single registry mints identifiers.
+    payloads: Mapping[Hashable, tuple[np.ndarray, np.ndarray, np.ndarray, str]]
+
+
+@dataclass(frozen=True)
+class _MergedContrastPartitions:
+    """Parent-owned, declared-order result of merging worker partitions."""
+
+    rows: tuple[dict[str, Any], ...]
+    registry: "_TermRegistry"
+    requests: tuple[BootstrapIntervalRequest, ...]
+    census: tuple[TermSupportRecord, ...]
+    census_identities: frozenset[str]
+
+
+def _census_identity(
+    key: BootstrapTermKey,
+    weights_for_identity: np.ndarray,
+    status: str,
+    outcome_name: str,
+    empty_axis_key: tuple[Any, ...],
+) -> str:
+    digest = hashlib.sha256()
+    positive = np.flatnonzero(weights_for_identity > 0.0)
+    digest.update(key.family.encode("ascii"))
+    digest.update(key.term_role.encode("utf-8"))
+    digest.update(outcome_name.encode("ascii"))
+    digest.update(status.encode("ascii"))
+    digest.update(positive.tobytes())
+    digest.update(np.asarray(weights_for_identity[positive], dtype=np.float64).tobytes())
+    if positive.size == 0:
+        digest.update(repr(empty_axis_key).encode("utf-8"))
+    return digest.hexdigest()
+
+
+def _contrast_partition(
+    inputs: ProductionInputs,
+    indexed_specs: tuple[tuple[int, ResultRowSpec], ...],
+    migrations: Mapping[str, str],
+    progress: Any = None,
+) -> _ContrastPartition:
+    """Compute contrast rows for a subset of declared specs with no shared state.
+
+    The arithmetic is identical to the serial loop. Term registration is local
+    to this partition and census de-duplication is deferred to the caller, so
+    partitions can be merged in declared order to reproduce the serial output
+    byte for byte. The caller must preserve declared order when merging.
+    """
+    # Local registry ONLY to de-duplicate identical payloads inside this
+    # partition and shrink what is shipped back. Its identifiers are opaque
+    # handles; see _TermRegistry.register_payload for why they cannot be
+    # used globally.
+    local_handles = _TermRegistry()
+    entries: list[_ContrastEntry] = []
     slice_cache: dict[tuple[str, int], tuple[np.ndarray, ...]] = {}
     weight_cache: dict[tuple[Any, ...], Any] = {}
     diagnostic_cache: dict[tuple[Any, ...], tuple[Any, Any, Any]] = {}
     value_cache: dict[tuple[str, str, int], np.ndarray] = {}
     active_cache_scope: tuple[Any, ...] | None = None
 
-    def add_census(
-        key: BootstrapTermKey,
-        support_sessions: tuple[Hashable, ...],
-        weights_for_identity: np.ndarray,
-        status: str,
-        outcome_name: str,
-        empty_axis_key: tuple[Any, ...],
-    ) -> None:
-        digest = hashlib.sha256()
-        positive = np.flatnonzero(weights_for_identity > 0.0)
-        digest.update(key.family.encode("ascii"))
-        digest.update(key.term_role.encode("utf-8"))
-        digest.update(outcome_name.encode("ascii"))
-        digest.update(status.encode("ascii"))
-        digest.update(positive.tobytes())
-        digest.update(np.asarray(weights_for_identity[positive], dtype=np.float64).tobytes())
-        if positive.size == 0:
-            digest.update(repr(empty_axis_key).encode("utf-8"))
-        identity = digest.hexdigest()
-        if identity not in census_seen:
-            census_seen.add(identity)
-            census.append(build_term_support_record(
-                key=key, session_ids=support_sessions, status=status
-            ))
-
-    contrast_progress = _Progress("contrasts", len(declared))
-    for spec_position, spec in enumerate(declared, start=1):
-        contrast_progress.advance(spec_position)
+    for position, (index, spec) in enumerate(indexed_specs, start=1):
         cache_scope = (
             spec.arm_id, spec.outcome_name, spec.path_estimand,
             spec.support_kind, spec.horizon_minutes,
@@ -521,21 +539,25 @@ def build_production_computation(inputs: ProductionInputs) -> ProductionComputat
                 contrast_tick = int(np.int64(target_tick) - np.int64(baseline_tick))
         rid = _row_id("contrast", _spec_key(spec))
         target_term_id = baseline_term_id = None
+        census_entries: list[_CensusEntry] = []
         for role, condition in (("target", weights.target), ("baseline", weights.baseline)):
             if condition is None:
                 continue
             support_sessions = tuple(sessions[condition.weights > 0.0])
-            add_census(
-                BootstrapTermKey("contrast", _spec_key(spec), role),
-                support_sessions, condition.weights, decision.status,
-                spec.outcome_name,
-                _spec_key(spec)[:5] + _spec_key(spec)[6:],
-            )
+            census_key = BootstrapTermKey("contrast", _spec_key(spec), role)
+            census_entries.append(_CensusEntry(
+                _census_identity(
+                    census_key, condition.weights, decision.status, spec.outcome_name,
+                    _spec_key(spec)[:5] + _spec_key(spec)[6:],
+                ),
+                census_key, support_sessions, decision.status,
+            ))
+        request = None
         if decision.status == "ok":
-            target_term_id = registry.register(values, weights.target.weights, spec.statistic)
+            target_term_id = local_handles.register(values, weights.target.weights, spec.statistic)
             if weights.baseline is not None:
-                baseline_term_id = registry.register(values, weights.baseline.weights, spec.statistic)
-            requests.append(BootstrapIntervalRequest(rid, target_term_id, baseline_term_id, decision))
+                baseline_term_id = local_handles.register(values, weights.baseline.weights, spec.statistic)
+            request = (rid, target_term_id, baseline_term_id, decision)
         max_share = weight_cv = unsupported = quarter_unsupported = None
         if positivity is not None:
             shares = [item.max_single_anchor_weight_share for item in positivity.strata if item.max_single_anchor_weight_share is not None]
@@ -544,7 +566,7 @@ def build_production_computation(inputs: ProductionInputs) -> ProductionComputat
             weight_cv = max(cvs) if cvs else None
             unsupported = positivity.unsupported_target_mass
             quarter_unsupported = positivity.quarter_unsupported_target_mass
-        contrast_rows.append({
+        entries.append(_ContrastEntry(index, {
             "row_id": rid, "arm_id": spec.arm_id, "outcome_name": spec.outcome_name,
             "path_estimand": spec.path_estimand, "support_kind": spec.support_kind,
             "horizon_minutes": spec.horizon_minutes, "statistic": spec.statistic,
@@ -568,13 +590,296 @@ def build_production_computation(inputs: ProductionInputs) -> ProductionComputat
             "max_single_anchor_weight_share": max_share, "weight_cv": weight_cv,
             "status": decision.status, "status_flags": _json(decision.status_flags),
             "migration_diagnostics": "" if spec.arm_id == PRIMARY_ARM_ID else migrations[spec.arm_id],
-        })
+        }, tuple(census_entries), request))
+        if progress is not None:
+            progress.advance(position)
+    return _ContrastPartition(tuple(entries), {
+        recipe.term_id: (
+            recipe.eligible_rows, recipe.eligible_values,
+            recipe.eligible_weights, recipe.statistic,
+        )
+        for recipe in local_handles.recipes
+    })
+
+
+def _partition_indexed_specs(
+    indexed_specs: tuple[tuple[int, ResultRowSpec], ...], partition_count: int,
+) -> tuple[tuple[tuple[int, ResultRowSpec], ...], ...]:
+    """Split declared specs into partitions without splitting a weight cache key.
+
+    Specs sharing a cache key share one ``build_estimand_weights`` result, so a
+    key split across partitions would recompute it. Keys are NOT contiguous in
+    declared order -- 5,130 distinct keys are scattered across 29,430 positions
+    -- so partitioning must group by key rather than by position. Declared
+    order is carried on each spec's index and restored by the caller.
+    """
+    groups: dict[tuple[Any, ...], list[tuple[int, ResultRowSpec]]] = {}
+    for index, spec in indexed_specs:
+        key = (
+            spec.arm_id, spec.outcome_name, spec.path_estimand, spec.support_kind,
+            spec.horizon_minutes, spec.contrast_name, spec.population_estimand,
+            spec.contrast_weighting, spec.target_cell,
+        )
+        groups.setdefault(key, []).append((index, spec))
+    ordered_groups = sorted(groups.values(), key=lambda group: group[0][0])
+    if partition_count <= 1 or len(ordered_groups) <= 1:
+        return (tuple(indexed_specs),)
+    buckets: list[list[tuple[int, ResultRowSpec]]] = [
+        [] for _ in range(min(partition_count, len(ordered_groups)))
+    ]
+    # Longest group first into the currently smallest bucket: the largest unit
+    # sets the wall clock, so it must not be scheduled last.
+    #
+    # Groups are appended WHOLE and are deliberately NOT re-sorted by declared
+    # index afterwards. weight_cache and diagnostic_cache clear whenever
+    # cache_scope changes, so a bucket resorted into declared order would
+    # interleave scopes and recompute weights the serial sweep computes once.
+    # Intra-partition order cannot affect any output value: every spec carries
+    # its declared index, and the parent merges strictly by that index before
+    # its single registry mints global identifiers. Worker-local identifiers
+    # are opaque handles only. Keeping a group contiguous is therefore free
+    # correctness-wise and materially cheaper.
+    for group in sorted(ordered_groups, key=len, reverse=True):
+        smallest = min(buckets, key=len)
+        smallest.extend(group)
+    return tuple(tuple(bucket) for bucket in buckets if bucket)
+
+
+PHASE8_STAGE1_WORKERS_ENV = "MNQ_PHASE8_STAGE1_WORKERS"
+
+
+def _contrast_worker_count() -> int:
+    """Resolve stage 1 worker count.
+
+    Defaults to serial. Parallelism is opt-in through the environment so no
+    existing caller, test or fixture silently changes execution mode, and so
+    the single-core path stays available as the identity oracle. ``0`` or a
+    negative value means every available core.
+    """
+    raw = os.environ.get(PHASE8_STAGE1_WORKERS_ENV)
+    if raw is None or not raw.strip():
+        return 1
+    try:
+        requested = int(raw)
+    except ValueError as exc:
+        raise SpineError(
+            f"{PHASE8_STAGE1_WORKERS_ENV} must be an integer, got {raw!r}"
+        ) from exc
+    if requested <= 0:
+        return max(1, os.cpu_count() or 1)
+    return requested
+
+
+def _run_contrast_partitions(
+    inputs: ProductionInputs,
+    partitions: tuple[tuple[tuple[int, ResultRowSpec], ...], ...],
+    progress: Any,
+) -> list[_ContrastPartition]:
+    """Run contrast partitions in worker processes and collect their results.
+
+    Results are returned in completion order; the caller restores declared
+    order from each entry's index, so completion order cannot affect output.
+    """
+    import multiprocessing
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+
+    # Use an explicit start-method context, matching the existing bootstrap
+    # executor in uncertainty.py rather than relying on the interpreter
+    # default: spawn on Windows, fork on POSIX. Under spawn, each child
+    # re-imports the entry module, so any caller must guard its entry point
+    # with ``if __name__ == "__main__"`` or the pool cannot start.
+    context = multiprocessing.get_context(
+        "spawn" if os.name == "nt" else "fork"
+    )
+    results: list[_ContrastPartition] = []
+    completed_specs = 0
+    with ProcessPoolExecutor(
+        max_workers=len(partitions),
+        mp_context=context,
+        initializer=_worker_initializer,
+        initargs=(
+            str(inputs.root), inputs.run_manifest, inputs.unit_manifest,
+            inputs.phase7_manifest, inputs.input_manifest_sha256,
+        ),
+    ) as executor:
+        futures = {
+            executor.submit(_worker_contrast_partition, partition): len(partition)
+            for partition in partitions
+        }
+        for future in as_completed(futures):
+            results.append(future.result())
+            completed_specs += futures[future]
+            if progress is not None:
+                progress.advance(completed_specs)
+    return results
+
+
+_WORKER_STATE: dict[str, Any] = {}
+
+
+def _worker_initializer(
+    root: str,
+    run_manifest: Mapping[str, Any],
+    unit_manifest: Mapping[str, Any],
+    phase7_manifest: Mapping[str, Any],
+    input_manifest_sha256: tuple[tuple[str, str], ...],
+) -> None:
+    """Open the ratified inputs once per worker.
+
+    ``ProductionInputs`` holds memory-mapped arrays that cannot be pickled, so
+    each worker opens its own from the same ratified root. This is spawn-safe
+    on Windows as well as fork-safe on Linux.
+    """
+    inputs = open_production_inputs(
+        Path(root), run_manifest=run_manifest, unit_manifest=unit_manifest,
+        phase7_manifest=phase7_manifest, input_manifest_sha256=input_manifest_sha256,
+    )
+    primary = inputs.arms[PRIMARY_ARM_ID]
+    _WORKER_STATE["inputs"] = inputs
+    _WORKER_STATE["migrations"] = {
+        arm: _migration(primary, inputs.arms[arm]) for arm in ALTERNATIVE_ARM_IDS
+    }
+
+
+def _worker_contrast_partition(
+    indexed_specs: tuple[tuple[int, ResultRowSpec], ...],
+) -> _ContrastPartition:
+    return _contrast_partition(
+        _WORKER_STATE["inputs"], indexed_specs, _WORKER_STATE["migrations"],
+    )
+
+
+def _merge_contrast_partitions(
+    results: tuple[_ContrastPartition, ...],
+) -> _MergedContrastPartitions:
+    """Merge opaque worker handles through one parent-owned term registry.
+
+    Completion order and worker-local mapping order are deliberately ignored.
+    Every identifier is minted centrally while entries are visited in declared
+    structural order. A worker handle is scoped to its partition and cannot
+    reach an output request.
+    """
+    registry = _TermRegistry()
+    rows: list[dict[str, Any]] = []
+    requests: list[BootstrapIntervalRequest] = []
+    census: list[TermSupportRecord] = []
+    census_seen: set[str] = set()
+    handle_to_global: dict[tuple[int, Hashable], Hashable] = {}
+    payload_by_handle = {
+        (part_index, handle): payload
+        for part_index, part in enumerate(results)
+        for handle, payload in part.payloads.items()
+    }
+    entry_partition = {
+        id(entry): part_index
+        for part_index, part in enumerate(results)
+        for entry in part.entries
+    }
+    entries = sorted(
+        (entry for part in results for entry in part.entries),
+        key=lambda item: item.index,
+    )
+    if len({entry.index for entry in entries}) != len(entries):
+        raise SpineError("contrast partitions contain a duplicate declared index")
+    for entry in entries:
+        rows.append(entry.row)
+        for census_entry in entry.census:
+            if census_entry.identity not in census_seen:
+                census_seen.add(census_entry.identity)
+                census.append(build_term_support_record(
+                    key=census_entry.key,
+                    session_ids=census_entry.support_sessions,
+                    status=census_entry.status,
+                ))
+        if entry.request is None:
+            continue
+        rid, target_handle, baseline_handle, decision = entry.request
+        global_ids: list[Hashable | None] = []
+        for handle in (target_handle, baseline_handle):
+            if handle is None:
+                global_ids.append(None)
+                continue
+            scoped = (entry_partition[id(entry)], handle)
+            if scoped not in payload_by_handle:
+                raise SpineError("contrast partition request has no term payload")
+            resolved = handle_to_global.get(scoped)
+            if resolved is None:
+                resolved = registry.register_payload(*payload_by_handle[scoped])
+                handle_to_global[scoped] = resolved
+            global_ids.append(resolved)
+        requests.append(BootstrapIntervalRequest(
+            rid, global_ids[0], global_ids[1], decision,
+        ))
+    return _MergedContrastPartitions(
+        tuple(rows), registry, tuple(requests), tuple(census),
+        frozenset(census_seen),
+    )
+
+
+def build_production_computation(inputs: ProductionInputs) -> ProductionComputation:
+    """Compute all point inventories and construct only status-ok interval requests."""
+    declared = declared_result_rows()
+    contrast_rows: list[dict[str, Any]] = []
+    day_rows: list[dict[str, Any]] = []
+    interaction_rows: list[dict[str, Any]] = []
+    registry = _TermRegistry()
+    requests: list[Any] = []
+    census: list[TermSupportRecord] = []
+    census_seen: set[str] = set()
+    primary = inputs.arms[PRIMARY_ARM_ID]
+    migrations = {arm: _migration(primary, inputs.arms[arm]) for arm in ALTERNATIVE_ARM_IDS}
+    cells = tuple(CellKey(phase, state) for phase in SESSION_PHASES for state in VOLATILITY_STATES)
+    slice_cache: dict[tuple[str, int], tuple[np.ndarray, ...]] = {}
+    weight_cache: dict[tuple[Any, ...], Any] = {}
+    diagnostic_cache: dict[tuple[Any, ...], tuple[Any, Any, Any]] = {}
+    value_cache: dict[tuple[str, str, int], np.ndarray] = {}
+    active_cache_scope: tuple[Any, ...] | None = None
+
+    def add_census(
+        key: BootstrapTermKey,
+        support_sessions: tuple[Hashable, ...],
+        weights_for_identity: np.ndarray,
+        status: str,
+        outcome_name: str,
+        empty_axis_key: tuple[Any, ...],
+    ) -> None:
+        digest = hashlib.sha256()
+        positive = np.flatnonzero(weights_for_identity > 0.0)
+        digest.update(key.family.encode("ascii"))
+        digest.update(key.term_role.encode("utf-8"))
+        digest.update(outcome_name.encode("ascii"))
+        digest.update(status.encode("ascii"))
+        digest.update(positive.tobytes())
+        digest.update(np.asarray(weights_for_identity[positive], dtype=np.float64).tobytes())
+        if positive.size == 0:
+            digest.update(repr(empty_axis_key).encode("utf-8"))
+        identity = digest.hexdigest()
+        if identity not in census_seen:
+            census_seen.add(identity)
+            census.append(build_term_support_record(
+                key=key, session_ids=support_sessions, status=status
+            ))
+
+    sink = _progress.get_sink()
+    contrast_progress = sink.phase(_progress.PHASE_CONTRASTS, len(declared))
+    indexed_specs = tuple(enumerate(declared))
+    partitions = _partition_indexed_specs(indexed_specs, _contrast_worker_count())
+    if len(partitions) <= 1:
+        results = [_contrast_partition(inputs, indexed_specs, migrations, contrast_progress)]
+    else:
+        results = _run_contrast_partitions(inputs, partitions, contrast_progress)
+
+    merged = _merge_contrast_partitions(tuple(results))
+    contrast_rows = list(merged.rows)
+    registry = merged.registry
+    requests = list(merged.requests)
+    census = list(merged.census)
+    census_seen = set(merged.census_identities)
 
     # Day-type inventory, primary arm only.
     _day_type_specs = tuple(declared_day_type_rows())
-    day_progress = _Progress("day_types", len(_day_type_specs))
+    day_progress = sink.phase(_progress.PHASE_DAY_TYPES, len(_day_type_specs))
     for _day_position, spec in enumerate(_day_type_specs, start=1):
-        day_progress.advance(_day_position)
         unit_mask, sessions, timestamps, valid, common = slice_cache[(spec.path_estimand, spec.horizon_minutes)]
         del timestamps
         completed = valid if spec.support_kind == "horizon_specific" else (valid & common)
@@ -616,12 +921,12 @@ def build_production_computation(inputs: ProductionInputs) -> ProductionComputat
             "completion": _json(result.completion), "status": result.status,
             "status_flags": _json(result.status_flags),
         })
+        day_progress.advance(_day_position)
 
     # Interaction inventory. Degenerate cells are emitted without building support.
     _interaction_specs = tuple(declared_interaction_rows())
-    interaction_progress = _Progress("interactions", len(_interaction_specs))
+    interaction_progress = sink.phase(_progress.PHASE_INTERACTIONS, len(_interaction_specs))
     for _interaction_position, spec in enumerate(_interaction_specs, start=1):
-        interaction_progress.advance(_interaction_position)
         unit_mask, sessions, timestamps, valid, common = slice_cache[(spec.path_estimand, spec.horizon_minutes)]
         del timestamps
         completed = valid if spec.support_kind == "horizon_specific" else (valid & common)
@@ -647,6 +952,7 @@ def build_production_computation(inputs: ProductionInputs) -> ProductionComputat
                 "status_flags": _json(("degenerate_baseline",)),
                 "panel_label": DESCRIPTIVE_ONLY_LABEL,
             })
+            interaction_progress.advance(_interaction_position)
             continue
         support = build_four_cell_support(
             sessions, primary.phases, primary.states, completed & primary.active,
@@ -693,6 +999,7 @@ def build_production_computation(inputs: ProductionInputs) -> ProductionComputat
             "status": evaluation.status, "status_flags": _json(evaluation.status_flags),
             "panel_label": DESCRIPTIVE_ONLY_LABEL,
         })
+        interaction_progress.advance(_interaction_position)
 
     if len(contrast_rows) != 29_430 or len(day_rows) != 216 or len(interaction_rows) != 720:
         raise SpineError("Phase 8 point inventory differs from the complete declared counts")

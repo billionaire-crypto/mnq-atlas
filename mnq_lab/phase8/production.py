@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import sys
+import time
 from pathlib import Path
 from typing import Any, Hashable, Mapping
 
@@ -195,6 +197,48 @@ class BootstrapTermRecipe:
         )
 
 
+_PROGRESS_MINIMUM_TOTAL = 1_000
+_PROGRESS_EVERY = 250
+
+
+class _Progress:
+    """Stage progress on stderr: counts and timings only, never a value.
+
+    Emitting a measured quantity here would put a tick, quantile, contrast or
+    interval endpoint into an operator log, so this class is deliberately
+    incapable of receiving one -- it accepts an item count and nothing else.
+
+    Silent below ``_PROGRESS_MINIMUM_TOTAL`` items so the small fixtures used
+    throughout the test suite produce no output.
+    """
+
+    def __init__(self, stage: str, total: int) -> None:
+        self.stage = stage
+        self.total = int(total)
+        self.started = time.perf_counter()
+        self.enabled = self.total >= _PROGRESS_MINIMUM_TOTAL
+        if self.enabled:
+            self._emit(0)
+
+    def _emit(self, done: int) -> None:
+        elapsed = time.perf_counter() - self.started
+        rate = done / elapsed if elapsed > 0.0 and done > 0 else 0.0
+        remaining = (self.total - done) / rate if rate > 0.0 else float("nan")
+        percent = 100.0 * done / self.total if self.total else 100.0
+        print(
+            f"[phase8] {self.stage} {done}/{self.total} ({percent:.1f}%) "
+            f"elapsed={elapsed:.1f}s rate={rate:.1f}/s eta={remaining:.0f}s",
+            file=sys.stderr,
+            flush=True,
+        )
+
+    def advance(self, done: int) -> None:
+        if not self.enabled:
+            return
+        if done % _PROGRESS_EVERY == 0 or done == self.total:
+            self._emit(done)
+
+
 class _TermRegistry:
     def __init__(self) -> None:
         self._payloads: dict[str, list[tuple[np.ndarray, np.ndarray, np.ndarray]]] = {}
@@ -366,7 +410,9 @@ def build_production_computation(inputs: ProductionInputs) -> ProductionComputat
                 key=key, session_ids=support_sessions, status=status
             ))
 
-    for spec in declared:
+    contrast_progress = _Progress("contrasts", len(declared))
+    for spec_position, spec in enumerate(declared, start=1):
+        contrast_progress.advance(spec_position)
         cache_scope = (
             spec.arm_id, spec.outcome_name, spec.path_estimand,
             spec.support_kind, spec.horizon_minutes,
@@ -525,7 +571,10 @@ def build_production_computation(inputs: ProductionInputs) -> ProductionComputat
         })
 
     # Day-type inventory, primary arm only.
-    for spec in declared_day_type_rows():
+    _day_type_specs = tuple(declared_day_type_rows())
+    day_progress = _Progress("day_types", len(_day_type_specs))
+    for _day_position, spec in enumerate(_day_type_specs, start=1):
+        day_progress.advance(_day_position)
         unit_mask, sessions, timestamps, valid, common = slice_cache[(spec.path_estimand, spec.horizon_minutes)]
         del timestamps
         completed = valid if spec.support_kind == "horizon_specific" else (valid & common)
@@ -569,7 +618,10 @@ def build_production_computation(inputs: ProductionInputs) -> ProductionComputat
         })
 
     # Interaction inventory. Degenerate cells are emitted without building support.
-    for spec in declared_interaction_rows():
+    _interaction_specs = tuple(declared_interaction_rows())
+    interaction_progress = _Progress("interactions", len(_interaction_specs))
+    for _interaction_position, spec in enumerate(_interaction_specs, start=1):
+        interaction_progress.advance(_interaction_position)
         unit_mask, sessions, timestamps, valid, common = slice_cache[(spec.path_estimand, spec.horizon_minutes)]
         del timestamps
         completed = valid if spec.support_kind == "horizon_specific" else (valid & common)

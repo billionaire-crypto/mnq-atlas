@@ -828,6 +828,19 @@ def _merge_contrast_partitions(
     )
 
 
+def _cached_slice(
+    cache: dict[tuple[str, int], tuple[np.ndarray, ...]],
+    inputs: ProductionInputs,
+    key: tuple[str, int],
+) -> tuple[np.ndarray, ...]:
+    """Return an input slice, rebuilding a worker-local cache miss."""
+    cached = cache.get(key)
+    if cached is None:
+        cached = _slice(inputs, *key)
+        cache[key] = cached
+    return cached
+
+
 def build_production_computation(inputs: ProductionInputs) -> ProductionComputation:
     """Compute all point inventories and construct only status-ok interval requests."""
     declared = declared_result_rows()
@@ -892,7 +905,9 @@ def build_production_computation(inputs: ProductionInputs) -> ProductionComputat
     _day_type_specs = tuple(declared_day_type_rows())
     day_progress = sink.phase(_progress.PHASE_DAY_TYPES, len(_day_type_specs))
     for _day_position, spec in enumerate(_day_type_specs, start=1):
-        unit_mask, sessions, timestamps, valid, common = slice_cache[(spec.path_estimand, spec.horizon_minutes)]
+        unit_mask, sessions, timestamps, valid, common = _cached_slice(
+            slice_cache, inputs, (spec.path_estimand, spec.horizon_minutes)
+        )
         del timestamps
         completed = valid if spec.support_kind == "horizon_specific" else (valid & common)
         day_types = np.full(sessions.size, "regular", dtype="<U21")
@@ -939,7 +954,9 @@ def build_production_computation(inputs: ProductionInputs) -> ProductionComputat
     _interaction_specs = tuple(declared_interaction_rows())
     interaction_progress = sink.phase(_progress.PHASE_INTERACTIONS, len(_interaction_specs))
     for _interaction_position, spec in enumerate(_interaction_specs, start=1):
-        unit_mask, sessions, timestamps, valid, common = slice_cache[(spec.path_estimand, spec.horizon_minutes)]
+        unit_mask, sessions, timestamps, valid, common = _cached_slice(
+            slice_cache, inputs, (spec.path_estimand, spec.horizon_minutes)
+        )
         del timestamps
         completed = valid if spec.support_kind == "horizon_specific" else (valid & common)
         values = np.asarray(inputs.unit[spec.outcome_name][unit_mask], dtype=np.int32)

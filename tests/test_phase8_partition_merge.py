@@ -186,3 +186,22 @@ def test_stage1_pool_recycles_each_one_partition_worker(monkeypatch, tmp_path):
     assert captured["processes"] == 2
     assert captured["chunksize"] == 1
     assert captured["maxtasksperchild"] == 1
+
+
+def test_post_contrast_inventory_rebuilds_worker_local_slice_cache(monkeypatch):
+    """An extracted contrast worker leaves the parent slice cache empty."""
+    expected = tuple(np.asarray([index]) for index in range(5))
+    calls = []
+
+    def fake_slice(inputs, path_estimand, horizon_minutes):
+        calls.append((inputs, path_estimand, horizon_minutes))
+        return expected
+
+    monkeypatch.setattr(production, "_slice", fake_slice)
+    inputs = object()
+    cache = {}
+    key = ("fully_labeled_1m_grid", 15)
+
+    assert production._cached_slice(cache, inputs, key) is expected
+    assert production._cached_slice(cache, inputs, key) is expected
+    assert calls == [(inputs, "fully_labeled_1m_grid", 15)]

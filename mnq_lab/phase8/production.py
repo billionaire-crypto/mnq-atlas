@@ -681,7 +681,6 @@ def _run_contrast_partitions(
     order from each entry's index, so completion order cannot affect output.
     """
     import multiprocessing
-    from concurrent.futures import ProcessPoolExecutor, as_completed
 
     # Use an explicit start-method context, matching the existing bootstrap
     # executor in uncertainty.py rather than relying on the interpreter
@@ -691,26 +690,39 @@ def _run_contrast_partitions(
     context = multiprocessing.get_context(
         "spawn" if os.name == "nt" else "fork"
     )
-    results: list[_ContrastPartition] = []
-    completed_specs = 0
-    with ProcessPoolExecutor(
-        max_workers=len(partitions),
-        mp_context=context,
+    # Each worker owns one complete cache-preserving partition and can retain
+    # tens of GiB in its Python allocator after returning that partition.  A
+    # persistent executor therefore keeps the worker heap resident while the
+    # same payload accumulates in the parent.  ``maxtasksperchild=1`` makes the
+    # operating lifetime match the scientific work unit: once the one
+    # partition has been serialized, that process exits and releases its
+    # private heap.  This changes no partition, row, payload, or merge order.
+    pool = context.Pool(
+        processes=len(partitions),
         initializer=_worker_initializer,
         initargs=(
             str(inputs.root), inputs.run_manifest, inputs.unit_manifest,
             inputs.phase7_manifest, inputs.input_manifest_sha256,
         ),
-    ) as executor:
-        futures = {
-            executor.submit(_worker_contrast_partition, partition): len(partition)
-            for partition in partitions
-        }
-        for future in as_completed(futures):
-            results.append(future.result())
-            completed_specs += futures[future]
+        maxtasksperchild=1,
+    )
+    results: list[_ContrastPartition] = []
+    completed_specs = 0
+    try:
+        completed = pool.imap_unordered(
+            _worker_contrast_partition, partitions, chunksize=1
+        )
+        pool.close()
+        for result in completed:
+            results.append(result)
+            completed_specs += len(result.entries)
             if progress is not None:
                 progress.advance(completed_specs)
+        pool.join()
+    except BaseException:
+        pool.terminate()
+        pool.join()
+        raise
     return results
 
 

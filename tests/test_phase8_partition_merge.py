@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
@@ -128,3 +130,59 @@ def test_old_worker_identifier_map_is_a_discriminating_negative_control(
     assert len(
         production._merge_contrast_partitions((first, second)).registry.recipes
     ) == 2
+
+
+def test_stage1_pool_recycles_each_one_partition_worker(monkeypatch, tmp_path):
+    """A worker retaining a returned 15-GiB heap is a named OOM witness."""
+    captured = {}
+
+    class FakePool:
+        def __init__(
+            self, *, processes, initializer, initargs, maxtasksperchild
+        ):
+            captured.update(
+                processes=processes,
+                initializer=initializer,
+                initargs=initargs,
+                maxtasksperchild=maxtasksperchild,
+            )
+            self.closed = False
+            self.joined = False
+            self.terminated = False
+
+        def imap_unordered(self, function, partitions, *, chunksize):
+            captured["function"] = function
+            captured["chunksize"] = chunksize
+            return iter(
+                _partition(index, 10 + index)
+                for index, _ in enumerate(partitions)
+            )
+
+        def close(self):
+            self.closed = True
+
+        def join(self):
+            self.joined = True
+
+        def terminate(self):
+            self.terminated = True
+
+    fake_context = SimpleNamespace(Pool=FakePool)
+    monkeypatch.setattr(
+        "multiprocessing.get_context", lambda _method: fake_context
+    )
+    inputs = SimpleNamespace(
+        root=tmp_path,
+        run_manifest={},
+        unit_manifest={},
+        phase7_manifest={},
+        input_manifest_sha256=(),
+    )
+    partitions = ((object(),), (object(),))
+
+    results = production._run_contrast_partitions(inputs, partitions, None)
+
+    assert len(results) == 2
+    assert captured["processes"] == 2
+    assert captured["chunksize"] == 1
+    assert captured["maxtasksperchild"] == 1

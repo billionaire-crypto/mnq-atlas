@@ -89,6 +89,13 @@ def _bool_vector(values: Any, name: str) -> np.ndarray:
 
 def _session_labels(values: Any) -> tuple[Hashable, ...]:
     array = _one_dimensional(values, "session_ids")
+    # A homogeneous non-bool integer array is unambiguously valid: integers
+    # are always finite and always hashable, and numpy unified every element
+    # into one concrete integer dtype rather than falling back to object,
+    # which is itself the proof no element was ambiguous. Every other dtype
+    # falls through to the exact per-element validator below.
+    if array.dtype.kind in ("i", "u"):
+        return tuple(array.tolist())
     labels: list[Hashable] = []
     for row_index, raw_label in enumerate(np.asarray(array, dtype=object)):
         label = raw_label.item() if isinstance(raw_label, np.generic) else raw_label
@@ -121,6 +128,29 @@ def _session_labels(values: Any) -> tuple[Hashable, ...]:
 
 def _quarter_labels(values: Any) -> tuple[str, ...]:
     array = _one_dimensional(values, "calendar_quarters")
+    # A unicode array holds only strings, so validity depends solely on the
+    # distinct values present. There are at most a few dozen distinct quarters
+    # across the corpus, so validating the unique set and then locating the
+    # first offending row costs a pass instead of a per-row Python check, and
+    # raises the identical index and message.
+    if array.dtype.kind == "U":
+        unique_labels = np.unique(array)
+        invalid = [
+            label
+            for label in unique_labels.tolist()
+            if len(label) != 6
+            or not label[:4].isdigit()
+            or label[4] != "Q"
+            or label[5] not in "1234"
+        ]
+        if invalid:
+            offending = np.flatnonzero(np.isin(array, invalid))
+            row_index = int(offending[0])
+            raise SpineError(
+                f"calendar_quarters contains an invalid year-quarter at index {row_index}: "
+                f"{array[row_index].item()!r}"
+            )
+        return tuple(array.tolist())
     labels: list[str] = []
     for row_index, raw_label in enumerate(np.asarray(array, dtype=object)):
         label = raw_label.item() if isinstance(raw_label, np.generic) else raw_label

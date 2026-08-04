@@ -201,19 +201,42 @@ def support_masks(
             f"got {phases.size} and {states.size}"
         )
 
-    for row_index, phase in enumerate(phases):
-        if not isinstance(phase, (str, np.str_)) or phase not in SESSION_PHASES:
+    # A unicode-dtype array cannot contain a non-string, so only membership
+    # can fail and np.isin decides it in one pass. np.flatnonzero gives the
+    # first offending row, reproducing the per-element loop's index and
+    # message exactly. Any other dtype may hold mixed or non-string objects
+    # and falls back to that loop unchanged.
+    if phases.dtype.kind == "U":
+        undeclared = np.flatnonzero(~np.isin(phases, SESSION_PHASES))
+        if undeclared.size:
+            row_index = int(undeclared[0])
             raise SpineError(
-                f"undeclared Phase 8 session phase at index {row_index}: {phase!r}"
+                f"undeclared Phase 8 session phase at index {row_index}: "
+                f"{phases[row_index]!r}"
             )
-    for row_index, state in enumerate(states):
-        if (
-            not isinstance(state, (str, np.str_))
-            or state not in VOLATILITY_STATES
-        ):
+    else:
+        for row_index, phase in enumerate(phases):
+            if not isinstance(phase, (str, np.str_)) or phase not in SESSION_PHASES:
+                raise SpineError(
+                    f"undeclared Phase 8 session phase at index {row_index}: {phase!r}"
+                )
+    if states.dtype.kind == "U":
+        undeclared = np.flatnonzero(~np.isin(states, VOLATILITY_STATES))
+        if undeclared.size:
+            row_index = int(undeclared[0])
             raise SpineError(
-                f"undeclared volatility state at index {row_index}: {state!r}"
+                f"undeclared volatility state at index {row_index}: "
+                f"{states[row_index]!r}"
             )
+    else:
+        for row_index, state in enumerate(states):
+            if (
+                not isinstance(state, (str, np.str_))
+                or state not in VOLATILITY_STATES
+            ):
+                raise SpineError(
+                    f"undeclared volatility state at index {row_index}: {state!r}"
+                )
 
     target_mask = (phases == target.phase) & (
         states == target.volatility_state

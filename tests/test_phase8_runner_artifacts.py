@@ -21,6 +21,9 @@ from mnq_lab.phase8.runner import (
     InventoryChunk,
     execute_checkpointed_chunks,
 )
+from mnq_lab.phase8 import uncertainty as uncertainty_module
+from mnq_lab.phase8.diagnostics import status_decision
+from mnq_lab.phase8.uncertainty import BootstrapIntervalRequest, BootstrapQuantileTerm
 
 
 def _identity(*, workers=2):
@@ -196,3 +199,65 @@ def test_launch_preflight_fails_before_any_chunk_computation(tmp_path):
             memory_gate=gate,
         )
     assert called is False
+
+
+def test_small_synthetic_pipeline_reaches_all_four_canonical_tables(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(uncertainty_module, "DRAWS_PER_BLOCK_LENGTH", 999)
+    groups = np.repeat(np.arange(4, dtype=np.int32), 2)
+    mask = np.ones(groups.size, dtype=np.bool_)
+    weights = np.full(groups.size, 1 / groups.size)
+    term = BootstrapQuantileTerm(
+        "smoke-term", np.arange(groups.size, dtype=np.int32), mask, weights, "q50"
+    )
+    ok = status_decision(
+        degenerate_baseline=False,
+        insufficient_anchors=False,
+        insufficient_completion=False,
+        insufficient_overlap=False,
+    )
+    request = BootstrapIntervalRequest("smoke-point", term.term_id, None, ok)
+    plans = uncertainty_module._prepare_joint_plan_matrices(groups, (term,))
+    result = uncertainty_module._joint_bootstrap_intervals_with_plan_matrices(
+        groups, (term,), (request,), plans
+    )
+    interval = result.requests[0].intervals[0]
+    columns = []
+    values = {
+        "row_id": "smoke-point:1",
+        "point_row_id": "smoke-point",
+        "mean_block_sessions": interval.mean_block_sessions,
+        "draws": interval.draws,
+        "confidence_level": interval.confidence_level,
+        "ci_lower_ticks": interval.ci_lower_ticks,
+        "ci_upper_ticks": interval.ci_upper_ticks,
+        "interval_valid": interval.interval_valid,
+        "rng_root_entropy": str(interval.rng_root_entropy),
+        "rng_child_spawn_key": str(interval.rng_child_spawn_key),
+        "historical_mixture_disclosure": interval.historical_mixture_disclosure,
+        "conditioner_uncertainty_disclosure": interval.conditioner_uncertainty_disclosure,
+        "weight_ess_disclosure": interval.weight_ess_disclosure,
+    }
+    for name in PHASE8_TABLE_SCHEMAS["intervals"]:
+        value = values[name]
+        if name in {"mean_block_sessions", "draws", "ci_lower_ticks", "ci_upper_ticks"}:
+            array = np.asarray([value], dtype=np.int64)
+        elif name == "confidence_level":
+            array = np.asarray([value], dtype=np.float64)
+        elif name == "interval_valid":
+            array = np.asarray([value], dtype=np.bool_)
+        else:
+            array = np.asarray([value])
+        columns.append((name, array))
+    tables = list(_tables())
+    tables[1] = Phase8Table("intervals", tuple(columns))
+    manifest = write_phase8_artifacts(
+        tmp_path / "smoke-output",
+        tuple(tables),
+        provenance={"synthetic": True},
+        operating={"workers": 1, "aggregate_peak_memory_bytes": 1},
+        limitations=("synthetic smoke only",),
+    )
+    assert manifest["tables"]["intervals"]["row_count"] == 1
+    assert tuple(manifest["tables"]) == PHASE8_TABLE_ORDER

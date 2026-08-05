@@ -1520,3 +1520,83 @@ interprets or emphasizes no measured value.
 artifact manifest or closeout exists and none is authorized here. The
 identity proof for each change is the acceptance gate, not a plausible
 argument: per D27, a plausible argument is not a proof.
+---
+
+## D31. Phase 8 completion denominator omitted structural RTH fit
+
+**Defect.** Phase 8 gated admissibility on a completion rate whose
+denominator omitted the structural fit of the outcome window. S00, which
+derived the frozen thresholds, uses
+`state anchor AND window_fits_rth_h{horizon}`
+(`mnq_lab/outcomes/completion.py:_summarise`). Phase 8 production supplied
+only `arm.active` as `structurally_eligible`; `window_fits_rth` is loaded at
+`production.py:127`, discarded by `_slice`, and never reaches
+`completion_diagnostics`. No comment, test, ledger entry or preregistration
+clause authorising the wider denominator was found.
+
+An outcome window that leaves RTH is not missing data. The requested outcome
+is structurally undefined, so counting it as an incomplete observation
+understates completion.
+
+**Discovered after v1 completed.** The defect was found while investigating
+why the closed Phase 8 v1 artifact returned no admissible cell for the close
+phase. `phase8-first-run-v1` remains immutable evidence of what the previous
+mechanism produced and is not edited, deleted or reused.
+
+**No outcome magnitude was inspected to choose the correction.** The
+investigation used support, completion, structural-fit and cell-count
+information only.
+
+**Measured.** `outcome_valid` is a strict subset of `window_fits_rth`: zero
+violations across 472,212 Unit O rows, so a non-fitting anchor can never be
+complete. Primary-arm structural fit fractions are 100.0 percent for open,
+morning, midday and afternoon at every horizon, and 83.3, 58.3 and 8.3
+percent for close at h15, h30 and h60. The atomic denominator difference is
+therefore confined to the close phase, although its status effect is not,
+because comparison baselines for other phases can include close cells.
+
+The S00 record `data/exploration/s00/s00_threshold_input_v1.json` was
+reproduced independently. Its fifth-percentile cell is midday at every
+horizon: 23,866/24,003 at h15, 23,763/24,003 at h30 and 23,568/24,003 at
+h60, giving 0.9942923801191518, 0.9900012498437696 and 0.9818772653418323.
+Applying the registered rule `max(0.90, floor(s00_p05 * 100) / 100)` returns
+0.99, 0.99 and 0.98. The frozen YAML thresholds are correct and are NOT
+changed by this entry. The record stores those fractions in reduced form
+(7,921/8,001 and 7,856/8,001); the unreduced counts are the midday cell
+counts and agree exactly.
+
+In that same S00 record the close phase reports a completion rate of exactly
+1.000000 at all three horizons, on denominators of 9,740, 6,818 and 974
+against 11,688 state anchors. Under the correct denominator the close phase
+is fully complete; under the Phase 8 denominator it produced no admissible
+cell at all.
+
+**Correction.** The structural denominator becomes support-aware:
+
+- `horizon_specific`: `arm.active AND window_fits_rth(named horizon)`
+- `common_support`:   `arm.active AND window_fits_rth(60 minutes)`
+
+The second rule follows from the Unit O contract recorded in
+`docs/OUTCOME_LAYER_PREREGISTRATION.md`: for each estimand `common_support`
+is computed independently as validity at the maximum declared horizon, so a
+15- or 30-minute common-support row uses that estimand's 60-minute-valid
+anchors. Its structurally eligible population must therefore be the
+population whose 60-minute window can fit RTH. `common_support` itself
+remains the completion event in the numerator and is not used as the
+denominator.
+
+**Scope.** The correction changes admissibility and the resulting interval
+inventory. It does not change point support, estimand weights, target or
+baseline masks, contrast weighting, positivity, status precedence,
+quantiles, the resampler, the bootstrap, or interval construction. The draw
+count, block lengths, entropy, bit generator, confidence level and interval
+probabilities are untouched.
+
+**A new versioned run is required.** The correction cannot be applied to
+`phase8-first-run-v1`. A corrected run must use a new versioned output root
+after audit authorisation.
+
+**Status:** `OPEN`. This entry records the defect and the authorised
+correction. It does not reopen the Phase 8 closeout, which remains the
+accurate record of what the previous mechanism produced, and it does not
+authorise Phase 9.

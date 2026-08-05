@@ -54,6 +54,10 @@ include `scheduled_rth_open_ct`, `scheduled_rth_close_ct`, `scheduled_rth_status
 
 `scheduled_rth_close_ct` is loaded and validated but **never consumed for a
 decision**. The data required to fix scheduled closes has been present all along.
+Precisely: the column exists on all 1,018 rows and is *populated* on 1,008. The
+ten blanks are the 9 `full_exchange_holiday` rows plus the single
+`no_scheduled_rth` session (20210402) — rows the calendar validator requires to
+be empty, not missing data.
 
 **Phase 7 v1 labels six sessions `unresolved_truncated_session`** — measured from
 `phase7-unit-o-first-run-v1/phase7/assignments`: 1,003 `ok`, 6 truncated, being
@@ -82,15 +86,20 @@ enumerated, not assumed inert.
 | | Case | Decided by | Available now? |
 |---|---|---|---|
 | A | Scheduled closure | calendar v1 `scheduled_rth_close_ct` | **yes** |
-| B | Registered temporary interruption | new registered interruption input | **no — gated, see §10** |
+| B1 | Registered temporary interruption, boundaries known | registered interruption input | supported, none registered |
+| B2 | Official interruption, boundaries unresolved | **session-exclusion registry (D33)** | **yes** |
 | C | Genuine data absence | bars absent while structurally available | yes |
 | D | Present but not fully labeled | existing estimand split | yes (unchanged) |
 | E | No scheduled RTH | calendar v1 `scheduled_rth_status = no_scheduled_rth` | **yes** |
 
-A, C, D and E are decidable today from ratified inputs. Only B is blocked.
+D33 split the original case B. B1 remains the model for interruptions whose exact
+start and end are authoritative; no such record exists yet, and the machinery is
+retained for future ones. B2 is the treatment ruled for the four March 2020
+sessions whose CME boundaries are not established: the whole session is excluded
+rather than classified intraday.
 
-Never infer A, B or E from absent bars. C is the *residual* case: it is what
-remains after A, B and E are excluded, never a positive inference.
+Never infer A, B1, B2 or E from absent bars. C is the *residual* case: it is what
+remains after the others are excluded, never a positive inference.
 
 ---
 
@@ -146,6 +155,25 @@ StructuralInterruption     (frozen)
 `SessionScheduleTable` holds a `MappingProxyType` keyed by `session_id` — immutable,
 loaded once, passed explicitly. No module-level mutable calendar, no per-row I/O.
 
+**The exclusion registry (D33).** A separate byte-pinned input, never a calendar
+mutation:
+
+```
+SessionExclusion           (frozen)
+    session_id: int                        # references a calendar v1 identity
+    reason: str                            # closed vocabulary
+    source_id: str
+    recorded_by_ruling: str                # "D33"
+```
+
+It is loaded once into an immutable frozenset held on the schedule table, is
+pinned by sha256 in the manifest, and fails closed on an unknown reason, a
+duplicate session, or a session absent from calendar v1. The registry adds no
+per-row filesystem access: exclusion is a set membership test on an in-memory
+structure. The only registered reason today is
+`excluded_unresolved_official_interruption`, carrying the four March 2020
+sessions. Calendar v1 is not edited, reissued or superseded.
+
 ---
 
 ## 7. The decision function
@@ -155,6 +183,20 @@ outcome_window_structurally_available(
     session_id, tau_ct_minute, horizon_minutes, schedule_table
 ) -> (available: bool, reason: str)
 ```
+
+**Exclusion is checked first (D33).** Before any schedule arithmetic, the function
+tests session exclusion. An excluded session never reaches the scheduled-close or
+interruption tests. Excluded sessions fail closed: no anchor from one may enter
+Phase 7 eligibility or the Unit O v2 population, so such rows are not emitted at
+all rather than emitted with a status.
+
+Order of evaluation:
+
+1. session excluded            -> not in population (fail closed)
+2. no scheduled RTH            -> unavailable, `no_scheduled_rth`
+3. window exceeds the close    -> unavailable, `scheduled_close`
+4. window meets an interruption -> unavailable, `registered_interruption`
+5. otherwise                   -> available, `not_applicable`
 
 Boundary convention, declared and separately tested:
 
@@ -254,15 +296,30 @@ FAQ: CME halts US equity index futures — the Nasdaq-100 family, which covers M
    while CME material states US-hours equity index products reopen **10 minutes**
    after the halt is instituted. These cannot both define the futures window.
 
-Per D32 and the brief, exact futures boundaries must come from authoritative CME
-records, must not be guessed, and must not be derived from MNQ bar gaps.
-**Therefore the interruption input cannot be built yet, and case B remains
-unregistered.** The design fails closed on its absence: with no registered
-interruption, the four March sessions retain genuine-data-absence treatment. They
-are never silently marked available.
+A commissioned primary-source sweep across CME rulebook, Special Executive
+Reports, advisories and rule filings, and across SEC, CFTC, Federal Register,
+NYSE, Nasdaq and Cboe CFE material, returned no document fixing exact CME or MNQ
+transition timestamps. It terminated on resource limits rather than exhausting
+the source space, so the result is "not established", not "proven absent".
 
-This gate does **not** block cases A, C, D and E, which is the material point —
-see §11.
+**Ruling (D33).** The user chose conservative whole-session exclusion of
+2020-03-09, 03-12, 03-16 and 03-18 in preference to uncertain intraday
+classification. Pre-halt and post-resumption anchors from these four sessions are
+not retained. This supersedes the preserve-post-resumption requirement for these
+four sessions only; it stands everywhere else, and the B1 machinery is retained
+for any interruption whose boundaries are later established authoritatively.
+
+**Measured impact of the exclusion** (structural counts, no magnitudes read):
+
+| | v1 | after exclusion | delta |
+|---|---:|---:|---:|
+| Unit O rows | 472,212 | 470,340 | −1,872 |
+| Phase 7 assignment rows | 787,020 | 783,900 | −3,120 |
+| distinct sessions | 1,009 | 1,005 | −4 |
+
+Each excluded session contributes exactly 468 Unit O rows (78 anchors × 2
+estimands × 3 horizons) and 780 assignment rows, uniformly across all four — so
+the exclusion is even and no session is partially represented.
 
 ---
 
@@ -273,10 +330,9 @@ the coverage witnesses (`5006/5006`, `5456/5456`) are driven by *scheduled
 closes*. The S00 h60 movement is therefore driven by case A, which is fully
 decidable from ratified calendar v1 today.
 
-The four March interruption sessions are a separable, smaller matter. Whether to
-block the whole rebuild on them or to proceed with calendar-driven availability
-and register interruptions as a later versioned input is a **user ruling**, not an
-implementer's choice. It is put to the user with the Stage 1 report.
+The four March sessions are settled by D33: excluded whole, via the registry in
+§12. The rebuild therefore proceeds on cases A, B2, C, D and E, with B1 retained
+but unpopulated.
 
 ---
 
@@ -291,6 +347,11 @@ Proposed, pending design audit and user ruling. Nothing below exists yet.
 | interruption input dir | `mnq_lab/spine/calendar_inputs/structural_interruptions_v1/` |
 | interruption schema | `cme-equity-index-structural-interruptions-v1` |
 | interruption ledger entry | `mnq_lab/ledger/calendar_entries/<date>-structural-interruptions-v1.json` |
+| **exclusion registry dir** | `mnq_lab/spine/calendar_inputs/session_exclusions_v1/` |
+| **exclusion registry file** | `session_exclusions_v1.json` + `.manifest.json` |
+| **exclusion schema** | `mnq-session-exclusion-registry-v1` |
+| **exclusion reason code** | `excluded_unresolved_official_interruption` |
+| **exclusion ledger entry** | `mnq_lab/ledger/calendar_entries/<date>-session-exclusions-v1.json` |
 | Phase 7 artifacts schema | `phase7-conditioner-artifacts-v2` |
 | Unit O schema | `unit-o-outcome-table-v2` |
 | Phase 7 + Unit O tree | `data/exploration/derived/phase7-unit-o-session-aware-v2/` |
@@ -300,15 +361,13 @@ Proposed, pending design audit and user ruling. Nothing below exists yet.
 | Phase 8 v2 tree | `data/exploration/derived/phase8-session-aware-v2/` |
 | Phase 8 v2 checkpoint | `data/exploration/derived/phase8-session-aware-v2.checkpoint/` |
 
-**Recommendation against a calendar v2.** The brief lists an "accepted session
-schedule/calendar v2". Measurement shows calendar v1 already contains every field
-the repair needs, and its 32 timed early closes are already validated against
-observed bar ends. Minting a v2 whose content would be identical adds a second
-calendar identity and provenance churn for no scientific gain, against the
-standing warning that two data definitions make differences unattributable.
-Recommendation: **keep calendar v1 unchanged and ratified**, and add the
-interruption input as a separate versioned artifact. This is a deviation from the
-brief's wording and is therefore put to the user rather than taken silently.
+**No calendar v2 — user ruled.** Calendar v1 already contains every field the
+repair needs, and its 32 timed early closes are already validated against observed
+bar ends. The user ruled that calendar v1 stays unchanged and ratified, and that
+corrections arrive as separate versioned inputs: the exclusion registry now, and
+an interruption input if authoritative boundaries are later established. Minting a
+v2 with identical scheduled-session content would create a second calendar
+identity for no scientific gain.
 
 ---
 

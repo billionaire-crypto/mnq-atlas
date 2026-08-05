@@ -77,8 +77,8 @@ def _interruption(mod, start, end, source=SOURCE):
     )
 
 
-def _table(mod, *schedules):
-    return mod.build_session_schedule_table(schedules)
+def _table(mod, *schedules, exclusions=()):
+    return mod.build_session_schedule_table(schedules, exclusions=exclusions)
 
 
 def _decide(mod, table, session_id, tau, horizon):
@@ -163,14 +163,82 @@ def test_11_the_two_unresolved_truncations_are_not_structural_closures():
         assert _decide(mod, table, session, 660, 60).available is True
 
 
-def test_12_march_sessions_are_not_whole_session_truncations():
+def test_12_march_sessions_are_excluded_whole_not_intraday_classified():
+    """D33: boundaries unresolved, so the whole session leaves the population.
+
+    Superseded the earlier expectation that these sessions stayed available. They
+    are NOT given an interruption, NOT retyped as truncated, and NOT treated as
+    ordinary missing data -- they are excluded, and no anchor survives.
+    """
     mod = _mod()
-    table = _table(mod, *(_schedule(mod, s) for s in MARCH_SESSIONS))
+    from mnq_lab import SpineError
+
+    table = _table(
+        mod,
+        *(_schedule(mod, s) for s in MARCH_SESSIONS),
+        exclusions=tuple(
+            mod.SessionExclusion(
+                session_id=s,
+                reason="excluded_unresolved_official_interruption",
+                source_id="D33",
+                recorded_by_ruling="D33",
+            )
+            for s in MARCH_SESSIONS
+        ),
+    )
     for session in MARCH_SESSIONS:
-        # no authoritative boundary is registered, so nothing is excluded
+        assert table.is_excluded(session) is True
+        # no interruption is invented for them
         assert table.lookup(session).structural_interruptions == ()
-        assert _decide(mod, table, session, 840, 60).available is True
-        assert _decide(mod, table, session, 510, 15).available is True
+        # and no window may be evaluated: excluded sessions fail closed
+        for tau, horizon in ((510, 15), (600, 60), (840, 60)):
+            with pytest.raises(SpineError):
+                _decide(mod, table, session, tau, horizon)
+
+
+def test_12b_exclusion_is_checked_before_window_availability():
+    """An excluded session must never reach the scheduled-close arithmetic."""
+    mod = _mod()
+    from mnq_lab import SpineError
+
+    excluded = 20200309
+    table = _table(
+        mod,
+        _schedule(mod, excluded),
+        exclusions=(mod.SessionExclusion(
+            session_id=excluded,
+            reason="excluded_unresolved_official_interruption",
+            source_id="D33",
+            recorded_by_ruling="D33",
+        ),),
+    )
+    # 845+60 would be a scheduled_close failure on a non-excluded session;
+    # here it must fail closed on exclusion instead, not return a reason.
+    with pytest.raises(SpineError):
+        _decide(mod, table, excluded, 845, 60)
+
+
+def test_12c_unknown_exclusion_reason_and_duplicates_fail_closed():
+    mod = _mod()
+    from mnq_lab import SpineError
+
+    with pytest.raises(SpineError):
+        mod.SessionExclusion(session_id=20200309, reason="because_it_looked_odd",
+                             source_id="D33", recorded_by_ruling="D33")
+    dup = mod.SessionExclusion(
+        session_id=20200309, reason="excluded_unresolved_official_interruption",
+        source_id="D33", recorded_by_ruling="D33")
+    with pytest.raises(SpineError):
+        _table(mod, _schedule(mod, 20200309), exclusions=(dup, dup))
+
+
+def test_12d_the_two_unresolved_truncations_are_not_excluded():
+    """D33 covers the four March sessions ONLY. 20200228 and 20200630 stay in."""
+    mod = _mod()
+    table = _table(mod, *(_schedule(mod, s) for s in TRUNCATION_SESSIONS))
+    for session in TRUNCATION_SESSIONS:
+        assert table.is_excluded(session) is False
+        assert _decide(mod, table, session, 660, 60).available is True
 
 
 # --------------------------------------------------------------------------

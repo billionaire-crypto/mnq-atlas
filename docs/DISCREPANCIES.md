@@ -1708,3 +1708,110 @@ contract freeze, and the stale comment corrected, when that code is revised.
 rebuild. It does not reopen the Phase 8 closeout, which remains the accurate
 record of what the previous mechanism produced, and it does not authorise
 Phase 9.
+---
+
+## D33. Whole-session exclusion of four unresolved official-interruption sessions
+
+**Relationship to D32.** D32 is independently audited and CLOSED. It is not
+edited, amended, withdrawn or concealed, and its bytes are unchanged. This entry
+supersedes exactly one narrow part of the repair plan D32 authorised, namely the
+treatment of four specific sessions. Every other part of D32 stands.
+
+**1. The four dates.** Authoritative official records confirm market-wide
+circuit-breaker (Level 1) events on the US trading dates 2020-03-09, 2020-03-12,
+2020-03-16 and 2020-03-18. The occurrence of an official interruption on each of
+those dates is established.
+
+**2. Exact CME/MNQ boundaries remain unresolved.** What is established is the
+mechanism: CME halts US equity index futures, the Nasdaq-100 complex among them,
+when the cash equity market declares a Level 1 market-wide circuit breaker. What
+is NOT established is the pair of transition timestamps that a five-minute
+structural classification requires. Two specific gaps prevent it:
+
+- the NYSE Market-Wide Circuit Breaker Working Group report states that CME
+  halted affected symbols "approximately one minute after each breach was
+  triggered", so the futures halt instant is neither the cash trigger instant
+  nor a stated time;
+- resumption is stated inconsistently across sources, a fifteen-minute
+  cash-market halt against CME material describing US-hours equity index
+  products reopening ten minutes after the halt is instituted.
+
+A primary-source sweep was commissioned across CME rulebook, Special Executive
+Reports, advisories and rule filings, and across SEC, CFTC, Federal Register,
+NYSE, Nasdaq and Cboe CFE material. It returned no document fixing exact CME or
+MNQ transition timestamps for the four dates. The sweep terminated on resource
+limits rather than on exhaustion of the source space, so its negative result is
+recorded as "not established", never as "proven absent".
+
+**3. A conservative structural decision.** The user selected whole-session
+exclusion of all four sessions in preference to uncertain intraday
+classification. Excluding a session whose availability cannot be established
+removes anchors that might have been valid. It cannot manufacture a valid
+outcome from a structurally undefined one, and it cannot import an unsourced
+timestamp into the instrument. The cost is coverage; the alternative cost would
+be an unattributable boundary inside the measurement. This entry records the
+choice as conservative, not as optimal.
+
+**Explicitly prohibited, and not done.** No CME boundary was guessed. No
+cash-market trigger time was used as an MNQ halt time. No boundary was inferred
+from missing bars. No halt start was estimated as a trigger plus approximately
+one minute. No pre-halt or post-resumption anchor from these four sessions is
+retained.
+
+**4. No measured market value informed this decision.** No outcome magnitude,
+tick, quantile, contrast, interval, ranking, threshold improvement or market
+interpretation was read or used. The decision rests on official interruption
+records, session identity and the absence of authoritative boundary timestamps.
+
+**5. Calendar v1 is unchanged and immutable.** The accepted calendar
+`mnq-cme-equity-index-calendar-v1` and its pinned artifacts are not edited,
+reissued or superseded. The four sessions remain in calendar v1 exactly as
+recorded, classified as regular full-RTH sessions. Exclusion is not a calendar
+correction and must not be written into the calendar.
+
+**6. A separate versioned session-exclusion registry.** The exclusion is carried
+by a new, separately versioned, byte-pinned session-exclusion registry that
+references calendar v1 session identities. It is an additional input, never a
+mutation of an existing one.
+
+**7. Reason code.** The registered exclusion reason is exactly
+`excluded_unresolved_official_interruption`. The vocabulary is closed and the
+loader fails closed on any unknown reason.
+
+**8. Scope of the exclusion.** No anchor from an excluded session may enter
+Phase 7 eligibility or the Unit O v2 population. The exclusion is evaluated
+before window availability, so an excluded session never reaches the
+scheduled-close or interruption tests.
+
+**9. Narrow supersession.** The earlier requirement to preserve pre-interruption
+and post-resumption windows is superseded for these four unresolved sessions
+only. It remains in force everywhere else.
+
+**10. The architecture keeps precise-interruption support.** The canonical
+availability layer retains support for temporary structural interruptions
+carried by authoritative start and end timestamps. Whole-session exclusion is
+the treatment for the unresolved case, not a replacement for the interruption
+model. Should authoritative CME boundaries later be established, they enter as a
+new versioned interruption record and a new versioned population, never by
+editing this ruling or any artifact built under it.
+
+**11. Production remains blocked.** No Phase 7, Unit O, S00 or Phase 8 v2
+production run is authorised by this entry.
+
+**12. Phase 9 remains blocked.**
+
+**13. No corrected artifact exists.** Recording this ruling creates no registry,
+no rebuild, no v2 artifact, no certificate and no threshold. Each requires its
+own production, manifest and independent audit before it exists.
+
+**Consequence to reconcile, recorded rather than silently fixed.** The Stage 2
+tests committed at `c3de65d3c5f15cf44039734bb8bee503dff6b8bc` include a witness
+asserting that the four March sessions carry no registered interruption and that
+their windows remain structurally available. Under this ruling that witness
+states the wrong expectation and must be revised to assert exclusion instead.
+The test is left unchanged by this documentary entry and is corrected only after
+this ruling receives an independent CLOSED verdict.
+
+**Status:** `OPEN`. It records a user decision and its scope. It does not reopen
+D31 or D32, does not modify calendar v1, does not authorise production, and does
+not authorise Phase 9.

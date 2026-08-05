@@ -1815,3 +1815,60 @@ this ruling receives an independent CLOSED verdict.
 **Status:** `OPEN`. It records a user decision and its scope. It does not reopen
 D31 or D32, does not modify calendar v1, does not authorise production, and does
 not authorise Phase 9.
+---
+
+## D34. A ratification certificate must be verified against its own commit, not the live tree
+
+**Defect.** Ratification condition C4 re-hashes the *working-tree* copy of the
+producing code (`mnq_lab/ledger/ratification.py:506`,
+`_sha256_file(repo / "mnq_lab" / "production" / "first_exploration_run.py")`)
+and compares it against the frozen constant `PRODUCING_CODE_SHA256`. The
+certificate it validates attests that a specific artifact was produced by code
+at a specific commit, which the certificate itself records as
+`run_commit = 6dcbff89e0d7af8e812474537cef41fc6cf7add4`. Verifying that claim
+requires consulting the code *at that commit*. Consulting the present working
+tree instead answers a different question: whether the repository still happens
+to sit at that code today.
+
+**Consequence, and why it surfaced now.** The two requirements cannot both
+hold. The governing rebuild plan directs that Phase 7 and Unit O be rebuilt by
+the existing governed producer rather than by a new one, because a second
+producer would introduce a new provenance path needing its own justification.
+Reusing that producer means editing it. Editing it makes C4 fail, so the v1
+certificate becomes unverifiable in any tree where the repair exists. The
+defect is latent until the first time the producer legitimately changes, which
+is exactly now.
+
+**Measured.** The producer at the certificate's recorded `run_commit` hashes to
+`5c6b3b2d6e5b06533c07489018b7c74932ad32aa823304f535103d6cef31613a`, identical
+to the pinned `PRODUCING_CODE_SHA256`. The same file in a working tree carrying
+the Stage 4 classification wiring hashes differently. C4 therefore fails on a
+tree that has changed nothing about the v1 artifact.
+
+**Ruling.** C4 verifies the producing code against the git blob at the
+certificate's own recorded `run_commit`, not against the working tree. The
+check fails closed when git is unavailable, when the recorded commit is
+unreachable, or when the blob is absent: an unverifiable certificate is never
+treated as a verified one.
+
+**The anti-tampering purpose is preserved, not weakened.** Git object identity
+is content-addressed, so the historical blob cannot be forged to match a
+different constant. The independent check one line earlier, that the run
+manifest's own recorded `producing_code_sha256` equals the pinned constant
+(`ratification.py:504`), is unchanged and still binds the artifact to the code.
+What is removed is only the incidental requirement that the present checkout
+still contain those bytes, which the certificate never claimed.
+
+**Explicitly not done.** `PRODUCING_CODE_SHA256` is not edited. No threshold is
+relaxed, no tolerance is added, no fallback is introduced, and no gate is
+weakened. No historical certificate, audit entry or completion record is
+modified. C4 remains a producer-authored attestation for the purposes of the
+attested-not-proven disclosure.
+
+**Scope.** This changes a verification path only. It produces no artifact, no
+certificate and no scientific value, and it changes no measured result. No
+outcome magnitude, tick, quantile, contrast or interval informed it. Production
+remains blocked and Phase 9 remains blocked.
+
+**Status:** `OPEN`. It authorises the C4 verification correction and nothing
+else.

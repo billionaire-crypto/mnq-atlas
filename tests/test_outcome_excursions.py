@@ -415,3 +415,64 @@ def test_outcome_layer_emits_no_row_for_an_excluded_session(tmp_path):
     assert not bool(np.any(table.column("session_id") == excluded_session))
     assert bool(np.any(table.column("session_id") == kept_session))
     assert table.row_count == both.row_count // 2
+
+
+def test_each_row_is_judged_against_its_own_session_schedule(tmp_path):
+    """Audit F-3: per-session binding, not merely per-table.
+
+    Two sessions, DIFFERENT closes, and the SAME observation time and horizon in
+    both. That is what makes this a per-session test: a wrong-session lookup
+    still consumes a schedule and still returns a well-formed answer, it just
+    returns the wrong one. With a uniform fixture that mistake is invisible.
+    """
+    from tests.unit_o_fixtures import combine_columns
+
+    early, late = 20210615, 20210616
+    store = in_memory_store(
+        tmp_path / "exploration" / "bars_5m",
+        combine_columns(
+            synthetic_outcome_columns("2021-06-15"),
+            synthetic_outcome_columns("2021-06-16"),
+        ),
+    )
+    table = build_outcome_table(
+        store,
+        schedule_table=schedule_for_store(
+            store,
+            closes={early: 720, late: 900},
+            statuses={early: "shortened_rth", late: "full_rth"},
+        ),
+    )
+
+    def rows(session):
+        return (
+            (table.column("session_id") == session)
+            & (table.column("observation_time_ct") == "11:30")
+            & (table.column("horizon_minutes") == 60)
+        )
+
+    # 11:30 + 60 = 12:30. Past the early session's 12:00 close ...
+    crossing = rows(early)
+    assert bool(np.any(crossing))
+    assert not bool(np.any(table.column("window_fits_rth")[crossing]))
+    assert set(table.column("outcome_status")[crossing]) == {
+        "structurally_unavailable"
+    }
+    assert set(table.column("structural_unavailability_reason")[crossing]) == {
+        "scheduled_close"
+    }
+
+    # ... and comfortably inside the late session's 15:00 close.
+    inside = rows(late)
+    assert bool(np.any(inside))
+    assert bool(np.all(table.column("window_fits_rth")[inside]))
+    assert set(table.column("outcome_status")[inside]) == {"ok"}
+    assert set(table.column("structural_unavailability_reason")[inside]) == {
+        "not_applicable"
+    }
+
+
+def test_structural_status_string_is_pinned_literally():
+    """Audit C-10: the constant's value cannot be renamed silently."""
+    assert STATUS_STRUCTURALLY_UNAVAILABLE == "structurally_unavailable"
+    assert len(STATUS_STRUCTURALLY_UNAVAILABLE) == 24  # fits the <U25 dtype

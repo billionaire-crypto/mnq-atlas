@@ -173,6 +173,8 @@ def schedule_for_store(
     close_ct: int = 900,
     status: str = "full_rth",
     excluded: tuple[int, ...] = (),
+    closes: dict[int, int] | None = None,
+    statuses: dict[int, str] | None = None,
 ) -> "SessionScheduleTable":
     """A full-RTH schedule covering exactly the sessions a synthetic store holds.
 
@@ -199,8 +201,11 @@ def schedule_for_store(
             SessionSchedule(
                 session_id=session,
                 scheduled_rth_open_ct=510,
-                scheduled_rth_close_ct=close_ct,
-                scheduled_rth_status=status,
+                # Per-session overrides (audit F-3): without a HETEROGENEOUS
+                # schedule nothing proves each row is judged against its OWN
+                # session, only that the layer consumes some schedule.
+                scheduled_rth_close_ct=(closes or {}).get(session, close_ct),
+                scheduled_rth_status=(statuses or {}).get(session, status),
                 structural_interruptions=(),
                 timezone="America/Chicago",
                 calendar_version=CALENDAR_VERSION,

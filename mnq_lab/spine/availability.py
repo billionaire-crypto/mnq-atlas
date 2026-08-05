@@ -29,13 +29,15 @@ Everything fails closed.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from functools import lru_cache
 from types import MappingProxyType
 from typing import Iterable
 
 from mnq_lab import SpineError
-from mnq_lab.constants import load_constants
+from mnq_lab.constants import REPO_ROOT, load_constants
 from mnq_lab.spine.accepted_calendar import (
     CALENDAR_SHA256,
     CALENDAR_VERSION,
@@ -46,7 +48,11 @@ from mnq_lab.spine.accepted_calendar import (
 __all__ = [
     "AVAILABILITY_CONTRACT_VERSION",
     "CANONICAL_TIMEZONE",
+    "EXCLUSION_REGISTRY_SHA256",
+    "EXCLUSION_REGISTRY_VERSION",
+    "EXCLUSION_SCHEMA_VERSION",
     "EXCLUSION_REASONS",
+    "load_session_exclusions",
     "INTERRUPTION_REASONS",
     "SCHEDULED_RTH_STATUSES",
     "UNAVAILABILITY_REASONS",
@@ -355,18 +361,73 @@ def _schedule_from_calendar_row(row: CalendarRow) -> SessionSchedule:
     )
 
 
+EXCLUSION_REGISTRY_VERSION = "mnq-session-exclusion-registry-v1"
+EXCLUSION_SCHEMA_VERSION = "session-exclusion-registry-v1"
+EXCLUSION_REGISTRY_SHA256 = (
+    "0a37822f05a9bb895c8ac421c64bc1849b644985e5f6cd016658bbf479055e75"
+)
+_EXCLUSION_PATH = (
+    REPO_ROOT
+    / "mnq_lab"
+    / "spine"
+    / "calendar_inputs"
+    / "session_exclusions_v1"
+    / "session_exclusions_v1.json"
+)
+_EXCLUSION_COLUMNS = ("session_id", "reason", "source_id", "recorded_by_ruling")
+
+
+def _canonical_bytes(value) -> bytes:
+    return (
+        json.dumps(value, sort_keys=True, indent=2, ensure_ascii=True) + "\n"
+    ).encode("utf-8")
+
+
+@lru_cache(maxsize=1)
+def load_session_exclusions() -> tuple[SessionExclusion, ...]:
+    """Load the byte-pinned exclusion registry (D33). No caller path, no override."""
+    payload = _EXCLUSION_PATH.read_bytes()
+    if hashlib.sha256(payload).hexdigest() != EXCLUSION_REGISTRY_SHA256:
+        raise SpineError("session-exclusion registry SHA-256 differs from the pinned input")
+    try:
+        document = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SpineError(f"exclusion registry is not canonical UTF-8 JSON: {exc}") from exc
+    if payload != _canonical_bytes(document):
+        raise SpineError("exclusion registry JSON bytes are not canonical")
+    if document.get("registry_version") != EXCLUSION_REGISTRY_VERSION:
+        raise SpineError("exclusion registry version differs from the contract")
+    if document.get("schema_version") != EXCLUSION_SCHEMA_VERSION:
+        raise SpineError("exclusion registry schema differs from the contract")
+    if document.get("references_calendar_sha256") != CALENDAR_SHA256:
+        raise SpineError("exclusion registry references a different accepted calendar")
+    if tuple(document.get("columns", ())) != _EXCLUSION_COLUMNS:
+        raise SpineError("exclusion registry column order differs from the contract")
+    rows = document.get("rows")
+    if not isinstance(rows, list):
+        raise SpineError("exclusion registry rows must be a list")
+    try:
+        return tuple(
+            SessionExclusion(**dict(zip(_EXCLUSION_COLUMNS, values, strict=True)))
+            for values in rows
+        )
+    except (TypeError, ValueError) as exc:
+        raise SpineError(f"exclusion registry row shape is invalid: {exc}") from exc
+
+
 @lru_cache(maxsize=1)
 def load_session_schedule_table() -> SessionScheduleTable:
     """Build the canonical table from the byte-pinned accepted calendar.
 
-    Accepts no caller path and no override. No interruption record is registered:
-    none has authoritative boundaries (D33). Exclusions are supplied by the
-    versioned registry once it exists; until then the table carries none, and an
-    excluded session therefore cannot be silently assumed.
+    Accepts no caller path and no override. No interruption interval is
+    registered, because none has authoritative boundaries (D33); the four
+    sessions whose boundaries are unresolved are carried by the exclusion
+    registry instead, and calendar v1 still classifies them regular/full_rth.
     """
     calendar = load_accepted_calendar()
     return build_session_schedule_table(
-        _schedule_from_calendar_row(row) for row in calendar.rows
+        (_schedule_from_calendar_row(row) for row in calendar.rows),
+        exclusions=load_session_exclusions(),
     )
 
 

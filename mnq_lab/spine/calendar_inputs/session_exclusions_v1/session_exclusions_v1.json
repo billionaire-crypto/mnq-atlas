@@ -1,0 +1,41 @@
+{
+  "authorising_ruling": "D33",
+  "columns": [
+    "session_id",
+    "reason",
+    "source_id",
+    "recorded_by_ruling"
+  ],
+  "market": "CME_GLOBEX_EQUITY_INDEX_FUTURES",
+  "note": "Official records establish market-wide circuit-breaker events on these four dates. Exact CME/MNQ halt and resumption boundaries are NOT established, so no interruption interval is registered and no boundary is inferred. Each whole session is excluded from the measured population. Calendar v1 is unchanged and still classifies these sessions regular/full_rth.",
+  "references_calendar_sha256": "b86e112c16112bf11a6a548ca8b3f21d28a08f90442b4dde84098f9d3f6eb069",
+  "references_calendar_version": "mnq-cme-equity-index-calendar-v1",
+  "registry_version": "mnq-session-exclusion-registry-v1",
+  "rows": [
+    [
+      20200309,
+      "excluded_unresolved_official_interruption",
+      "docs/DISCREPANCIES.md#D33",
+      "D33"
+    ],
+    [
+      20200312,
+      "excluded_unresolved_official_interruption",
+      "docs/DISCREPANCIES.md#D33",
+      "D33"
+    ],
+    [
+      20200316,
+      "excluded_unresolved_official_interruption",
+      "docs/DISCREPANCIES.md#D33",
+      "D33"
+    ],
+    [
+      20200318,
+      "excluded_unresolved_official_interruption",
+      "docs/DISCREPANCIES.md#D33",
+      "D33"
+    ]
+  ],
+  "schema_version": "session-exclusion-registry-v1"
+}

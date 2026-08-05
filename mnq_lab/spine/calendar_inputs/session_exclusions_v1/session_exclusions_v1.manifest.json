@@ -1,0 +1,10 @@
+{
+  "artifact": "session_exclusions_v1.json",
+  "authorising_ruling": "D33",
+  "bytes": 1353,
+  "references_calendar_sha256": "b86e112c16112bf11a6a548ca8b3f21d28a08f90442b4dde84098f9d3f6eb069",
+  "registry_version": "mnq-session-exclusion-registry-v1",
+  "row_count": 4,
+  "schema_version": "session-exclusion-registry-v1",
+  "sha256": "0a37822f05a9bb895c8ac421c64bc1849b644985e5f6cd016658bbf479055e75"
+}

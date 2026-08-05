@@ -1872,3 +1872,41 @@ remains blocked and Phase 9 remains blocked.
 
 **Status:** `OPEN`. It authorises the C4 verification correction and nothing
 else.
+---
+
+## D35. Protected-hash checks read the commit they describe (extends D34)
+
+**Same defect as D34, second instance, wider.** The Unit O closeout records the
+byte length and SHA-256 of fifteen protected files as they were when Unit O v1
+closed. `tests/test_unit_o_closeout.py` re-read those files from the *working
+tree*. That asks whether the repository still sits at those bytes today, not
+whether the closeout's record is accurate. Stage 5 legitimately edits seven of
+the fifteen, so the check failed on a tree that changed nothing about v1.
+
+**Ruling.** The check reads each protected file at the commit the closeout
+describes, `da68aee974dab1f039d3eeabfbc5eabfbf04a6ea`, where all fifteen recorded
+hashes reproduce exactly. Git objects are content-addressed, so reading history
+cannot be forged; a negative control asserts the check still rejects a wrong pin
+and an absent file. No recorded hash, byte count or closeout document is edited.
+
+**Unit O schema version.** The outcome table gained
+`structural_unavailability_reason` and renamed `window_outside_rth` to
+`structurally_unavailable`. That is a different schema, so it carries a
+different identifier: `unit-o-outcomes-v2`. The v1 identifier remains attached to
+the v1 artifact and is not reused.
+
+**Outcome-layer contract (Stage 5).** `build_outcome_table` now requires an
+explicit `schedule_table`. Unit O loads no calendar, holds none in a global, and
+has no fallback close. Anchors from D33-excluded sessions are dropped before
+resolution. The isolation guard was TIGHTENED rather than relaxed: an exact
+two-name allowlist, the forbidden-name set unchanged, the new parameter required
+to be the neutral-layer `SessionScheduleTable`, and the runtime loader sentinel
+re-armed on `spine.accepted_calendar` and `spine.availability`, where the real
+loader now lives.
+
+**Scope.** Verification paths, a schema identifier and the outcome-layer
+signature. No artifact, no certificate, no measured value and no threshold
+changes. No outcome magnitude informed any of it. Production and Phase 9 remain
+blocked.
+
+**Status:** `OPEN`.

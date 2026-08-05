@@ -165,3 +165,38 @@ def write_synthetic_store(
         },
     )
     return BarStore.open(store_root)
+
+
+def schedule_for_store(store) -> "SessionScheduleTable":
+    """A full-RTH schedule covering exactly the sessions a synthetic store holds.
+
+    D32 Stage 5: ``build_outcome_table`` now requires an explicit schedule and
+    has no fallback close, so synthetic fixtures must supply one. Every session
+    is declared 08:30-15:00 full RTH with no interruption and no exclusion, which
+    reproduces the v1 fixed-close behaviour exactly -- so these tests keep
+    measuring what they measured before, and any difference they show is a real
+    difference rather than a change of fixture.
+    """
+    import numpy as np
+
+    from mnq_lab.spine.accepted_calendar import CALENDAR_SHA256, CALENDAR_VERSION
+    from mnq_lab.spine.availability import (
+        SessionSchedule,
+        build_session_schedule_table,
+    )
+
+    sessions = sorted({int(value) for value in np.asarray(store.column("session_id"))})
+    return build_session_schedule_table(
+        SessionSchedule(
+            session_id=session,
+            scheduled_rth_open_ct=510,
+            scheduled_rth_close_ct=900,
+            scheduled_rth_status="full_rth",
+            structural_interruptions=(),
+            timezone="America/Chicago",
+            calendar_version=CALENDAR_VERSION,
+            calendar_sha256=CALENDAR_SHA256,
+            interruption_source_id=None,
+        )
+        for session in sessions
+    )

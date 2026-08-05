@@ -208,7 +208,7 @@ def test_unit_o_tau_1400_fits_h60_but_tau_1405_does_not():
     from mnq_lab.outcomes.excursions import (
         ESTIMAND_OBSERVED,
         STATUS_OK as OUTCOME_OK,
-        STATUS_WINDOW_OUTSIDE_RTH,
+        STATUS_STRUCTURALLY_UNAVAILABLE,
         resolve_outcome_row,
     )
     from tests.unit_o_fixtures import synthetic_outcome_columns
@@ -227,7 +227,7 @@ def test_unit_o_tau_1400_fits_h60_but_tau_1405_does_not():
         )
 
     assert resolved("14:00")["outcome_status"] == OUTCOME_OK
-    assert resolved("14:05")["outcome_status"] == STATUS_WINDOW_OUTSIDE_RTH
+    assert resolved("14:05")["outcome_status"] == STATUS_STRUCTURALLY_UNAVAILABLE
 
 
 def test_unit_o_exact_label_resolution_rejects_positional_adjacency():

@@ -23,7 +23,9 @@ from mnq_lab.spine.seal import LOCKED_STORE_DIRNAME, assert_exploration_safe
 from mnq_lab.spine.store import BarStore, environment_fingerprint
 from mnq_lab.spine.timemodel import assert_store_bar_seconds
 
-ARTIFACT_SCHEMA_VERSION = "unit-o-outcomes-v1"
+# D32/D35: the outcome schema gained structural_unavailability_reason and
+# renamed a status, so it is a new schema and carries a new identifier.
+ARTIFACT_SCHEMA_VERSION = "unit-o-outcomes-v2"
 BASE_COMMIT = "289977aaaf836c76788035670d099740dfaa05f7"
 OUTCOME_PREREGISTRATION = REPO_ROOT / "docs" / "OUTCOME_LAYER_PREREGISTRATION.md"
 PHASE8_PREREGISTRATION = REPO_ROOT / "docs" / "PHASE8_PREREGISTRATION.md"

@@ -12,8 +12,10 @@ from mnq_lab import SpineError
 from mnq_lab.conditioners import calendar as conditioner_calendar
 from mnq_lab.conditioners import pipeline as conditioner_pipeline
 from mnq_lab.outcomes import artifacts, excursions
+from mnq_lab.spine import accepted_calendar, availability
+from mnq_lab.spine.availability import SessionScheduleTable
 from mnq_lab.spine.seal import LOCKED_STORE_DIRNAME
-from tests.unit_o_fixtures import synthetic_outcome_columns, write_synthetic_store
+from tests.unit_o_fixtures import schedule_for_store, synthetic_outcome_columns, write_synthetic_store
 
 
 class OutcomeIsolationSentinel(RuntimeError):
@@ -25,8 +27,15 @@ def _raise_sentinel(*args, **kwargs):
 
 
 def test_unit_o_public_api_has_no_conditioner_calendar_or_scale_arguments():
+    """D32/D35: tightened, not loosened.
+
+    Stage 5 adds exactly one parameter, the neutral-layer schedule table. The
+    assertion stays an exact two-name allowlist so a third parameter still fails
+    closed, the forbidden set is unchanged, and the new parameter is required to
+    be the spine value object rather than any conditioner type.
+    """
     signature = inspect.signature(excursions.build_outcome_table)
-    assert list(signature.parameters) == ["store"]
+    assert set(signature.parameters) == {"store", "schedule_table"}
     forbidden = {
         "conditioner",
         "assignment",
@@ -36,6 +45,12 @@ def test_unit_o_public_api_has_no_conditioner_calendar_or_scale_arguments():
         "calendar",
     }
     assert forbidden.isdisjoint(signature.parameters)
+    annotation = signature.parameters["schedule_table"].annotation
+    assert annotation in (
+        SessionScheduleTable,
+        "SessionScheduleTable",
+    ), annotation
+    assert signature.parameters["schedule_table"].kind is inspect.Parameter.KEYWORD_ONLY
 
 
 def test_public_builder_calls_both_existing_boundary_guards(tmp_path, monkeypatch):
@@ -55,7 +70,7 @@ def test_public_builder_calls_both_existing_boundary_guards(tmp_path, monkeypatc
 
     monkeypatch.setattr(excursions, "assert_exploration_safe", exploration_guard)
     monkeypatch.setattr(excursions, "assert_store_bar_seconds", duration_guard)
-    table = excursions.build_outcome_table(store)
+    table = excursions.build_outcome_table(store, schedule_table=schedule_for_store(store))
     assert table.row_count > 0
     assert calls == {"exploration": 1, "duration": 1}
 
@@ -88,8 +103,13 @@ def test_every_public_unit_o_entrypoint_avoids_both_real_sentinels(
     store = write_synthetic_store(tmp_path / "data", synthetic_outcome_columns())
     monkeypatch.setattr(conditioner_pipeline, "build_conditioner_pipeline", _raise_sentinel)
     monkeypatch.setattr(conditioner_calendar, "load_accepted_calendar", _raise_sentinel)
+    # D35: after Stage 3 the real loader lives in spine.accepted_calendar and
+    # conditioners.calendar merely re-exports it, so patching only the re-export
+    # left this trap inert. Arm the loaders that Unit O could actually reach.
+    monkeypatch.setattr(accepted_calendar, "load_accepted_calendar", _raise_sentinel)
+    monkeypatch.setattr(availability, "load_session_schedule_table", _raise_sentinel)
 
-    table = excursions.build_outcome_table(store)
+    table = excursions.build_outcome_table(store, schedule_table=schedule_for_store(store))
     assert table.row_count > 0
     manifest = artifacts.write_outcome_artifact(
         tmp_path / "artifact",
@@ -120,21 +140,21 @@ def test_in_memory_mutant_of_real_excursion_module_reaches_sentinel(
     mutant.__dict__.update(excursions.__dict__)
     real_build = excursions.build_outcome_table
 
-    def mutated_build(store):
+    def mutated_build(store, **kwargs):
         conditioner_pipeline.build_conditioner_pipeline(None, None, None)
-        return real_build(store)
+        return real_build(store, **kwargs)
 
     mutant.build_outcome_table = mutated_build
     assert mutant.build_outcome_table is not real_build
     with pytest.raises(OutcomeIsolationSentinel):
-        mutant.build_outcome_table(store)
+        mutant.build_outcome_table(store, schedule_table=schedule_for_store(store))
 
 
 def test_artifact_writer_refuses_locked_tier_names_even_in_metadata(
     tmp_path,
 ):
     store = write_synthetic_store(tmp_path / "data", synthetic_outcome_columns())
-    table = excursions.build_outcome_table(store)
+    table = excursions.build_outcome_table(store, schedule_table=schedule_for_store(store))
     with pytest.raises(SpineError, match="forbidden tier"):
         artifacts.write_outcome_artifact(
             tmp_path / "artifact",

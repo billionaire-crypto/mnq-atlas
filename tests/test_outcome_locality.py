@@ -15,6 +15,7 @@ from mnq_lab.outcomes.excursions import (
 )
 from tests.conftest import ct_ns
 from tests.unit_o_fixtures import (
+    schedule_for_store,
     combine_columns,
     independent_semantic_masks,
     in_memory_store,
@@ -140,14 +141,16 @@ def _prefix_rows(table, last_session=20210615):
 def test_prefix_extension_preserves_every_value_status_support_and_mask(tmp_path):
     first = synthetic_outcome_columns("2021-06-15")
     second = synthetic_outcome_columns("2021-06-16")
+    _prefix_store = in_memory_store(tmp_path / "prefix" / "exploration" / "bars_5m", first)
     prefix_table = build_outcome_table(
-        in_memory_store(tmp_path / "prefix" / "exploration" / "bars_5m", first)
+        _prefix_store, schedule_table=schedule_for_store(_prefix_store)
     )
     extended_columns = combine_columns(first, second)
+    _extended_store = in_memory_store(
+        tmp_path / "extended" / "exploration" / "bars_5m", extended_columns
+    )
     extended_table = build_outcome_table(
-        in_memory_store(
-            tmp_path / "extended" / "exploration" / "bars_5m", extended_columns
-        )
+        _extended_store, schedule_table=schedule_for_store(_extended_store)
     )
     prefix_rows = _prefix_rows(prefix_table)
     extended_prefix = _prefix_rows(extended_table)
@@ -186,7 +189,7 @@ def test_backward_carry_mutant_fails_the_same_nonempty_prefix_fixture(tmp_path):
     )
 
     def backward_carry_mutant(store):
-        table = build_outcome_table(store)
+        table = build_outcome_table(store, schedule_table=schedule_for_store(store))
         columns = table.mutable_copy()
         first_valid = int(np.flatnonzero(columns["outcome_valid"])[0])
         columns["upward_excursion_ticks"][first_valid] = np.int32(

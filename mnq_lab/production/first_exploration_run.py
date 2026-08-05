@@ -1134,7 +1134,11 @@ def run_shakedown() -> dict[str, Any]:
     _enforce_peak_memory_ceiling("Phase 7 write and release")
 
     mark = time.perf_counter()
-    outcomes = build_outcome_table(store)
+    # D32/D33: the canonical schedule is resolved once here and handed in. Unit O
+    # never loads a calendar itself and has no fallback close.
+    outcomes = build_outcome_table(
+        store, schedule_table=load_session_schedule_table()
+    )
     timings["unit_o_compute"] = time.perf_counter() - mark
     _enforce_peak_memory_ceiling("Unit O compute")
 

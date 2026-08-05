@@ -18,7 +18,7 @@ from mnq_lab.outcomes.excursions import (
     build_outcome_table,
     validate_outcome_table,
 )
-from tests.unit_o_fixtures import synthetic_outcome_columns, write_synthetic_store
+from tests.unit_o_fixtures import schedule_for_store, synthetic_outcome_columns, write_synthetic_store
 
 EXPECTED_SCHEMA = (
     "estimand",
@@ -37,6 +37,7 @@ EXPECTED_SCHEMA = (
     "window_fits_rth",
     "common_support",
     "outcome_status",
+    "structural_unavailability_reason",
     "path_timestamp_missing",
     "path_session_mismatch",
     "path_symbol_mismatch",
@@ -75,7 +76,7 @@ def _artifact_bytes(root):
 
 def test_outcome_table_schema_dtypes_and_immutable_columns_are_exact(tmp_path):
     store = write_synthetic_store(tmp_path / "data", synthetic_outcome_columns())
-    table = build_outcome_table(store)
+    table = build_outcome_table(store, schedule_table=schedule_for_store(store))
     assert OUTCOME_SCHEMA == EXPECTED_SCHEMA
     assert tuple(table.columns) == EXPECTED_SCHEMA
     assert table.row_count == 2 * 78 * 3
@@ -91,7 +92,7 @@ def test_outcome_table_schema_dtypes_and_immutable_columns_are_exact(tmp_path):
 def test_invalid_rows_have_false_validity_and_no_semantic_numeric_payload(tmp_path):
     columns = synthetic_outcome_columns(missing=("08:40",))
     store = write_synthetic_store(tmp_path / "data", columns)
-    table = build_outcome_table(store)
+    table = build_outcome_table(store, schedule_table=schedule_for_store(store))
     invalid = table.column("outcome_status") != STATUS_OK
     assert invalid.any()
     assert not table.column("outcome_valid")[invalid].any()
@@ -106,7 +107,7 @@ def test_invalid_rows_have_false_validity_and_no_semantic_numeric_payload(tmp_pa
 
 def test_writer_is_byte_deterministic_and_manifest_is_canonical(tmp_path):
     store = write_synthetic_store(tmp_path / "data", synthetic_outcome_columns())
-    table = build_outcome_table(store)
+    table = build_outcome_table(store, schedule_table=schedule_for_store(store))
     first = tmp_path / "first"
     second = tmp_path / "second"
     manifest_a = write_outcome_artifact(
@@ -127,12 +128,12 @@ def test_writer_is_byte_deterministic_and_manifest_is_canonical(tmp_path):
 
 def test_manifest_binds_every_column_and_all_frozen_inputs(tmp_path):
     store = write_synthetic_store(tmp_path / "data", synthetic_outcome_columns())
-    table = build_outcome_table(store)
+    table = build_outcome_table(store, schedule_table=schedule_for_store(store))
     root = tmp_path / "artifact"
     manifest = write_outcome_artifact(
         root, table, source_store=store, environment=ENVIRONMENT
     )
-    assert manifest["artifact_schema_version"] == "unit-o-outcomes-v1"
+    assert manifest["artifact_schema_version"] == "unit-o-outcomes-v2"
     assert manifest["base_commit"] == "289977aaaf836c76788035670d099740dfaa05f7"
     assert manifest["code_commit"] == ENVIRONMENT["commit"]
     assert manifest["dirty_worktree"] is False
@@ -176,7 +177,7 @@ def test_writer_refuses_overwrite_invalid_table_and_mutated_preregistration(
     tmp_path, monkeypatch
 ):
     store = write_synthetic_store(tmp_path / "data", synthetic_outcome_columns())
-    table = build_outcome_table(store)
+    table = build_outcome_table(store, schedule_table=schedule_for_store(store))
     root = tmp_path / "artifact"
     root.mkdir()
     (root / "occupied").write_text("x", encoding="ascii")

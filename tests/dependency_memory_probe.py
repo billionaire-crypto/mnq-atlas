@@ -49,6 +49,7 @@ from tests.test_seasonal_dependency_retention import (
     _vol_rel_fixture,
 )
 from tests.unit_o_fixtures import (
+    schedule_for_store,
     write_synthetic_store,
 )
 
@@ -172,7 +173,7 @@ def _run_full_shape(root: Path, session_count: int) -> dict[str, object]:
     gc.collect()
 
     mark = time.perf_counter()
-    outcomes = build_outcome_table(store)
+    outcomes = build_outcome_table(store, schedule_table=schedule_for_store(store))
     stage_seconds["unit_o_compute"] = time.perf_counter() - mark
     outcome_row_count = outcomes.row_count
 

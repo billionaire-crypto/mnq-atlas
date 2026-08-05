@@ -18,6 +18,12 @@ import numpy as np
 from mnq_lab import SpineError
 from mnq_lab.constants import Constants, load_constants
 from mnq_lab.core.causality import required_interval_starts
+from mnq_lab.spine.availability import (
+    REASON_NOT_APPLICABLE,
+    UNAVAILABILITY_REASONS,
+    SessionScheduleTable,
+    outcome_window_structurally_available,
+)
 from mnq_lab.spine.exploration import validate_exploration_store
 from mnq_lab.spine.seal import assert_exploration_safe
 from mnq_lab.spine.store import BarStore
@@ -33,7 +39,12 @@ ESTIMAND_OBSERVED = "observed_bar_path"
 ESTIMAND_ORDER = (ESTIMAND_FULLY_LABELED, ESTIMAND_OBSERVED)
 
 STATUS_ANCHOR_BAR_MISSING = "anchor_bar_missing"
-STATUS_WINDOW_OUTSIDE_RTH = "window_outside_rth"
+# D32: renamed from window_outside_rth. That name asserted the window left RTH,
+# which is false for a scheduled early close (RTH ended earlier than 15:00) and
+# actively false for an intraday interruption (RTH did not end at all). The
+# reason lives in its own closed column, so the status axis stays stable while
+# reasons can be added under version control. 24 chars: fits the <U25 dtype.
+STATUS_STRUCTURALLY_UNAVAILABLE = "structurally_unavailable"
 STATUS_PATH_TIMESTAMP_MISSING = "path_timestamp_missing"
 STATUS_PATH_SESSION_MISMATCH = "path_session_mismatch"
 STATUS_PATH_SYMBOL_MISMATCH = "path_symbol_mismatch"
@@ -41,7 +52,7 @@ STATUS_INSUFFICIENT_COMPONENTS = "insufficient_components"
 STATUS_OK = "ok"
 OUTCOME_STATUSES = (
     STATUS_ANCHOR_BAR_MISSING,
-    STATUS_WINDOW_OUTSIDE_RTH,
+    STATUS_STRUCTURALLY_UNAVAILABLE,
     STATUS_PATH_TIMESTAMP_MISSING,
     STATUS_PATH_SESSION_MISMATCH,
     STATUS_PATH_SYMBOL_MISMATCH,
@@ -66,6 +77,7 @@ OUTCOME_SCHEMA = (
     "window_fits_rth",
     "common_support",
     "outcome_status",
+    "structural_unavailability_reason",
     "path_timestamp_missing",
     "path_session_mismatch",
     "path_symbol_mismatch",
@@ -95,6 +107,7 @@ _DTYPES = MappingProxyType(
         "window_fits_rth": np.dtype("bool"),
         "common_support": np.dtype("bool"),
         "outcome_status": np.dtype("<U25"),
+        "structural_unavailability_reason": np.dtype("<U24"),
         "path_timestamp_missing": np.dtype("bool"),
         "path_session_mismatch": np.dtype("bool"),
         "path_symbol_mismatch": np.dtype("bool"),
@@ -167,6 +180,14 @@ class OutcomeTable:
 class _OutcomeContract:
     time_model: TimeModel
     horizons: tuple[int, ...]
+    # D32: supplied once per build and passed explicitly. Never loaded inside a
+    # per-row function, never a mutable global.
+    schedule_table: SessionScheduleTable | None = None
+
+    def with_schedule(self, schedule_table: SessionScheduleTable) -> "_OutcomeContract":
+        if not isinstance(schedule_table, SessionScheduleTable):
+            raise SpineError("Unit O requires a canonical SessionScheduleTable")
+        return _OutcomeContract(self.time_model, self.horizons, schedule_table)
 
     @classmethod
     def from_constants(cls, constants: Constants | None = None) -> "_OutcomeContract":
@@ -429,15 +450,27 @@ class _ExactResolver:
             and n_present
             and np.any(~full_flags[present])
         )
-        fits = bool(
-            self.contract.time_model.outcome_window_fits_rth(
-                np.asarray([tau_ct_minute], dtype=np.int32), horizon_minutes
-            )[0]
+        # D32: session-aware structural availability replaces the fixed 15:00
+        # close. The schedule table is on the contract, supplied once per build.
+        # Nothing here reads a bar to decide availability, and no fallback close
+        # exists: an absent schedule raises rather than assuming 15:00.
+        if self.contract.schedule_table is None:
+            raise SpineError(
+                "Unit O resolution requires a session schedule; there is no "
+                "fallback close"
+            )
+        decision = outcome_window_structurally_available(
+            session_id=int(session_id),
+            tau_ct_minute=int(tau_ct_minute),
+            horizon_minutes=int(horizon_minutes),
+            schedule_table=self.contract.schedule_table,
         )
+        fits = bool(decision.available)
+        unavailability_reason = str(decision.reason)
 
         predicates = (
             (not anchor_exists, STATUS_ANCHOR_BAR_MISSING),
-            (not fits, STATUS_WINDOW_OUTSIDE_RTH),
+            (not fits, STATUS_STRUCTURALLY_UNAVAILABLE),
             (path_timestamp_missing, STATUS_PATH_TIMESTAMP_MISSING),
             (path_session_mismatch, STATUS_PATH_SESSION_MISMATCH),
             (path_symbol_mismatch, STATUS_PATH_SYMBOL_MISMATCH),
@@ -470,6 +503,15 @@ class _ExactResolver:
             "window_fits_rth": fits,
             "common_support": False,
             "outcome_status": status,
+            # The reason is carried only when the status is the structural one.
+            # Anchor-bar-missing outranks it, so a row that is both keeps
+            # anchor_bar_missing and reports not_applicable; window_fits_rth is
+            # the column that records the structural fact for such rows.
+            "structural_unavailability_reason": (
+                unavailability_reason
+                if status == STATUS_STRUCTURALLY_UNAVAILABLE
+                else REASON_NOT_APPLICABLE
+            ),
             "path_timestamp_missing": path_timestamp_missing,
             "path_session_mismatch": path_session_mismatch,
             "path_symbol_mismatch": path_symbol_mismatch,
@@ -491,9 +533,19 @@ def resolve_outcome_row(
     session_phase: str,
     horizon_minutes: int,
     estimand: str,
+    schedule_table: SessionScheduleTable | None = None,
 ) -> dict[str, object]:
-    """Resolve one synthetic/audit row through the production exact resolver."""
-    contract = _OutcomeContract.from_constants()
+    """Resolve one synthetic/audit row through the production exact resolver.
+
+    ``schedule_table`` defaults to the canonical byte-pinned one. This is an
+    audit/test entry point, not the production builder, which requires the table
+    explicitly; the default here is the ratified table, never a fabricated close.
+    """
+    if schedule_table is None:
+        from mnq_lab.spine.availability import load_session_schedule_table
+
+        schedule_table = load_session_schedule_table()
+    contract = _OutcomeContract.from_constants().with_schedule(schedule_table)
     return _ExactResolver(columns, contract).resolve(
         session_id=session_id,
         tau_ns=tau_ns,
@@ -512,14 +564,23 @@ def _records_to_table(records: list[dict[str, object]]) -> OutcomeTable:
     return OutcomeTable.from_columns(columns)
 
 
-def build_outcome_table(store: BarStore) -> OutcomeTable:
-    """Build every estimand x session x tau x horizon row from an exploration store."""
+def build_outcome_table(
+    store: BarStore, *, schedule_table: SessionScheduleTable
+) -> OutcomeTable:
+    """Build every estimand x session x tau x horizon row from an exploration store.
+
+    ``schedule_table`` is required and explicit. Unit O does not load a calendar,
+    does not hold one in a module global, and has no fallback close: availability
+    is decided from the schedule handed in, once, before any row is resolved.
+    """
     if not isinstance(store, BarStore):
         raise SpineError("build_outcome_table requires a BarStore")
+    if not isinstance(schedule_table, SessionScheduleTable):
+        raise SpineError("build_outcome_table requires a canonical SessionScheduleTable")
     assert_exploration_safe(store.root)
     assert_store_bar_seconds(store.manifest)
     bars = validate_exploration_store(store)
-    contract = _OutcomeContract.from_constants()
+    contract = _OutcomeContract.from_constants().with_schedule(schedule_table)
     resolver = _ExactResolver(bars.columns, contract, bars.symbols)
     grid = contract.time_model.anchor_grid(
         bars.column("session_id"), bars.column("ts_event_ns")
@@ -529,6 +590,11 @@ def build_outcome_table(store: BarStore) -> OutcomeTable:
     max_horizon = contract.horizons[-1]
     for estimand in ESTIMAND_ORDER:
         for anchor in grid.itertuples(index=False):
+            # D33: an excluded session contributes no anchor at all. It is
+            # dropped here rather than resolved and marked, so no row from it can
+            # enter the population by any later path.
+            if schedule_table.is_excluded(int(anchor.session_id)):
+                continue
             anchor_rows = [
                 resolver.resolve(
                     session_id=int(anchor.session_id),
@@ -617,7 +683,7 @@ def validate_outcome_table(table: OutcomeTable) -> None:
     expected_status = np.full(table.row_count, STATUS_OK, dtype=_DTYPES["outcome_status"])
     precedence = (
         (~table.column("anchor_close_valid"), STATUS_ANCHOR_BAR_MISSING),
-        (~table.column("window_fits_rth"), STATUS_WINDOW_OUTSIDE_RTH),
+        (~table.column("window_fits_rth"), STATUS_STRUCTURALLY_UNAVAILABLE),
         (table.column("path_timestamp_missing"), STATUS_PATH_TIMESTAMP_MISSING),
         (table.column("path_session_mismatch"), STATUS_PATH_SESSION_MISMATCH),
         (table.column("path_symbol_mismatch"), STATUS_PATH_SYMBOL_MISMATCH),
@@ -634,6 +700,19 @@ def validate_outcome_table(table: OutcomeTable) -> None:
     valid = table.column("outcome_valid")
     if not np.array_equal(valid, statuses == STATUS_OK):
         raise SpineError("Unit O outcome validity differs from status")
+    # D32: the reason axis is closed, and carries a reason exactly when the
+    # status is the structural one. Tested both ways so neither can drift.
+    reasons = table.column("structural_unavailability_reason")
+    if not np.all(np.isin(reasons, np.asarray(UNAVAILABILITY_REASONS))):
+        raise SpineError("Unit O carries an undeclared structural-unavailability reason")
+    structural = statuses == STATUS_STRUCTURALLY_UNAVAILABLE
+    if not np.array_equal(structural, reasons != REASON_NOT_APPLICABLE):
+        raise SpineError(
+            "structural_unavailability_reason must be set exactly when the "
+            "status is structurally_unavailable"
+        )
+    if bool(np.any(structural & table.column("window_fits_rth"))):
+        raise SpineError("a structurally unavailable row reports a fitting window")
     outcome_names = (
         "downward_excursion_ticks",
         "upward_excursion_ticks",
@@ -673,7 +752,7 @@ __all__ = [
     "OUTCOME_SCHEMA",
     "OUTCOME_STATUSES",
     "STATUS_ANCHOR_BAR_MISSING",
-    "STATUS_WINDOW_OUTSIDE_RTH",
+    "STATUS_STRUCTURALLY_UNAVAILABLE",
     "STATUS_PATH_TIMESTAMP_MISSING",
     "STATUS_PATH_SESSION_MISMATCH",
     "STATUS_PATH_SYMBOL_MISMATCH",

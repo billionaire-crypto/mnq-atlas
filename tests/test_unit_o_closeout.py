@@ -40,11 +40,46 @@ def test_unit_o_closeout_raw_bytes_are_pinned():
     assert _digest(payload) == CLOSEOUT_SHA256
 
 
+CLOSEOUT_COMMIT = "da68aee974dab1f039d3eeabfbc5eabfbf04a6ea"
+
+
+def _blob_at(commit: str, relative: str) -> bytes:
+    result = subprocess.run(
+        ["git", "cat-file", "blob", f"{commit}:{relative}"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, f"{relative} is unreadable at {commit}"
+    return result.stdout
+
+
 def test_every_unit_o_closeout_protected_hash_matches_raw_bytes():
+    """D35: verified at the commit the closeout describes, not the live tree.
+
+    These hashes record what the protected files WERE when Unit O v1 closed.
+    Re-reading the working tree asks a different question -- whether the repo
+    still sits at those bytes today -- which fails as soon as v2 work
+    legitimately edits any of them. Git objects are content-addressed, so
+    reading history cannot be forged.
+    """
     for relative, (expected_bytes, expected_hash) in PROTECTED.items():
-        payload = (REPO_ROOT / relative).read_bytes()
+        payload = _blob_at(CLOSEOUT_COMMIT, relative)
         assert len(payload) == expected_bytes, relative
         assert _digest(payload) == expected_hash, relative
+
+
+def test_closeout_hash_check_still_detects_a_wrong_pin():
+    """Negative control: reading history must not make the check vacuous."""
+    relative = "mnq_lab/outcomes/excursions.py"
+    payload = _blob_at(CLOSEOUT_COMMIT, relative)
+    assert _digest(payload) == PROTECTED[relative][1]
+    assert _digest(payload + b"x") != PROTECTED[relative][1]
+    empty = subprocess.run(
+        ["git", "cat-file", "blob", f"{CLOSEOUT_COMMIT}:docs/NOT_A_REAL_FILE.md"],
+        cwd=REPO_ROOT, capture_output=True, check=False,
+    )
+    assert empty.returncode != 0
 
 
 def test_d21_transition_preserves_the_exact_historical_prefix():

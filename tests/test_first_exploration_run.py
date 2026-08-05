@@ -35,6 +35,7 @@ from mnq_lab.production.first_exploration_run import (
 from mnq_lab.spine.exploration import validate_exploration_store
 from mnq_lab.spine.store import environment_fingerprint
 from tests.unit_o_fixtures import (
+    schedule_for_store,
     in_memory_store,
     synthetic_outcome_columns,
     write_synthetic_store,
@@ -184,7 +185,7 @@ def test_staged_artifacts_reverify_hashes_rows_source_and_frozen_inputs(tmp_path
     store = write_synthetic_store(tmp_path / "source", columns)
     bars = validate_exploration_store(store)
     product = _build_phase7_product(store, bars, _calendar(20210615))
-    outcomes = build_outcome_table(store)
+    outcomes = build_outcome_table(store, schedule_table=schedule_for_store(store))
     stage = tmp_path / "stage"
     environment = environment_fingerprint(Path(__file__).resolve().parents[1])
 
@@ -215,7 +216,7 @@ def test_staging_validator_kills_each_declared_mutation(tmp_path, mutation, mess
     store = write_synthetic_store(tmp_path / "source", columns)
     bars = validate_exploration_store(store)
     product = _build_phase7_product(store, bars, _calendar(20210615))
-    outcomes = build_outcome_table(store)
+    outcomes = build_outcome_table(store, schedule_table=schedule_for_store(store))
     stage = tmp_path / "stage"
     _stage_artifacts(stage, store, product, outcomes, environment={"commit": "fixture", "dirty": False})
     source_sha = _sha256(store.root / "manifest.json")
@@ -250,7 +251,7 @@ def test_final_manifest_is_last_and_labels_outputs_non_admissible(tmp_path):
     store = write_synthetic_store(tmp_path / "source", columns)
     bars = validate_exploration_store(store)
     product = _build_phase7_product(store, bars, _calendar(20210615))
-    outcomes = build_outcome_table(store)
+    outcomes = build_outcome_table(store, schedule_table=schedule_for_store(store))
     stage = tmp_path / "stage"
     final = tmp_path / "final"
     staged = _stage_artifacts(stage, store, product, outcomes, environment={"commit": "fixture", "dirty": False})

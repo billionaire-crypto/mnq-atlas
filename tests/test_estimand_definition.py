@@ -366,12 +366,15 @@ def test_unit_o_partial_components_split_status_but_not_observed_excursion(tmp_p
         build_outcome_table,
     )
     from tests.conftest import ct_ns
-    from tests.unit_o_fixtures import in_memory_store, synthetic_outcome_columns
+    from tests.unit_o_fixtures import (
+        in_memory_store,
+        schedule_for_store,
+        synthetic_outcome_columns,
+    )
 
     columns = synthetic_outcome_columns(partial={"08:40": 3})
-    table = build_outcome_table(
-        in_memory_store(tmp_path / "exploration" / "bars_5m", columns)
-    )
+    _store = in_memory_store(tmp_path / "exploration" / "bars_5m", columns)
+    table = build_outcome_table(_store, schedule_table=schedule_for_store(_store))
     key = (table.column("tau_ns") == ct_ns(f"{ORDINARY} 08:35")) & (
         table.column("horizon_minutes") == 15
     )
@@ -391,12 +394,15 @@ def test_unit_o_wholly_missing_bar_fails_both_estimands(tmp_path):
         build_outcome_table,
     )
     from tests.conftest import ct_ns
-    from tests.unit_o_fixtures import in_memory_store, synthetic_outcome_columns
+    from tests.unit_o_fixtures import (
+        in_memory_store,
+        schedule_for_store,
+        synthetic_outcome_columns,
+    )
 
     columns = synthetic_outcome_columns(missing=("08:40",))
-    table = build_outcome_table(
-        in_memory_store(tmp_path / "exploration" / "bars_5m", columns)
-    )
+    _store = in_memory_store(tmp_path / "exploration" / "bars_5m", columns)
+    table = build_outcome_table(_store, schedule_table=schedule_for_store(_store))
     rows = (table.column("tau_ns") == ct_ns(f"{ORDINARY} 08:35")) & (
         table.column("horizon_minutes") == 15
     )
@@ -414,12 +420,15 @@ def test_unit_o_common_support_is_per_estimand_not_their_intersection(tmp_path):
         build_outcome_table,
     )
     from tests.conftest import ct_ns
-    from tests.unit_o_fixtures import in_memory_store, synthetic_outcome_columns
+    from tests.unit_o_fixtures import (
+        in_memory_store,
+        schedule_for_store,
+        synthetic_outcome_columns,
+    )
 
     columns = synthetic_outcome_columns(partial={"09:20": 3})
-    table = build_outcome_table(
-        in_memory_store(tmp_path / "exploration" / "bars_5m", columns)
-    )
+    _store = in_memory_store(tmp_path / "exploration" / "bars_5m", columns)
+    table = build_outcome_table(_store, schedule_table=schedule_for_store(_store))
     key = (table.column("tau_ns") == ct_ns(f"{ORDINARY} 08:35")) & (
         table.column("horizon_minutes") == 15
     )
@@ -438,12 +447,15 @@ def test_unit_o_anchor_component_count_is_not_an_outcome_requirement(tmp_path):
         build_outcome_table,
     )
     from tests.conftest import ct_ns
-    from tests.unit_o_fixtures import in_memory_store, synthetic_outcome_columns
+    from tests.unit_o_fixtures import (
+        in_memory_store,
+        schedule_for_store,
+        synthetic_outcome_columns,
+    )
 
     columns = synthetic_outcome_columns(partial={"08:30": 2})
-    table = build_outcome_table(
-        in_memory_store(tmp_path / "exploration" / "bars_5m", columns)
-    )
+    _store = in_memory_store(tmp_path / "exploration" / "bars_5m", columns)
+    table = build_outcome_table(_store, schedule_table=schedule_for_store(_store))
     row = (
         (table.column("estimand") == O_FULL)
         & (table.column("tau_ns") == ct_ns(f"{ORDINARY} 08:35"))

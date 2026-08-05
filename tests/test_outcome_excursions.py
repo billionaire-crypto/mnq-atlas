@@ -19,7 +19,7 @@ from mnq_lab.outcomes.excursions import (
     STATUS_PATH_SESSION_MISMATCH,
     STATUS_PATH_SYMBOL_MISMATCH,
     STATUS_PATH_TIMESTAMP_MISSING,
-    STATUS_WINDOW_OUTSIDE_RTH,
+    STATUS_STRUCTURALLY_UNAVAILABLE,
     _OutcomeContract,
     build_outcome_table,
     compute_excursion_ticks,
@@ -28,6 +28,7 @@ from mnq_lab.outcomes.excursions import (
 )
 from tests.conftest import ct_ns
 from tests.unit_o_fixtures import (
+    schedule_for_store,
     in_memory_store,
     synthetic_outcome_columns,
 )
@@ -60,7 +61,7 @@ def _resolve(columns, *, tau="08:35", horizon=15, estimand=ESTIMAND_FULLY_LABELE
 def test_status_vocabulary_and_precedence_are_closed():
     assert OUTCOME_STATUSES == (
         STATUS_ANCHOR_BAR_MISSING,
-        STATUS_WINDOW_OUTSIDE_RTH,
+        STATUS_STRUCTURALLY_UNAVAILABLE,
         STATUS_PATH_TIMESTAMP_MISSING,
         STATUS_PATH_SESSION_MISMATCH,
         STATUS_PATH_SYMBOL_MISMATCH,
@@ -201,7 +202,7 @@ def test_noninteger_empty_and_invalid_ohlc_inputs_halt_as_corruption():
             "14:05",
             60,
             ESTIMAND_FULLY_LABELED,
-            STATUS_WINDOW_OUTSIDE_RTH,
+            STATUS_STRUCTURALLY_UNAVAILABLE,
             None,
         ),
         (
@@ -264,7 +265,7 @@ def test_status_precedence_retains_all_true_diagnostic_flags():
 def test_public_build_emits_every_anchor_horizon_estimand_row_in_fixed_order(tmp_path):
     columns = synthetic_outcome_columns(missing=("08:25",))
     store = in_memory_store(tmp_path / "exploration" / "bars_5m", columns)
-    table = build_outcome_table(store)
+    table = build_outcome_table(store, schedule_table=schedule_for_store(store))
     assert table.row_count == 2 * 78 * 3
     assert table.column("estimand").tolist() == (
         [ESTIMAND_FULLY_LABELED] * (78 * 3)
@@ -283,7 +284,7 @@ def test_public_build_compares_decoded_symbols_not_merely_integer_codes(tmp_path
         columns,
         symbols=("MNQM1", "MNQM1"),
     )
-    table = build_outcome_table(store)
+    table = build_outcome_table(store, schedule_table=schedule_for_store(store))
     row = _row(table, estimand=ESTIMAND_OBSERVED)
     assert row["outcome_status"] == STATUS_OK
     assert not row["path_symbol_mismatch"]
@@ -296,7 +297,7 @@ def test_public_build_flags_a_genuine_decoded_symbol_change(tmp_path):
         columns,
         symbols=("MNQM1", "MNQU1"),
     )
-    table = build_outcome_table(store)
+    table = build_outcome_table(store, schedule_table=schedule_for_store(store))
     row = _row(table, estimand=ESTIMAND_OBSERVED)
     assert row["outcome_status"] == STATUS_PATH_SYMBOL_MISMATCH
     assert row["path_symbol_mismatch"]
@@ -308,11 +309,10 @@ def test_duplicate_timestamps_and_impossible_cross_estimand_status_halt(tmp_path
     duplicated = {name: np.insert(value, 1, value[0]) for name, value in columns.items()}
     store = in_memory_store(tmp_path / "exploration" / "bars_5m", duplicated)
     with pytest.raises(SpineError, match="strictly increasing|duplicate"):
-        build_outcome_table(store)
+        build_outcome_table(store, schedule_table=schedule_for_store(store))
 
-    clean = build_outcome_table(
-        in_memory_store(tmp_path / "clean" / "exploration" / "bars_5m", columns)
-    )
+    clean_store = in_memory_store(tmp_path / "clean" / "exploration" / "bars_5m", columns)
+    clean = build_outcome_table(clean_store, schedule_table=schedule_for_store(clean_store))
     mutated = clean.mutable_copy()
     full = (
         (mutated["estimand"] == ESTIMAND_FULLY_LABELED)

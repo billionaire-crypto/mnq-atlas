@@ -1600,3 +1600,111 @@ after audit authorisation.
 correction. It does not reopen the Phase 8 closeout, which remains the
 accurate record of what the previous mechanism produced, and it does not
 authorise Phase 9.
+---
+
+## D32. The root defect is a fixed RTH close in the outcome layer, not the Phase 8 denominator
+
+**Relationship to D31.** This entry supersedes D31's proposed implementation
+and completes D31's threshold claim. D31's bytes are not edited and D31 is
+not withdrawn: its central finding is confirmed below. Both entries stand;
+where they conflict, this one governs.
+
+**1. D31's finding is correct.** Phase 8 gated admissibility on a completion
+rate whose denominator omitted the structural fit of the outcome window,
+while S00 derived the frozen thresholds over `state anchor AND
+window_fits_rth_h{horizon}` (`mnq_lab/outcomes/completion.py`). An outcome
+window that leaves the trading session is not missing data: the requested
+outcome is structurally undefined, so counting it as an incomplete
+observation understates completion. That omission is real and is not
+disputed here.
+
+**2. D31's proposed implementation does not remove the defect.** The
+correction drafted under D31 builds its structural denominator from Unit O's
+`window_fits_rth` column. That column is itself the defective quantity. A
+Phase 8 consumer that reads it inherits the defect rather than removing it,
+and Unit O's structural-fit field and outcome-status field remain
+semantically wrong for every later consumer, none of which is obliged to
+know that the field must be recomputed before use. Correcting the
+denominator while leaving its input wrong relocates the defect; it does not
+repair it.
+
+**3. Root cause.** `TimeModel.outcome_window_fits_rth`
+(`mnq_lab/spine/timemodel.py:279`) evaluates `tau_ct_minute +
+horizon_minutes <= self.rth_end_minute`. `rth_end_minute` is parsed once
+from the single global constant `time.rth_end_ct: "15:00"` in
+`analysis_constants_v1.yaml`; the function takes no session argument and
+therefore has no access to a session schedule. It consequently cannot
+distinguish an ordinary full session, a scheduled early close, a session
+with no scheduled RTH, a registered temporary market interruption, and a
+genuinely missing bar during otherwise available trading time. All five
+collapse onto one fixed 15:00 CT boundary. A structurally unavailable
+required timestamp is then classified as a missing path timestamp and
+charged against completion as incomplete data. The absence of per-session
+availability in the outcome layer, not the Phase 8 denominator, is the
+governing defect.
+
+**4. D31's threshold claim is incomplete.** D31 states that the frozen
+completion thresholds are unchanged. That is true of the reproduction D31
+performed, which was conditioned on the same fixed-close fit field, and it
+is therefore not a statement about the corrected population. Under a
+session-aware structural population the thresholds are not all invariant.
+
+**5. Expected corrected thresholds.** A session-aware reproduction reported
+to this project returns h15 -> 0.99, h30 -> 0.99 and h60 -> 0.99 under the
+unchanged registered rule `max(0.90, floor(s00_p05 * 100) / 100)`, against
+the recorded v1 values 0.99, 0.99 and 0.98. Only h60 moves. This entry
+records that expectation and withdraws D31's unqualified "thresholds
+unchanged" claim; it does not itself establish the new value. The corrected
+population does not yet exist, so the figure cannot be reproduced at the
+time of this ruling. It must be independently re-derived and ratified as
+S00 v2 from the corrected structural population, and it must not be forced
+if independent reproduction disagrees. `analysis_constants_v1.yaml` is
+untouched by this entry and remains frozen; any corrected value is recorded
+in a new versioned constants file, never by editing v1.
+
+**6. A Phase 8-local patch is rejected as the final repair.** Masking the
+condition inside Phase 8 would conceal it from Phase 8 completion while
+leaving the defective Unit O fields in place and available for reuse. It is
+rejected as the terminal remedy. The repair belongs in the canonical session
+schedule and the outcome layer.
+
+**7. Authorised remedy.** The user directed a versioned rebuild of Phase 7
+and Unit O together, because the governed producer constructs them together,
+because Phase 7 labels six regular sessions `unresolved_truncated_session`,
+and because registering structural interruptions may legitimately change
+calendar and data-quality metadata and possibly eligibility. Reusing Phase 7
+unrebuilt would assume those fields are unaffected rather than prove it. The
+rebuild is expected to leave Phase 7 scientific conditioning values and
+assignments unchanged, and that expectation is to be tested by raw-byte
+comparison, not assumed. This authorises no change to Phases 1-6.
+
+**8. The existing artifacts remain immutable evidence.** Neither Phase 7 +
+Unit O v1 tree, `phase8-first-run-v1`, any v1 manifest, checkpoint,
+progress log, ratification certificate, S00 record, preregistration,
+closeout, `docs/UNIT_O.md`, the accepted calendar v1, nor any historical
+ledger entry is edited, deleted, renamed or reused. All corrected products
+take new versioned paths and identifiers, recorded before production.
+
+**9. No outcome magnitude informed this decision.** The investigation and
+this ruling used session-schedule information, structural fit, completion
+counts, coverage counts, status counts, row identities, source bytes and
+hashes only. No tick, quantile, contrast or interval value was read.
+
+**10. This entry produces no corrected result.** Recording the ruling
+creates no rebuild, no v2 artifact, no certificate and no threshold. Every
+such product requires its own production run, its own manifest and its own
+independent audit before it exists.
+
+**11. Timing.** The ruling was made during instrument construction, before
+any hypothesis test and before any Phase 9 work. Phase 9 remains blocked.
+
+**Forward reference to reconcile.** The uncommitted Phase 8 working-tree
+change carries a source comment labelled "D32" for a different proposition,
+namely which horizon's threshold grades a `common_support` row. This ruling
+does not decide that question. It must be settled and recorded under the v2
+contract freeze, and the stale comment corrected, when that code is revised.
+
+**Status:** `OPEN`. It authorises the repair sequence and the versioned
+rebuild. It does not reopen the Phase 8 closeout, which remains the accurate
+record of what the previous mechanism produced, and it does not authorise
+Phase 9.

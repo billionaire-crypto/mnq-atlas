@@ -329,3 +329,89 @@ def test_duplicate_timestamps_and_impossible_cross_estimand_status_halt(tmp_path
     mutated["outcome_status"][observed] = STATUS_INSUFFICIENT_COMPONENTS
     with pytest.raises(SpineError, match="observed_bar_path"):
         validate_outcome_table(clean.from_columns(mutated))
+
+
+# ---------------------------------------------------------------------------
+# D32 Stage 5 audit finding F-1: nothing proved build_outcome_table actually
+# CONSUMES the session schedule. Every fixture used a 15:00 close, so the new
+# rule and the old fixed-close rule agreed everywhere and a fixed-15:00 mutant
+# survived the whole suite. These tests exercise the disagreement.
+# ---------------------------------------------------------------------------
+
+
+def _rows_at(table, observation_ct, horizon):
+    mask = (table.column("observation_time_ct") == observation_ct) & (
+        table.column("horizon_minutes") == horizon
+    )
+    return mask
+
+
+def test_outcome_layer_honours_a_scheduled_early_close(tmp_path):
+    """A window crossing a 12:00 close is structurally unavailable.
+
+    Under the fixed-15:00 rule 11:30 + 60 = 12:30 <= 15:00 would "fit" and the
+    row would carry an excursion, inside a session that had already closed.
+    """
+    store = in_memory_store(
+        tmp_path / "exploration" / "bars_5m", synthetic_outcome_columns()
+    )
+    table = build_outcome_table(
+        store,
+        schedule_table=schedule_for_store(
+            store, close_ct=720, status="shortened_rth"
+        ),
+    )
+
+    crossing = _rows_at(table, "11:30", 60)
+    assert bool(np.any(crossing))
+    assert not bool(np.any(table.column("window_fits_rth")[crossing]))
+    assert set(table.column("outcome_status")[crossing]) == {
+        STATUS_STRUCTURALLY_UNAVAILABLE
+    }
+    assert set(table.column("structural_unavailability_reason")[crossing]) == {
+        "scheduled_close"
+    }
+    assert not bool(np.any(table.column("outcome_valid")[crossing]))
+    for name in (
+        "downward_excursion_ticks",
+        "upward_excursion_ticks",
+        "signed_downward_extreme_ticks",
+        "signed_upward_extreme_ticks",
+    ):
+        assert not bool(np.any(table.column(name)[crossing] != 0))
+
+    # a window comfortably inside the shortened session is untouched
+    inside = _rows_at(table, "11:00", 15)
+    assert bool(np.any(inside))
+    assert bool(np.all(table.column("window_fits_rth")[inside]))
+    assert set(table.column("structural_unavailability_reason")[inside]) == {
+        "not_applicable"
+    }
+
+    # and the boundary is exact: 11:00 + 60 == 12:00 still fits
+    boundary = _rows_at(table, "11:00", 60)
+    assert bool(np.all(table.column("window_fits_rth")[boundary]))
+
+
+def test_outcome_layer_emits_no_row_for_an_excluded_session(tmp_path):
+    """D33: an excluded session contributes no anchor at all."""
+    from tests.unit_o_fixtures import combine_columns
+
+    columns = combine_columns(
+        synthetic_outcome_columns("2021-06-15"),
+        synthetic_outcome_columns("2021-06-16"),
+    )
+    store = in_memory_store(tmp_path / "exploration" / "bars_5m", columns)
+    excluded_session, kept_session = 20210615, 20210616
+
+    both = build_outcome_table(store, schedule_table=schedule_for_store(store))
+    assert bool(np.any(both.column("session_id") == excluded_session))
+    assert bool(np.any(both.column("session_id") == kept_session))
+
+    table = build_outcome_table(
+        store,
+        schedule_table=schedule_for_store(store, excluded=(excluded_session,)),
+    )
+    assert not bool(np.any(table.column("session_id") == excluded_session))
+    assert bool(np.any(table.column("session_id") == kept_session))
+    assert table.row_count == both.row_count // 2

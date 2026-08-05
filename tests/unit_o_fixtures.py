@@ -167,7 +167,13 @@ def write_synthetic_store(
     return BarStore.open(store_root)
 
 
-def schedule_for_store(store) -> "SessionScheduleTable":
+def schedule_for_store(
+    store,
+    *,
+    close_ct: int = 900,
+    status: str = "full_rth",
+    excluded: tuple[int, ...] = (),
+) -> "SessionScheduleTable":
     """A full-RTH schedule covering exactly the sessions a synthetic store holds.
 
     D32 Stage 5: ``build_outcome_table`` now requires an explicit schedule and
@@ -185,18 +191,31 @@ def schedule_for_store(store) -> "SessionScheduleTable":
         build_session_schedule_table,
     )
 
+    from mnq_lab.spine.availability import SessionExclusion
+
     sessions = sorted({int(value) for value in np.asarray(store.column("session_id"))})
     return build_session_schedule_table(
-        SessionSchedule(
-            session_id=session,
-            scheduled_rth_open_ct=510,
-            scheduled_rth_close_ct=900,
-            scheduled_rth_status="full_rth",
-            structural_interruptions=(),
-            timezone="America/Chicago",
-            calendar_version=CALENDAR_VERSION,
-            calendar_sha256=CALENDAR_SHA256,
-            interruption_source_id=None,
-        )
-        for session in sessions
+        (
+            SessionSchedule(
+                session_id=session,
+                scheduled_rth_open_ct=510,
+                scheduled_rth_close_ct=close_ct,
+                scheduled_rth_status=status,
+                structural_interruptions=(),
+                timezone="America/Chicago",
+                calendar_version=CALENDAR_VERSION,
+                calendar_sha256=CALENDAR_SHA256,
+                interruption_source_id=None,
+            )
+            for session in sessions
+        ),
+        exclusions=tuple(
+            SessionExclusion(
+                session_id=int(session),
+                reason="excluded_unresolved_official_interruption",
+                source_id="TEST",
+                recorded_by_ruling="D33",
+            )
+            for session in excluded
+        ),
     )

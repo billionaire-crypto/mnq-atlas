@@ -212,6 +212,23 @@ Boundary convention, declared and separately tested:
   interruption and no later bar is ever substituted for a missing scheduled
   timestamp.
 
+**Precision on "no per-row filesystem access".** The decision path performs one
+constants read per process, not per row: `_declared_horizons()` calls
+`load_constants()` to validate the horizon, and is `lru_cache(maxsize=1)`. The
+schedule table itself is loaded once and passed explicitly. No file is opened per
+window, per anchor or per row; the literal claim "filesystem-free" would be
+false, and the accurate claim is one cached read per process.
+
+**A currently unreachable branch, declared.** The decision requires
+`tau >= scheduled_rth_open_ct`. On calendar v1 this can never fire: all 1,008
+RTH-bearing sessions open at 08:30 and the tau grid starts at 08:30. The branch
+is dead today and becomes live only if a session with a later scheduled open ever
+enters the calendar. It is pinned by a synthetic witness so a regression cannot
+pass unnoticed. Note that such a window is currently reported with reason
+`scheduled_close`, which is a misnomer for a *pre-open* window; if a
+later-opening session is ever registered, that reason code must be revisited
+rather than reused.
+
 Fails closed, with no fallback: unknown session; reversed or empty interruption;
 overlapping interruptions (no canonical merge is defined, so they are rejected);
 interruption outside the scheduled session; undeclared reason; missing schedule.
@@ -224,15 +241,26 @@ There is **no fallback to 15:00**.
 Unit O v2 uses one general structural-unavailability status plus a separate,
 closed, typed reason field.
 
-**Why A over B.** The decisive argument is byte-comparability, which Stage 8
-depends on. `outcome_status` is `numpy` dtype `<U25` (`excursions.py`), i.e. a
-fixed 100-byte element. Option B needs strings such as
-`window_after_scheduled_close` (28 chars), forcing the dtype wider; a width change
-rewrites **every** element in the column, so the Stage 8 v1↔v2 comparison would
-show all 472,212 rows differing and could no longer isolate the intended change.
-Option A keeps the column at `<U25` and confines the diff to genuinely changed
-rows. Secondary: the reason axis can be extended later under version control
-without disturbing the status axis that Phase 8 switches on.
+**Why A over B — axis separation.** The status axis answers *what happened* and is
+the axis Phase 8 switches on; the reason axis answers *why* and can be extended
+under version control without disturbing it. Keeping them separate means a future
+reason (an exchange emergency, a systems outage) is additive rather than a change
+to the vocabulary every consumer branches on. Option A also refuses to label an
+11:56 intraday halt `window_outside_rth`, which would be actively false: RTH did
+not end.
+
+**A rejected argument, recorded so no one leans on it.** An earlier draft of this
+section claimed the decisive reason was byte-comparability — that Option B's
+wider dtype would rewrite every element and make the Stage 8 v1↔v2 comparison show
+all 472,212 rows differing. **That argument is unsound and has been withdrawn.**
+It was falsified by measurement: numpy compares fixed-width unicode arrays *by
+value*, not by width, so a `<U25`-vs-`<U28` comparison isolates exactly the same
+differing rows as `<U25`-vs-`<U25`. The premise would hold only for a whole-column
+raw-byte digest, and such a digest is all-or-nothing and changes under Option A
+too, since Option A also rewrites values (`window_outside_rth` ->
+`structurally_unavailable`). It therefore could not discriminate between the
+options at all. The dtype facts remain true and are unchanged below; only the
+inference drawn from them was wrong.
 
 **Status vocabulary v2** — precedence order preserved, rank 2 renamed:
 

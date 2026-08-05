@@ -123,6 +123,34 @@ def test_3_exact_close_boundary_is_available_on_both_full_and_short_sessions():
     assert _decide(mod, table, EARLY_SESSION, 695, 30).available is False  # 725 > 720
 
 
+def test_3b_window_starting_before_the_scheduled_open_is_unavailable():
+    """Pins the `tau < scheduled_rth_open_ct` guard.
+
+    Unreachable on calendar v1 -- all 1,008 RTH-bearing sessions open at 08:30
+    and the tau grid starts at 08:30 -- so an audit mutant that deleted this
+    guard survived the suite. A synthetic session with a LATER open makes the
+    branch live, so a regression cannot pass unnoticed.
+
+    The reason is currently `scheduled_close`, which is a misnomer for a
+    pre-open window. That is pinned deliberately: if a later-opening session is
+    ever registered, this test fails and forces the reason code to be revisited
+    rather than silently reused.
+    """
+    mod = _mod()
+    late_open = 29990103
+    table = _table(mod, _schedule(mod, late_open, open_ct=600))  # opens 10:00
+
+    # before the open -> unavailable
+    d = _decide(mod, table, late_open, 510, 15)
+    assert d.available is False
+    assert d.reason == "scheduled_close"
+    assert _decide(mod, table, late_open, 595, 15).available is False
+    # exactly at the open -> available
+    assert _decide(mod, table, late_open, 600, 15).available is True
+    # comfortably inside -> available
+    assert _decide(mod, table, late_open, 700, 60).available is True
+
+
 def test_4_no_scheduled_rth_makes_every_window_unavailable():
     mod = _mod()
     table = _table(mod, _schedule(mod, NO_RTH_SESSION, status="no_scheduled_rth",

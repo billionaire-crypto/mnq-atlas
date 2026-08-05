@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
 from typing import Any, Mapping
 
 from mnq_lab import SpineError
@@ -244,6 +245,44 @@ def _tree_sha256(root: Path) -> str:
         digest.update(relative + b"\0" + str(byte_count).encode("ascii"))
         digest.update(b"\0" + file_sha + b"\n")
     return digest.hexdigest()
+
+
+_PRODUCING_CODE_PATH = "mnq_lab/production/first_exploration_run.py"
+_COMMIT_RE = re.compile(r"[0-9a-f]{40}")
+
+
+def _producing_code_sha256_at_commit(repo: Path, run_commit: str) -> str:
+    """SHA-256 of the producing code AS IT WAS at the certificate's run commit.
+
+    D34. The certificate attests that an artifact was produced by code at
+    ``run_commit``; verifying that claim must read the code at that commit. The
+    previous implementation hashed the working-tree copy, which answers whether
+    the checkout still sits at that code today -- a different question, and one
+    that fails the moment the producer is legitimately changed.
+
+    Anti-tampering is preserved: git object identity is content-addressed, so
+    the historical blob cannot be forged to match a different constant.
+
+    Fails closed. An unverifiable certificate is never a verified one, so an
+    absent git, an unreachable commit or a missing blob raises rather than
+    passing or falling back to the working tree.
+    """
+    if not isinstance(run_commit, str) or not _COMMIT_RE.fullmatch(run_commit):
+        raise SpineError("certificate run_commit is not a full hexadecimal commit id")
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(repo), "cat-file", "blob", f"{run_commit}:{_PRODUCING_CODE_PATH}"],
+            capture_output=True,
+            check=False,
+        )
+    except OSError as exc:  # git absent or not executable
+        raise SpineError(f"cannot verify producing code at {run_commit}: {exc}") from exc
+    if completed.returncode != 0:
+        raise SpineError(
+            f"producing code is unreadable at commit {run_commit}: "
+            f"{completed.stderr.decode('utf-8', 'replace').strip()}"
+        )
+    return hashlib.sha256(completed.stdout).hexdigest()
 
 
 def _d22_sha256(path: Path) -> str:
@@ -503,8 +542,8 @@ def evaluate_ratification_certificate(
         )
         if gates["producing_code_sha256"] != PRODUCING_CODE_SHA256:
             raise SpineError("producing code hash differs")
-        if _sha256_file(repo / "mnq_lab" / "production" / "first_exploration_run.py") != PRODUCING_CODE_SHA256:
-            raise SpineError("producing code bytes differ")
+        if _producing_code_sha256_at_commit(repo, certificate["run_commit"]) != PRODUCING_CODE_SHA256:
+            raise SpineError("producing code bytes differ at the certificate's run commit")
         expected_gate_records = [dict(record, passed=True) for record in GATE_CLASSIFICATION]
         if gates["gate_records"] != expected_gate_records or gates["all_gates_passed"] is not True:
             raise SpineError("gate pass records are incomplete or changed")

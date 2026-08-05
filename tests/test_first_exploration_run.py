@@ -153,9 +153,12 @@ def test_partial_regular_session_gets_a_data_quality_flag_without_reclassificati
     )
 
     assert {row.calendar_session_class for row in assignments} == {"regular"}
-    assert {row.data_quality_status for row in assignments} == {
-        "unresolved_truncated_session"
-    }
+    # D32/D33 Stage 4: a hole in the middle of a session is now named as such.
+    # The v1 label asserted the whole day was truncated, which a mid-session gap
+    # is not. The calendar classification is still untouched, as before.
+    statuses = {row.data_quality_status for row in assignments}
+    assert statuses == {"observed_unexplained_mid_session_gap"}
+    assert "unresolved_truncated_session" not in statuses
 
 
 def test_staging_refuses_nonempty_root_and_missing_manifest(tmp_path):

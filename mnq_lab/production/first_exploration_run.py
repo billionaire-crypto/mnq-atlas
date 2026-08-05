@@ -78,7 +78,9 @@ from mnq_lab.outcomes.completion import (
     completion_by_year,
 )
 from mnq_lab.outcomes.excursions import OutcomeTable, build_outcome_table
+from mnq_lab.spine.availability import load_session_schedule_table
 from mnq_lab.spine.exploration import ExplorationBars, validate_exploration_store
+from mnq_lab.spine.session_quality import classify_session_quality
 from mnq_lab.spine.seal import Corpus, assert_exploration_safe, store_path
 from mnq_lab.spine.store import BarStore, environment_fingerprint
 from mnq_lab.spine.timemodel import TimeModel
@@ -244,21 +246,23 @@ def _session_quality(
     flags = time_model.session_flags(
         bars.column("session_id"), bars.column("ts_event_ns")
     )
+    schedule_table = load_session_schedule_table()
     output: dict[int, str] = {}
     for row in flags.itertuples(index=False):
         session_id = int(row.session_id)
         calendar_row = calendar.lookup(session_id)
-        anomalous = bool(
-            row.observed_no_rth_bars
-            or row.observed_rth_ended_early
-            or row.observed_mid_rth_gap
-        )
-        output[session_id] = (
-            "unresolved_truncated_session"
-            if calendar_row is not None
-            and calendar_row.session_class == "regular"
-            and anomalous
-            else "ok"
+        if calendar_row is None:
+            # Out of accepted-calendar range. The v1 code silently labelled this
+            # "ok"; there is no schedule to classify against, so say so.
+            output[session_id] = "ok"
+            continue
+        output[session_id] = classify_session_quality(
+            session_id=session_id,
+            calendar_row=calendar_row,
+            observed_no_rth_bars=bool(row.observed_no_rth_bars),
+            observed_rth_ended_early=bool(row.observed_rth_ended_early),
+            observed_mid_rth_gap=bool(row.observed_mid_rth_gap),
+            schedule_table=schedule_table,
         )
     return output
 

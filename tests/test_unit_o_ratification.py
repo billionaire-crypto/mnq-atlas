@@ -7,6 +7,7 @@ import hashlib
 import inspect
 from pathlib import Path
 import shutil
+import subprocess
 
 import pytest
 
@@ -68,7 +69,52 @@ def _copy_protected_repo_bytes(repo: Path) -> None:
     shutil.copy2(REPO_ROOT / "docs/DISCREPANCIES.md", repo / "docs/DISCREPANCIES.md")
     producer = repo / "mnq_lab/production/first_exploration_run.py"
     producer.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(REPO_ROOT / "mnq_lab/production/first_exploration_run.py", producer)
+    # D34: C4 now verifies the producer AT the certificate's run commit, so the
+    # synthetic repo must hold the bytes that hash to the pinned constant. Take
+    # them from the real repository's history rather than its working tree,
+    # which legitimately moves on as the producer evolves.
+    producer.write_bytes(_pinned_producer_bytes())
+
+
+def _pinned_producer_bytes() -> bytes:
+    """Producing-code bytes hashing to PRODUCING_CODE_SHA256."""
+    relative = "mnq_lab/production/first_exploration_run.py"
+    live = (REPO_ROOT / relative).read_bytes()
+    if hashlib.sha256(live).hexdigest() == PRODUCING_CODE_SHA256:
+        return live
+    revisions = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "log", "--format=%H", "--", relative],
+        capture_output=True, check=True,
+    ).stdout.decode().split()
+    for revision in revisions:
+        blob = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "cat-file", "blob", f"{revision}:{relative}"],
+            capture_output=True, check=False,
+        ).stdout
+        if hashlib.sha256(blob).hexdigest() == PRODUCING_CODE_SHA256:
+            return blob
+    raise AssertionError("no revision of the producer matches PRODUCING_CODE_SHA256")
+
+
+def _commit_synthetic_repo(repo: Path) -> str:
+    """Make the fixture a real git repository and return its commit id.
+
+    C4 reads the producer out of git history, so a fabricated 40-hex id would
+    only ever prove the check fails closed -- never that it accepts a genuine
+    certificate. The fixture therefore commits for real.
+    """
+    def run(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["git", "-C", str(repo), *args], capture_output=True, check=True
+        )
+
+    subprocess.run(["git", "init", "-q", str(repo)], capture_output=True, check=True)
+    run("config", "user.email", "synthetic@example.invalid")
+    run("config", "user.name", "Synthetic Fixture")
+    run("config", "core.autocrlf", "false")
+    run("add", "-A")
+    run("-c", "commit.gpgsign=false", "commit", "-q", "-m", "synthetic fixture")
+    return run("rev-parse", "HEAD").stdout.decode().strip()
 
 
 def _environment(*, dirty: bool = False, commit: str = RUN_COMMIT) -> dict[str, object]:
@@ -156,7 +202,7 @@ def _build_case(
     source_sha: str = SOURCE_STORE_MANIFEST_SHA256,
     visible_at: str = VISIBLE_AFTER,
     dirty: bool = False,
-    run_commit: str = RUN_COMMIT,
+    run_commit: str | None = None,
     reproduction_commit: str | None = None,
     reproduction_environment_overrides: dict[str, object] | None = None,
     override_basis: str = "2026-08-02 user ruling and independently audited bounded override",
@@ -164,6 +210,11 @@ def _build_case(
     repo = tmp_path / "repo"
     repo.mkdir()
     _copy_protected_repo_bytes(repo)
+    # D34: the certificate's run commit must exist, because C4 reads the
+    # producer from history at that commit.
+    synthetic_commit = _commit_synthetic_repo(repo)
+    if run_commit is None:
+        run_commit = synthetic_commit
     tree = repo / "artifacts" / tree_name
     replay = repo / "artifacts" / "replay"
     _write_tree(tree, source_sha=source_sha, dirty=dirty, commit=run_commit)
@@ -374,6 +425,45 @@ def test_c5_refuses_self_comparison_disguised_as_a_rerun(tmp_path):
         ),
     )
     assert "C5" in evaluate_ratification_certificate(certificate, repo_root=repo).failures
+
+
+def test_c4_still_catches_a_tampered_producer_at_the_run_commit(tmp_path):
+    """D34 negative control: the check reads history, but it still checks.
+
+    Without this, moving C4 from the working tree to git history could have made
+    it vacuous -- passing because it looked somewhere that always agreed. Here
+    the producer committed at the run commit is deliberately wrong, and C4 must
+    fail. Compare with the untampered fixture, which passes.
+    """
+    clean_root = tmp_path / "clean"
+    clean_root.mkdir(parents=True)
+    repo, _, certificate = _build_case(clean_root)
+    assert evaluate_ratification_certificate(certificate, repo_root=repo).passed
+
+    tampered_root = tmp_path / "tampered"
+    tampered_root.mkdir(parents=True)
+    repo, _, certificate = _build_case(tampered_root)
+    producer = repo / "mnq_lab/production/first_exploration_run.py"
+    producer.write_bytes(producer.read_bytes() + b"\n# silently altered producer\n")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], capture_output=True, check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "-c", "commit.gpgsign=false",
+         "commit", "-q", "-m", "tamper"],
+        capture_output=True, check=True,
+    )
+    head = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, check=True
+    ).stdout.decode().strip()
+    _mutate_certificate(certificate, lambda value: value.__setitem__("run_commit", head))
+    assert "C4" in evaluate_ratification_certificate(certificate, repo_root=repo).failures
+
+
+def test_c4_fails_closed_when_the_run_commit_is_unreachable(tmp_path):
+    repo, _, certificate = _build_case(tmp_path)
+    _mutate_certificate(
+        certificate, lambda value: value.__setitem__("run_commit", "0" * 40)
+    )
+    assert "C4" in evaluate_ratification_certificate(certificate, repo_root=repo).failures
 
 
 def test_c5_accepts_commit_only_fingerprint_variance_with_identical_columns(tmp_path):

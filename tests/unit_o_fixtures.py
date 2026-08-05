@@ -195,16 +195,33 @@ def schedule_for_store(
 
     from mnq_lab.spine.availability import SessionExclusion
 
+    _NO_RTH = {"no_scheduled_rth", "full_exchange_holiday"}
+
+    def _open_close(session: int, session_status: str):
+        """A no-RTH session must carry no open and no close.
+
+        SessionSchedule enforces this, so a fixture that always supplies times
+        cannot construct one at all -- which is why no_scheduled_rth had no
+        build_outcome_table coverage.
+        """
+        if session_status in _NO_RTH:
+            return None, None
+        return 510, (closes or {}).get(session, close_ct)
+
     sessions = sorted({int(value) for value in np.asarray(store.column("session_id"))})
     return build_session_schedule_table(
         (
             SessionSchedule(
                 session_id=session,
-                scheduled_rth_open_ct=510,
                 # Per-session overrides (audit F-3): without a HETEROGENEOUS
                 # schedule nothing proves each row is judged against its OWN
                 # session, only that the layer consumes some schedule.
-                scheduled_rth_close_ct=(closes or {}).get(session, close_ct),
+                scheduled_rth_open_ct=_open_close(
+                    session, (statuses or {}).get(session, status)
+                )[0],
+                scheduled_rth_close_ct=_open_close(
+                    session, (statuses or {}).get(session, status)
+                )[1],
                 scheduled_rth_status=(statuses or {}).get(session, status),
                 structural_interruptions=(),
                 timezone="America/Chicago",

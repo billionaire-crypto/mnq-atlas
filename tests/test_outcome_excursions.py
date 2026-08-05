@@ -476,3 +476,75 @@ def test_structural_status_string_is_pinned_literally():
     """Audit C-10: the constant's value cannot be renamed silently."""
     assert STATUS_STRUCTURALLY_UNAVAILABLE == "structurally_unavailable"
     assert len(STATUS_STRUCTURALLY_UNAVAILABLE) == 24  # fits the <U25 dtype
+
+
+def test_heterogeneous_store_judges_full_shortened_and_no_rth_sessions(tmp_path):
+    """Audit F-3 follow-up: all three schedule kinds in ONE store.
+
+    Same observation time and horizon in every session, three different
+    verdicts. no_scheduled_rth had no build_outcome_table coverage at all,
+    because the fixture could not construct such a session.
+
+    The no-RTH session carries a full set of synthetic bars. Its rows are still
+    unavailable, which is the point: availability comes from the schedule, never
+    from what happens to be observed.
+    """
+    from tests.unit_o_fixtures import combine_columns
+
+    full, shortened, no_rth = 20210615, 20210616, 20210617
+    store = in_memory_store(
+        tmp_path / "exploration" / "bars_5m",
+        combine_columns(
+            synthetic_outcome_columns("2021-06-15"),
+            synthetic_outcome_columns("2021-06-16"),
+            synthetic_outcome_columns("2021-06-17"),
+        ),
+    )
+    table = build_outcome_table(
+        store,
+        schedule_table=schedule_for_store(
+            store,
+            closes={full: 900, shortened: 720},
+            statuses={
+                full: "full_rth",
+                shortened: "shortened_rth",
+                no_rth: "no_scheduled_rth",
+            },
+        ),
+    )
+
+    def rows(session):
+        mask = (
+            (table.column("session_id") == session)
+            & (table.column("observation_time_ct") == "11:30")
+            & (table.column("horizon_minutes") == 60)
+        )
+        assert bool(np.any(mask)), session
+        return mask
+
+    # full RTH: 11:30 + 60 = 12:30, comfortably inside a 15:00 close
+    m = rows(full)
+    assert bool(np.all(table.column("window_fits_rth")[m]))
+    assert set(table.column("outcome_status")[m]) == {"ok"}
+    assert set(table.column("structural_unavailability_reason")[m]) == {
+        "not_applicable"
+    }
+    assert bool(np.all(table.column("outcome_valid")[m]))
+
+    # shortened RTH: the same window runs 30 minutes past a 12:00 close
+    m = rows(shortened)
+    assert not bool(np.any(table.column("window_fits_rth")[m]))
+    assert not bool(np.any(table.column("outcome_valid")[m]))
+    assert set(table.column("outcome_status")[m]) == {"structurally_unavailable"}
+    assert set(table.column("structural_unavailability_reason")[m]) == {
+        "scheduled_close"
+    }
+
+    # no scheduled RTH: no window is available at all, bars notwithstanding
+    m = rows(no_rth)
+    assert not bool(np.any(table.column("window_fits_rth")[m]))
+    assert not bool(np.any(table.column("outcome_valid")[m]))
+    assert set(table.column("outcome_status")[m]) == {"structurally_unavailable"}
+    assert set(table.column("structural_unavailability_reason")[m]) == {
+        "no_scheduled_rth"
+    }

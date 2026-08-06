@@ -123,13 +123,9 @@ def test_contract_records_provenance_and_limitations():
 # "nonexistence is established", "shown to be absent") and still pass. This is
 # the third attempt and it matches on affirmative LEMMAS rather than fixed
 # phrases: a proof/certainty verb that governs an absence term inside one clause,
-# with no negation standing before that verb in the same clause.
-#
-# Residual, stated rather than hidden: a proof-of-absence split across
-# parenthetical commas ("demonstrates, beyond doubt, the absence of ...") is
-# scanned as three clauses and would slip through. The detector favours never
-# flagging an honest denial over catching that contrived construction. The
-# batteries below fix both directions so the detector cannot silently weaken.
+# with no nearby negation governing that verb. A parenthetical stitch keeps
+# wording such as "demonstrates, beyond doubt, the absence" from evading the
+# guard while unrelated comma-separated clauses remain independent.
 
 # Verbs and adverbs that assert epistemic certainty of a conclusion.
 _PROOF_LEMMA = re.compile(
@@ -148,32 +144,47 @@ _ABSENCE_LEMMA = re.compile(
     r"no\s+such|"
     r"does\s+not\s+exist|do\s+not\s+exist|did\s+not\s+exist|"
     r"never\s+existed|not\s+to\s+exist|"
-    r"no\s+\w+\s+exists?)\b",
+    r"no\s+\w+\s+exists?|"
+    r"there\s+(?:is|was|are|were)\s+no|"
+    r"none\b[^.;:\n]{0,80}\bexists?|"
+    r"zero\s+\w+\s+existed)\b",
     re.IGNORECASE,
 )
-# A negation appearing before the proof verb, in the same clause, turns the
-# assertion into an honest denial ("not established", "never proven", "no
-# boundary was demonstrated"). A "no such X" in the OBJECT sits after the proof
-# verb and is deliberately not scanned, so "proven that no such X exists" — a
-# real proof-of-absence — is still flagged.
+# A nearby negation before the proof verb turns the assertion into an honest
+# denial ("not established", "never proven", "could not demonstrate"). The
+# bounded window avoids treating an unrelated earlier negative statement as if
+# it governed a later affirmative proof claim.
 _GOVERNING_NEGATION = re.compile(
     r"\b(?:not|never|no|nor|cannot|neither|without|unable|fails?|failed)\b|n't",
     re.IGNORECASE,
 )
 _CLAUSE_SPLIT = re.compile(r"[.;:,\n]")
+_SENTENCE_SPLIT = re.compile(r"[.;:\n]")
+_NEGATION_WINDOW = 24
 
 
 def _proof_of_absence_clauses(text: str) -> list[str]:
     """Return every clause that affirmatively asserts proof of absence."""
     hits: list[str] = []
-    for clause in _CLAUSE_SPLIT.split(text):
-        if not _ABSENCE_LEMMA.search(clause):
-            continue
-        for verb in _PROOF_LEMMA.finditer(clause):
-            if _GOVERNING_NEGATION.search(clause[: verb.start()]):
+
+    def scan(unit: str) -> None:
+        if not _ABSENCE_LEMMA.search(unit):
+            return
+        for verb in _PROOF_LEMMA.finditer(unit):
+            prefix = unit[max(0, verb.start() - _NEGATION_WINDOW) : verb.start()]
+            if _GOVERNING_NEGATION.search(prefix):
                 continue  # the proof verb is negated → an honest denial
-            hits.append(clause.strip())
+            hits.append(unit.strip())
             break
+
+    for clause in _CLAUSE_SPLIT.split(text):
+        scan(clause)
+    for sentence in _SENTENCE_SPLIT.split(text):
+        comma_parts = sentence.split(",")
+        for index in range(len(comma_parts) - 2):
+            middle = comma_parts[index + 1]
+            if 0 < len(middle.split()) <= 5:
+                scan(f"{comma_parts[index]} {comma_parts[index + 2]}")
     return hits
 
 
@@ -190,6 +201,10 @@ _PROVEN_ABSENCE_DOCUMENTS = (
     "The boundary has been demonstrated to be absent from every source.",
     "Although we did not inspect the tapes, the analysis proves the absence of any halt.",
     "The search was exhaustive and therefore proves no such boundary exists.",
+    "The records demonstrate, beyond any doubt, the absence of an interruption.",
+    "The evidence conclusively establishes there is no interruption boundary.",
+    "This proves none of the resumption boundaries exist.",
+    "The review established zero interruptions existed.",
 )
 # Honest denials of proof-of-absence. Every one must pass; several negate the
 # proof verb by subject ("No boundary was established") not by an adjacent word.

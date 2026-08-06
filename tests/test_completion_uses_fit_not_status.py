@@ -91,10 +91,10 @@ def _discover_committed_surfaces() -> tuple[str, ...]:
     return _discover(files, _committed)
 
 
-def _reads_outcome_status(relative: str) -> list[str]:
+def _reads_outcome_status(relative: str, read: object = _committed) -> list[str]:
     """AST over identifiers, constants and attributes: no getattr/dict-key hiding."""
     offenders: list[str] = []
-    tree = ast.parse(_committed(relative), filename=relative)
+    tree = ast.parse(read(relative), filename=relative)
     for node in ast.walk(tree):
         hit = (
             (isinstance(node, ast.Constant) and node.value == FORBIDDEN)
@@ -106,12 +106,23 @@ def _reads_outcome_status(relative: str) -> list[str]:
     return offenders
 
 
-def test_no_denominator_surface_reads_outcome_status_in_committed_source():
-    """Fails if any discovered completion surface consumes the status string."""
-    roster = set(_discover_committed_surfaces()) | set(ALWAYS_CHECK)
+def _guarded_offenders(
+    files: list[str], read: object, *, always_check: tuple[str, ...] = ()
+) -> list[str]:
+    """Discover denominator surfaces and run the forbidden-read guard on each."""
+    roster = set(_discover(files, read)) | set(always_check)
     offenders: list[str] = []
     for relative in sorted(roster):
-        offenders.extend(_reads_outcome_status(relative))
+        offenders.extend(_reads_outcome_status(relative, read))
+    return offenders
+
+
+def test_no_denominator_surface_reads_outcome_status_in_committed_source():
+    """Fails if any discovered completion surface consumes the status string."""
+    files: list[str] = []
+    for package in SCANNED_PACKAGES:
+        files.extend(_committed_py_files(package))
+    offenders = _guarded_offenders(files, _committed, always_check=ALWAYS_CHECK)
     assert offenders == [], (
         "completion/eligibility surfaces must not read outcome_status "
         f"(contract section 5.1): {offenders}"
@@ -141,32 +152,48 @@ def test_discovery_covers_the_known_surfaces_and_the_revision_1_gap():
     assert len(discovered) >= len(known_required)
 
 
-def test_discovery_flags_a_planted_denominator_module_outside_the_roster():
-    """Negative control on the discovery mechanism, via an injected file list.
+def test_guard_rejects_a_scratch_denominator_module_outside_the_old_roster(tmp_path):
+    """Negative control on discovery plus AST enforcement using a scratch file.
 
     A new module that computes a denominator MUST be picked up (and therefore
-    AST-checked); a module with no primitive MUST be ignored. Nothing is written
-    to disk. This is what the hand roster could not do.
+    AST-checked); a module with no primitive MUST be ignored. This exercises the
+    same combined guard as committed source, rather than separately testing two
+    implementation details. The files exist only under pytest's temporary path.
     """
-    planted = (
+    scratch_root = tmp_path / "mnq_lab" / "phase8"
+    scratch_root.mkdir(parents=True)
+    planted = scratch_root / "new_denominator.py"
+    planted.write_text(
         "import numpy as np\n"
         "def denom(mask, rows):\n"
         "    n_anchors = int(np.count_nonzero(mask))\n"
-        "    return rows['outcome_status'] == 'ok'\n"
+        "    return rows['outcome_status'] == 'ok'\n",
+        encoding="utf-8",
     )
-    clean = "def helper(x):\n    return x + 1\n"
-    injected = _discover(
-        ["pkg/sneaky.py", "pkg/clean.py"],
-        lambda p: planted if p.endswith("sneaky.py") else clean,
-    )
-    assert injected == ("pkg/sneaky.py",), injected
-    # and once discovered, the AST check would catch its status read
-    found = [
-        node
-        for node in ast.walk(ast.parse(planted))
-        if isinstance(node, ast.Constant) and node.value == FORBIDDEN
-    ]
-    assert found, "a discovered denominator surface reading outcome_status must be caught"
+    clean = scratch_root / "helper.py"
+    clean.write_text("def helper(x):\n    return x + 1\n", encoding="utf-8")
+    files = [str(planted), str(clean)]
+
+    def read(path: str) -> str:
+        with open(path, encoding="utf-8") as handle:
+            return handle.read()
+
+    assert _discover(files, read) == (str(planted),)
+    offenders = _guarded_offenders(files, read)
+    assert offenders == [f"{planted}:4"], offenders
+
+
+def test_guarded_offenders_stays_connected_to_discovery():
+    """Mutation witness: bypassing discovery makes the planted violation survive."""
+    sources = {
+        "pkg/new_surface.py": (
+            "def denominator(rows):\n"
+            "    n_anchors = 1\n"
+            "    return rows['outcome_status']\n"
+        )
+    }
+    offenders = _guarded_offenders(list(sources), sources.__getitem__)
+    assert offenders == ["pkg/new_surface.py:3"]
 
 
 def test_completion_denominator_is_built_from_the_fit_predicate():

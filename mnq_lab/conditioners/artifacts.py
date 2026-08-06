@@ -41,7 +41,11 @@ __all__ = [
 ]
 
 
-PHASE7_ARTIFACT_SCHEMA_VERSION = "phase7-conditioner-artifacts-v1"
+# D32/D33: the column set is unchanged, but data_quality_status carries a new
+# closed vocabulary and excluded sessions contribute no rows. A consumer
+# switching on the v1 values would misread a v2 artifact, so the identifier
+# changes. v1 stays attached to the v1 artifact and is not reused.
+PHASE7_ARTIFACT_SCHEMA_VERSION = "phase7-conditioner-artifacts-v2"
 PREREGISTRATION_PATH = REPO_ROOT / "docs" / "PHASE7_PREREGISTRATION.md"
 PREREGISTRATION_SHA256 = "eeb97cb7e6ccd17a0ccd676de3cf7424f511fc773bacd62ff9e9f88aa404a930"
 

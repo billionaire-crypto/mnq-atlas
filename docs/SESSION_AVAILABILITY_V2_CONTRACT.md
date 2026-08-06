@@ -10,6 +10,17 @@ differs from `docs/SESSION_AVAILABILITY_V2_DESIGN.md`, this contract governs.
 Authorising rulings: D32, D33, D34, D35 in `docs/DISCREPANCIES.md`.
 Nothing here authorises a production run.
 
+**Revision 2.** Revision 1 did not pass audit. Three statements were wrong or
+unsupported and are corrected here: §6 undercounted the Phase 7 relabelling as
+six sessions when 39 session identities change classification; §6 stated the
+outcome-status change as 1,344 without counting the 34,920 renames; and §5.1
+justified itself with Phase 8 behaviour that exists only in uncommitted source.
+§7's "verified end-to-end" is downgraded to a required preflight invariant, and
+§11 is widened to permit equality-only comparison of conditioner values. The
+corrections are recorded rather than silently applied: revision 1 is superseded
+in place because it never achieved a CLOSED audit, so there is no ratified
+document to supersede.
+
 ---
 
 ## 1. Frozen input identities
@@ -172,30 +183,71 @@ Consequently:
 - A future consumer MUST NOT infer structural eligibility from the status string.
 
 This ranking was chosen to reproduce the pinned witness and keep the v1↔v2 diff
-narrow, and was independently ruled defensible: it is not a computational repeat
-of the D32 defect, because Phase 8 completion consumes the fit predicate and no
-completion arithmetic touches `outcome_status`. The residual is recorded here
+narrow, and was independently ruled defensible. The residual is recorded here
 rather than resolved silently, and rank 1 is **not** frozen as permanently
 correct — it may be revisited under a later ruling.
+
+**State of compliance, stated precisely.** No completion, eligibility or
+denominator surface reads `outcome_status` anywhere: verified against *committed*
+source in `outcomes/completion.py`, `phase8/diagnostics.py`,
+`phase8/production.py`, `phase8/day_types.py` and `phase8/contrasts.py`, all
+zero references. `outcomes/completion.py` builds its denominator from
+`state_anchor AND` its fit predicate.
+
+**Committed Phase 8 does NOT yet consume the fit predicate.** It passes
+`arm.active` directly as `structurally_eligible` in all three completion paths
+(contrast, day-type, interaction) and loads `window_fits_rth` into its input
+schema without using it there. Making Phase 8's denominator fit-aware is
+**Stage 11 work and is not part of this contract**. Revision 1 wrongly justified
+§5.1 by describing that behaviour as present; it exists only in uncommitted
+source, which is not contract evidence.
+
+The rule above is therefore **normative for Stage 11 and beyond**, not a
+description of current Phase 8 behaviour. It is enforced mechanically by
+`tests/test_completion_uses_fit_not_status.py`, which runs against committed
+source so that uncommitted work cannot mask a violation.
 
 ---
 
 ## 6. Expected changed fields
 
+All counts below are over **retained** rows, i.e. after the four excluded
+sessions are removed. Every figure is an exact tripwire: production must
+reproduce it, and any departure halts the rebuild.
+
 | field | expectation |
 |---|---:|
 | `window_fits_rth` | 7,218 rows change (3,609 per path estimand) |
-| `outcome_status` | 1,344 rows change (all currently `path_timestamp_missing`) |
-| `outcome_status` (rename) | every current `window_outside_rth` becomes `structurally_unavailable` |
+| `outcome_status` — rename | 34,920 rows: `window_outside_rth` → `structurally_unavailable` |
+| `outcome_status` — precedence | 1,344 **additional** rows, all currently `path_timestamp_missing` |
+| `outcome_status` — **total** | **36,264** string changes on shared rows |
 | `structural_unavailability_reason` | new column |
-| `data_quality_status` | new vocabulary; 6 sessions relabelled |
+| `data_quality_status` | **39 sessions** change classification; **27,300** retained assignment rows |
 | Unit O row count | 472,212 → 470,340 (−1,872) |
-| Phase 7 assignment rows | 787,020 → 783,900 (−3,120) |
+| Phase 7 assignment rows | 787,020 → 783,900 (−3,120, the four excluded sessions) |
 | distinct sessions | 1,009 → 1,005 |
 
-Of the 7,218 fit changes, 5,874 are currently `anchor_bar_missing` and keep that
-status; 1,344 are currently `path_timestamp_missing` and become
-`structurally_unavailable`.
+Of the 7,218 fit changes, 5,874 are currently `anchor_bar_missing` and **keep**
+that status; 1,344 are currently `path_timestamp_missing` and become
+`structurally_unavailable`. The 34,920 renames are mechanical and independent of
+the fit changes.
+
+**Phase 7 relabelling in full.** Revision 1 said "6 sessions", counting only
+those previously flagged `unresolved_truncated_session`. That was an undercount:
+32 sessions previously labelled `ok` become `scheduled_early_close`, and one
+becomes `no_scheduled_rth`. The complete transition census is:
+
+| v1 label | v2 label | sessions |
+|---|---|---:|
+| `ok` | `ok` | 970 |
+| `ok` | `scheduled_early_close` | 32 |
+| `ok` | `no_scheduled_rth` | 1 |
+| `unresolved_truncated_session` | `observed_unresolved_early_termination` | 2 |
+| `unresolved_truncated_session` | `excluded_unresolved_official_interruption` | 4 |
+
+39 sessions change label. 35 of them are retained and carry 780 assignment rows
+each, so 27,300 rows change `data_quality_status`; the remaining 4 are excluded
+and their 3,120 rows disappear entirely.
 
 ## 7. Expected unchanged fields
 
@@ -211,10 +263,18 @@ rebuild rather than being explained afterwards:
 - calendar classifications for all 1,018 sessions
 
 **Measured basis for the conditioner expectation:** the four excluded sessions
-carry **zero valid scale rows across all five arms**, so they never entered the
-seasonal reference pool. Removing them changes no seasonal profile, no `vol_rel`
-and no category assignment. Verified end-to-end through seasonal → vol_rel →
-thresholds → assignments: 0 differences in 78,702 rows.
+carry **zero valid scale rows across all five arms** (1,560 rows, 312 per arm,
+none valid), so they never entered the seasonal reference pool. The seasonal and
+threshold dependency pools admit only valid scale and `vol_rel` rows, so removing
+them cannot move a median.
+
+**Status of the end-to-end figure.** A run through seasonal → vol_rel →
+thresholds → assignments returned 0 differences in 78,702 rows. That measurement
+is **not reproducible from these commits**: no v2 artifact exists and no
+committed comparison witness reproduces it. It is therefore recorded as a
+**required preflight invariant**, not as a verified result. Stage 7 preflight
+must reproduce it and halt on any difference. Revision 1 stated it as "verified
+end-to-end", which was stronger than the evidence available from the repository.
 
 If any existing defined outcome magnitude changes, work stops and reports the
 first row identity and its dependency **without printing the magnitude**.
@@ -272,13 +332,20 @@ No v1 path is reused, overwritten or renamed. v1 checkpoints are never resumed.
 
 Every choice frozen in this document was made using only: schedule information,
 the exclusion registry, structural fit, completion counts, coverage counts,
-session and row identities, file hashes, and source code.
+session and row identities, file hashes, source code, and **equality-only
+comparison of conditioner values** — that is, counting how many rows differ,
+never reading, reporting or interpreting a magnitude.
+
+That last category is stated explicitly because one measurement did touch
+conditioner values: confirming the excluded sessions contribute nothing to the
+seasonal pool required computing seasonal profiles both ways and counting
+differences. Conditioner scales are covariates, not outcomes, and only equality
+counts were produced. Revision 1 said "using only" the structural list while
+admitting that access in the next sentence; the list is widened here rather than
+the admission being dropped.
 
 **No tick, quantile, contrast, interval or any other outcome magnitude informed
-any choice recorded here.** The one measurement that touched conditioner values —
-confirming the excluded sessions contribute nothing to the seasonal pool —
-reported only counts of differing rows, never a value, and read no outcome
-column.
+any choice recorded here.** No outcome column was read at any point.
 
 ## 12. Known limitations
 
@@ -301,7 +368,23 @@ column.
    session opens at 08:30 and the τ grid starts at 08:30. If a later-opening
    session is ever registered, that reason code must be revisited rather than
    reused.
-6. **Commit-diff wording.** For the record, and correcting an imprecision noted in
+6. **Every v2 count in §6 and §7 is a FORECAST**, derived from v1 plus the
+   corrected rules, before any v2 artifact exists. They are exact tripwires for
+   the Stage 7 preflight, not observed attestations. If preflight differs, work
+   stops and this contract is superseded under a new ruling rather than edited to
+   match the output.
+7. **The 78,702-row conditioner-invariance result has no committed witness.**
+   See §7. It must be reproduced at preflight.
+8. **`registered_structural_interruption` is untested against real data.** Beyond
+   the synthetic pinning noted above, the first real interruption record will
+   require a new versioned input AND end-to-end real-data validation of the
+   resolver, the classifier, Unit O and every completion consumer — not merely a
+   registry entry.
+9. **Hash-pinned prose cannot detect semantic drift.** The pin prevents this
+   document being edited; it cannot notice that the code has moved away from what
+   the document says. That gap is why §5.1 is enforced by a test rather than by
+   this paragraph, and why §12.6 exists.
+10. **Commit-diff wording.** For the record, and correcting an imprecision noted in
    audit: commit `08c14ba`'s *diff* contains no D31 Phase 8 change and does not
    add `tests/test_phase8_structural_completion.py`. The `mnq_lab/phase8` package
    is of course present in that tree; the claim is about the diff, not the tree.

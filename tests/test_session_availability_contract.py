@@ -24,8 +24,8 @@ from mnq_lab.spine.availability import (
 from mnq_lab.spine.session_quality import SESSION_QUALITY_STATUSES
 
 CONTRACT = REPO_ROOT / "docs" / "SESSION_AVAILABILITY_V2_CONTRACT.md"
-CONTRACT_BYTES = 14_345
-CONTRACT_SHA256 = "fea24481eaf7b1d2d20b1da87d8ad0262f4284b0984ddd983f1b76ec2f3aa939"
+CONTRACT_BYTES = 19_419
+CONTRACT_SHA256 = "5b2a77b38d6b68db1409822fec45f7f98cf92509d843bba156afba18bb1aff1b"
 
 
 def test_contract_raw_bytes_are_pinned():
@@ -108,6 +108,35 @@ def test_contract_records_provenance_and_limitations():
     """Fails if the no-magnitude statement or the limitations are dropped."""
     text = CONTRACT.read_text(encoding="utf-8")
     assert "No tick, quantile, contrast, interval or any other outcome magnitude" in text
-    assert "not established" in text and "proven absent" in text
     assert "There is no calendar v2." in text
     assert "There is no registered interruption input." in text
+    # equality-only conditioner comparison is declared, not smuggled
+    assert "equality-only" in text
+
+
+def test_absence_of_evidence_is_never_stated_as_proof_of_absence():
+    """Semantic, not syntactic.
+
+    Revision 1's test merely required both phrases to appear somewhere, which a
+    document affirming "proven absent" elsewhere would still satisfy. This pins
+    the negation itself and rejects affirmative proven-absence language.
+    """
+    text = CONTRACT.read_text(encoding="utf-8")
+    # the document wraps, so match the clause that does not span the wrap
+    assert 'is "not established", never "proven absent"' in text
+    for affirmative in (
+        "is proven absent",
+        "are proven absent",
+        "proven not to exist",
+        "proven that no",
+        "conclusively absent",
+    ):
+        assert affirmative not in text, affirmative
+
+
+def test_contract_marks_its_v2_counts_as_forecasts_not_attestations():
+    """Fails if a forecast is ever restated as an observed result."""
+    text = CONTRACT.read_text(encoding="utf-8")
+    assert "FORECAST" in text
+    assert "required preflight invariant" in text
+    assert "Committed Phase 8 does NOT yet consume the fit predicate." in text

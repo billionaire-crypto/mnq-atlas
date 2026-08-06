@@ -9,6 +9,7 @@ Each test states what breaks it, so none of them is a check that cannot fail.
 from __future__ import annotations
 
 import hashlib
+import re
 
 from mnq_lab.conditioners.artifacts import PHASE7_ARTIFACT_SCHEMA_VERSION
 from mnq_lab.constants import REPO_ROOT
@@ -114,24 +115,116 @@ def test_contract_records_provenance_and_limitations():
     assert "equality-only" in text
 
 
-def test_absence_of_evidence_is_never_stated_as_proof_of_absence():
-    """Semantic, not syntactic.
+# --- F-A: semantic proof-of-absence detector --------------------------------
+#
+# Revision 1 pinned one exact negation clause and blocked five exact phrases.
+# The Stage 6 audit showed a document could assert proof of absence in unlisted
+# wordings ("demonstrated the absence", "proves no such boundary exists",
+# "nonexistence is established", "shown to be absent") and still pass. This is
+# the third attempt and it matches on affirmative LEMMAS rather than fixed
+# phrases: a proof/certainty verb that governs an absence term inside one clause,
+# with no negation standing before that verb in the same clause.
+#
+# Residual, stated rather than hidden: a proof-of-absence split across
+# parenthetical commas ("demonstrates, beyond doubt, the absence of ...") is
+# scanned as three clauses and would slip through. The detector favours never
+# flagging an honest denial over catching that contrived construction. The
+# batteries below fix both directions so the detector cannot silently weaken.
 
-    Revision 1's test merely required both phrases to appear somewhere, which a
-    document affirming "proven absent" elsewhere would still satisfy. This pins
-    the negation itself and rejects affirmative proven-absence language.
-    """
+# Verbs and adverbs that assert epistemic certainty of a conclusion.
+_PROOF_LEMMA = re.compile(
+    r"\b(?:prov(?:e|es|en|ed|ing)|proof|"
+    r"demonstrat(?:e|es|ed|ing|ion|ions)|"
+    r"establish(?:es|ed|ing)|"
+    r"shows?|shown|"
+    r"confirm(?:s|ed|ing)?|"
+    r"conclusively|definitively|irrefutabl\w+|incontrovertibl\w+)\b",
+    re.IGNORECASE,
+)
+# Terms asserting that something does not exist.
+_ABSENCE_LEMMA = re.compile(
+    r"\b(?:absence|absent|"
+    r"nonexisten\w*|non-existen\w*|inexisten\w*|"
+    r"no\s+such|"
+    r"does\s+not\s+exist|do\s+not\s+exist|did\s+not\s+exist|"
+    r"never\s+existed|not\s+to\s+exist|"
+    r"no\s+\w+\s+exists?)\b",
+    re.IGNORECASE,
+)
+# A negation appearing before the proof verb, in the same clause, turns the
+# assertion into an honest denial ("not established", "never proven", "no
+# boundary was demonstrated"). A "no such X" in the OBJECT sits after the proof
+# verb and is deliberately not scanned, so "proven that no such X exists" — a
+# real proof-of-absence — is still flagged.
+_GOVERNING_NEGATION = re.compile(
+    r"\b(?:not|never|no|nor|cannot|neither|without|unable|fails?|failed)\b|n't",
+    re.IGNORECASE,
+)
+_CLAUSE_SPLIT = re.compile(r"[.;:,\n]")
+
+
+def _proof_of_absence_clauses(text: str) -> list[str]:
+    """Return every clause that affirmatively asserts proof of absence."""
+    hits: list[str] = []
+    for clause in _CLAUSE_SPLIT.split(text):
+        if not _ABSENCE_LEMMA.search(clause):
+            continue
+        for verb in _PROOF_LEMMA.finditer(clause):
+            if _GOVERNING_NEGATION.search(clause[: verb.start()]):
+                continue  # the proof verb is negated → an honest denial
+            hits.append(clause.strip())
+            break
+    return hits
+
+
+# Documents that assert proof of absence in varied wordings. Every one must be
+# rejected; each uses a distinct construction the fixed-phrase list would miss.
+_PROVEN_ABSENCE_DOCUMENTS = (
+    "The audit conclusively demonstrated the absence of any circuit-breaker halt.",
+    "We have proven that no such interruption boundary exists.",
+    "The nonexistence of a CME halt is hereby established.",
+    "These records show the halt boundary to be absent.",
+    "The investigation definitively confirms the boundary is nonexistent.",
+    "It is proven that the interruption did not exist.",
+    "Our sweep establishes the nonexistence of any resumption boundary.",
+    "The boundary has been demonstrated to be absent from every source.",
+    "Although we did not inspect the tapes, the analysis proves the absence of any halt.",
+    "The search was exhaustive and therefore proves no such boundary exists.",
+)
+# Honest denials of proof-of-absence. Every one must pass; several negate the
+# proof verb by subject ("No boundary was established") not by an adjacent word.
+_HONEST_DENIAL_DOCUMENTS = (
+    'The negative result is "not established", never "proven absent".',
+    "Authoritative boundaries were not established; the result is not proven.",
+    "The sweep did not demonstrate the absence of a halt.",
+    "We cannot show that the boundary is absent.",
+    "It remains unestablished whether any halt existed.",
+    "The primary-source sweep terminated on resource limits, so nonexistence was not proven.",
+    "No authoritative boundary could be established, and absence was never demonstrated.",
+    "Absence of a boundary is not proven; the negative result is not established.",
+)
+
+
+def test_absence_of_evidence_is_never_stated_as_proof_of_absence():
+    """Semantic, not syntactic. Matches proof-of-absence lemmas, not phrases."""
     text = CONTRACT.read_text(encoding="utf-8")
-    # the document wraps, so match the clause that does not span the wrap
+    # the honest denial must be present, and the document wraps, so match the
+    # clause that does not span the wrap
     assert 'is "not established", never "proven absent"' in text
-    for affirmative in (
-        "is proven absent",
-        "are proven absent",
-        "proven not to exist",
-        "proven that no",
-        "conclusively absent",
-    ):
-        assert affirmative not in text, affirmative
+    # and the frozen contract itself must assert no proof of absence anywhere
+    assert _proof_of_absence_clauses(text) == []
+
+
+def test_detector_rejects_proof_of_absence_in_varied_wordings():
+    """Negative control: every unlisted proven-absence wording is caught."""
+    for document in _PROVEN_ABSENCE_DOCUMENTS:
+        assert _proof_of_absence_clauses(document), document
+
+
+def test_detector_accepts_honest_denials_of_proof_of_absence():
+    """Guards against over-matching: honest 'not established' language passes."""
+    for document in _HONEST_DENIAL_DOCUMENTS:
+        assert _proof_of_absence_clauses(document) == [], document
 
 
 def test_contract_marks_its_v2_counts_as_forecasts_not_attestations():

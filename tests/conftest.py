@@ -9,6 +9,8 @@ definition.
 from __future__ import annotations
 
 import csv
+import shutil
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -20,6 +22,36 @@ from mnq_lab.spine.seal import Corpus, store_path
 from mnq_lab.spine.store import BarStore
 
 CT = "America/Chicago"
+
+# --- free-space preflight ----------------------------------------------------
+#
+# Authorised in the re-audit 5 decision. Runs were dying partway through with
+# OSError [Errno 28] / [WinError 112] because the volume holding pytest's
+# temporary directory filled up, which produced failures that looked like test
+# defects and made the suite unusable as a Stage 7 gate. Failing fast, before a
+# single test runs, turns that into one clear message.
+#
+# This check NEVER deletes anything. Freeing space is a deliberate human act.
+MIN_FREE_BYTES = 1536 * 1024 * 1024  # 1.5 GiB
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Abort before collection when the temp volume lacks room for the run."""
+    basetemp = getattr(config.option, "basetemp", None)
+    target = Path(basetemp) if basetemp else Path(tempfile.gettempdir())
+    # the directory may not exist yet; measure the nearest existing ancestor
+    while not target.exists() and target != target.parent:
+        target = target.parent
+    free = shutil.disk_usage(target).free
+    if free < MIN_FREE_BYTES:
+        raise pytest.UsageError(
+            f"Refusing to start: {free / 1024**3:.2f} GiB free on the volume holding "
+            f"{target}, below the {MIN_FREE_BYTES / 1024**3:.2f} GiB minimum. "
+            "A full run needs roughly 0.3 GiB of temporary space and previously "
+            "failed mid-suite with 'no space left on device', which is "
+            "indistinguishable from a real regression. Free space and re-run; "
+            "nothing is deleted automatically."
+        )
 SOURCE_HEADER = [
     "ts_event",
     "rtype",

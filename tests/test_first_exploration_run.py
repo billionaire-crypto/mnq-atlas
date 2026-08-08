@@ -23,6 +23,7 @@ from mnq_lab.production.first_exploration_run import (
     GATE_CLASSIFICATION,
     OUTPUT_ROOT,
     RUN_MANIFEST_NAME,
+    STAGING_ROOT,
     _build_phase7_product,
     _canonical_json_bytes,
     _finalize_staged_run,
@@ -80,7 +81,13 @@ def _sha256(path: Path) -> str:
 def test_public_entry_point_has_no_override_and_fixed_output_root():
     assert tuple(inspect.signature(run_shakedown).parameters) == ()
     assert OUTPUT_ROOT.as_posix().endswith(
-        "data/exploration/derived/phase7-unit-o-first-run-v1"
+        "data/exploration/derived/phase7-unit-o-session-aware-v2"
+    )
+    # Contract section 9: the staging root is never a second literal that can
+    # drift from the final root -- it is derived from it.
+    assert STAGING_ROOT == OUTPUT_ROOT.with_name(f".{OUTPUT_ROOT.name}.staging")
+    assert STAGING_ROOT.as_posix().endswith(
+        "data/exploration/derived/.phase7-unit-o-session-aware-v2.staging"
     )
 
 

@@ -96,7 +96,7 @@ OUTPUT_ROOT = (
     / "data"
     / Corpus.EXPLORATION.dirname
     / "derived"
-    / "phase7-unit-o-first-run-v1"
+    / "phase7-unit-o-session-aware-v2"
 )
 STAGING_ROOT = OUTPUT_ROOT.with_name(f".{OUTPUT_ROOT.name}.staging")
 

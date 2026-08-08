@@ -693,6 +693,33 @@ def _build_phase7_product(
         np.asarray(bars.column("observed_1m_components")),
         np.asarray(bars.column("expected_1m_components")),
     )
+    # The completion frame is the declared anchor grid computed from the FULL
+    # bar series, so it still carries the excluded sessions. It feeds both the
+    # state diagnostics and the completion diagnostic, and
+    # build_state_validity_panel requires the diagnostic keys to equal the
+    # assignment keys exactly. Filtering here keeps both surfaces on the same
+    # population; filtering the bars instead would change completion for
+    # retained anchors.
+    if excluded:
+        keep = ~np.isin(
+            completion_frame["session_id"].to_numpy(dtype=np.int64), sorted(excluded)
+        )
+        completion_frame = completion_frame[keep].reset_index(drop=True)
+    # Every population surface must stand on the same anchor set. The first
+    # corrected run halted three calls downstream, inside
+    # build_state_validity_panel, with a message that named neither the
+    # exclusion nor the frame. Say it here instead.
+    if not np.array_equal(
+        completion_frame["session_id"].to_numpy(dtype=np.int64),
+        grid["session_id"].to_numpy(dtype=np.int64),
+    ) or not np.array_equal(
+        completion_frame["tau_ns"].to_numpy(dtype=np.int64),
+        grid["tau_ns"].to_numpy(dtype=np.int64),
+    ):
+        raise SpineError(
+            "completion frame and anchor grid describe different populations; "
+            "both must carry the same exclusion filter"
+        )
     labels = np.asarray(bars.column("ts_event_ns"), dtype=np.int64)
     anchor_labels = completion_frame["anchor_label_ns"].to_numpy(dtype=np.int64)
     anchor_indices = np.searchsorted(labels, anchor_labels)

@@ -255,6 +255,25 @@ def test_frozen_constants_are_literals_not_computed():
         )
 
 
+def test_grid_and_completion_frame_carry_the_same_exclusion_filter():
+    """Regression: the first corrected run halted because only one was filtered.
+
+    ``completion_frame`` is the declared anchor grid recomputed from the full
+    bar series, so it must be filtered alongside ``grid``. Filtering one and not
+    the other leaves the state diagnostics keyed to a population the assignment
+    tables no longer contain, which halts inside build_state_validity_panel
+    with a message naming neither the exclusion nor the frame.
+    """
+    source = Path(run_module.__file__).read_text(encoding="utf-8")
+    body = source.split("def _build_phase7_product", 1)[1].split("\ndef ", 1)[0]
+    anchors = source.split("def _anchor_products", 1)[1].split("\ndef ", 1)[0]
+
+    assert "completion_frame = completion_frame[keep]" in body
+    assert "grid = grid[keep]" in anchors
+    # and the guard that makes a future divergence say so immediately
+    assert "different populations" in body
+
+
 def test_entry_point_resolves_the_schedule_table_exactly_once():
     """Contract requirement: one exclusion interpretation, not two loads."""
     source = Path(run_module.__file__).read_text(encoding="utf-8")

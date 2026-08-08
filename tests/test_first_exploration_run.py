@@ -67,11 +67,21 @@ def _calendar(*session_ids: int) -> CalendarTable:
     )
 
 
-def _product(tmp_path: Path, *, missing: tuple[str, ...] = ()):
+def _product(
+    tmp_path: Path,
+    *,
+    missing: tuple[str, ...] = (),
+    excluded: tuple[int, ...] = (),
+):
     columns = synthetic_outcome_columns(missing=missing)
     store = in_memory_store(tmp_path / "exploration" / "bars_5m", columns)
     bars = validate_exploration_store(store)
-    return store, _build_phase7_product(store, bars, _calendar(20210615))
+    return store, _build_phase7_product(
+        store,
+        bars,
+        _calendar(20210615),
+        schedule_for_store(store, excluded=excluded),
+    )
 
 
 def _sha256(path: Path) -> str:
@@ -191,7 +201,9 @@ def test_staged_artifacts_reverify_hashes_rows_source_and_frozen_inputs(tmp_path
     columns = synthetic_outcome_columns()
     store = write_synthetic_store(tmp_path / "source", columns)
     bars = validate_exploration_store(store)
-    product = _build_phase7_product(store, bars, _calendar(20210615))
+    product = _build_phase7_product(
+        store, bars, _calendar(20210615), schedule_for_store(store)
+    )
     outcomes = build_outcome_table(store, schedule_table=schedule_for_store(store))
     stage = tmp_path / "stage"
     environment = environment_fingerprint(Path(__file__).resolve().parents[1])
@@ -222,7 +234,9 @@ def test_staging_validator_kills_each_declared_mutation(tmp_path, mutation, mess
     columns = synthetic_outcome_columns()
     store = write_synthetic_store(tmp_path / "source", columns)
     bars = validate_exploration_store(store)
-    product = _build_phase7_product(store, bars, _calendar(20210615))
+    product = _build_phase7_product(
+        store, bars, _calendar(20210615), schedule_for_store(store)
+    )
     outcomes = build_outcome_table(store, schedule_table=schedule_for_store(store))
     stage = tmp_path / "stage"
     _stage_artifacts(stage, store, product, outcomes, environment={"commit": "fixture", "dirty": False})
@@ -257,7 +271,9 @@ def test_final_manifest_is_last_and_labels_outputs_non_admissible(tmp_path):
     columns = synthetic_outcome_columns()
     store = write_synthetic_store(tmp_path / "source", columns)
     bars = validate_exploration_store(store)
-    product = _build_phase7_product(store, bars, _calendar(20210615))
+    product = _build_phase7_product(
+        store, bars, _calendar(20210615), schedule_for_store(store)
+    )
     outcomes = build_outcome_table(store, schedule_table=schedule_for_store(store))
     stage = tmp_path / "stage"
     final = tmp_path / "final"

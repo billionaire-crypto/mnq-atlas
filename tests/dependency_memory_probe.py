@@ -143,7 +143,9 @@ def _run_full_shape(root: Path, session_count: int) -> dict[str, object]:
     stage_seconds: dict[str, float] = {}
 
     mark = time.perf_counter()
-    product = _build_phase7_product(store, bars, calendar)
+    product = _build_phase7_product(
+        store, bars, calendar, schedule_for_store(store)
+    )
     stage_seconds["phase7_compute"] = time.perf_counter() - mark
     rows = tuple(
         chain(

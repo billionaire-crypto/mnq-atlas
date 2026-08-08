@@ -78,7 +78,10 @@ from mnq_lab.outcomes.completion import (
     completion_by_year,
 )
 from mnq_lab.outcomes.excursions import OutcomeTable, build_outcome_table
-from mnq_lab.spine.availability import load_session_schedule_table
+from mnq_lab.spine.availability import (
+    SessionScheduleTable,
+    load_session_schedule_table,
+)
 from mnq_lab.spine.exploration import ExplorationBars, validate_exploration_store
 from mnq_lab.spine.session_quality import classify_session_quality
 from mnq_lab.spine.seal import Corpus, assert_exploration_safe, store_path
@@ -99,6 +102,20 @@ OUTPUT_ROOT = (
     / "phase7-unit-o-session-aware-v2"
 )
 STAGING_ROOT = OUTPUT_ROOT.with_name(f".{OUTPUT_ROOT.name}.staging")
+
+# Contract section 6: every figure is an exact production tripwire over RETAINED
+# rows, i.e. after the four D33 sessions are removed. These are transcribed from
+# the frozen contract and the Stage 7 preflight. They are NEVER derived from the
+# produced tables -- the v2 run that this guard exists to prevent validated its
+# output against row counts computed from that same output, so a population
+# defect could not be seen.
+FROZEN_RETAINED_SESSIONS = 1_005
+FROZEN_RETAINED_ASSIGNMENT_ROWS = 783_900
+FROZEN_RETAINED_SEASONAL_PROFILE_ROWS = 391_950
+FROZEN_RETAINED_THRESHOLD_ROWS = 50_250
+FROZEN_RETAINED_UNIT_O_ROWS = 470_340
+# Section 6: 35 retained sessions change data_quality_status, 780 rows each.
+FROZEN_RELABELLED_ASSIGNMENT_ROWS = 27_300
 
 _OUTCOME_PREREGISTRATION = REPO_ROOT / "docs" / "OUTCOME_LAYER_PREREGISTRATION.md"
 _PHASE8_PREREGISTRATION = REPO_ROOT / "docs" / "PHASE8_PREREGISTRATION.md"
@@ -242,11 +259,11 @@ def _session_quality(
     bars: ExplorationBars,
     calendar: CalendarTable,
     time_model: TimeModel,
+    schedule_table: SessionScheduleTable,
 ) -> dict[int, str]:
     flags = time_model.session_flags(
         bars.column("session_id"), bars.column("ts_event_ns")
     )
-    schedule_table = load_session_schedule_table()
     output: dict[int, str] = {}
     for row in flags.itertuples(index=False):
         session_id = int(row.session_id)
@@ -291,6 +308,7 @@ def _anchor_products(
     bars: ExplorationBars,
     calendar: CalendarTable,
     time_model: TimeModel,
+    schedule_table: SessionScheduleTable,
 ) -> tuple[
     dict[str, ScaleAnchorTable],
     dict[str, np.ndarray],
@@ -310,6 +328,19 @@ def _anchor_products(
     grid = time_model.anchor_grid(
         bars.column("session_id"), bars.column("ts_event_ns")
     )
+    # D33 / contract section 6: the four excluded sessions must "disappear
+    # entirely" from Phase 7, not merely carry an exclusion label. The filter is
+    # applied to the ANCHOR GRID, never to the bars: the scale estimators run
+    # over the continuous return series and anchors index into it, so removing
+    # grid rows leaves every retained scale value byte-identical, while removing
+    # bars would restart the EWMA state and change them. Everything downstream
+    # -- current_sessions, the conditioner pipeline, seasonal profiles,
+    # thresholds, assignments and the state-validity panel -- derives from this
+    # grid, so one filter here reaches every Phase 7 population surface.
+    excluded = frozenset(schedule_table.excluded_session_ids)
+    if excluded:
+        keep = ~np.isin(grid["session_id"].to_numpy(dtype=np.int32), sorted(excluded))
+        grid = grid[keep].reset_index(drop=True)
     labels = np.asarray(bars.column("ts_event_ns"), dtype=np.int64)
     anchor_labels = grid["anchor_label_ns"].to_numpy(dtype=np.int64)
     indices = np.searchsorted(labels, anchor_labels)
@@ -327,7 +358,7 @@ def _anchor_products(
         name: np.empty(total_rows, dtype=np.dtype(dtype))
         for name, dtype in ANCHOR_SCALE_SCHEMA
     }
-    quality = _session_quality(bars, calendar, time_model)
+    quality = _session_quality(bars, calendar, time_model, schedule_table)
     tables: dict[str, ScaleAnchorTable] = {}
     runtime: dict[str, dict[str, np.ndarray]] = {}
 
@@ -635,15 +666,25 @@ def _build_phase7_product(
     store: BarStore,
     bars: ExplorationBars,
     calendar: CalendarTable,
+    schedule_table: SessionScheduleTable,
 ) -> Phase7Product:
     if not isinstance(store, BarStore) or not isinstance(bars, ExplorationBars):
         raise SpineError("Phase 7 shakedown requires one validated BarStore")
+    if not isinstance(schedule_table, SessionScheduleTable):
+        raise SpineError("Phase 7 shakedown requires the canonical schedule table")
     time_model = TimeModel.from_constants()
-    tables, anchor_columns, runtime, grid = _anchor_products(bars, calendar, time_model)
+    excluded = frozenset(schedule_table.excluded_session_ids)
+    tables, anchor_columns, runtime, grid = _anchor_products(
+        bars, calendar, time_model, schedule_table
+    )
     current_sessions = tuple(
         int(value) for value in np.unique(grid["session_id"].to_numpy(dtype=np.int32))
     )
-    completed = completed_session_ids(bars, calendar)
+    if excluded.intersection(current_sessions):
+        raise SpineError("an excluded session survived the Phase 7 anchor grid filter")
+    # The excluded sessions must not reach the seasonal-profile aggregation as
+    # completed evidence either; the grid filter alone would leave them counted.
+    completed = frozenset(completed_session_ids(bars, calendar)) - excluded
     pipeline = build_conditioner_pipeline(tables, current_sessions, completed, calendar)
     completion_frame = anchor_outcome_completion(
         time_model,
@@ -1092,6 +1133,72 @@ def _enforce_free_memory_preflight() -> int:
     return available
 
 
+def _enforce_frozen_phase7_population(
+    product: Phase7Product,
+    schedule_table: SessionScheduleTable,
+) -> None:
+    """Halt unless Phase 7 reproduces the frozen contract section 6 population.
+
+    Every expectation is a module literal transcribed from the frozen contract.
+    None is derived from ``product``. The v2 run this guard exists to prevent
+    compared its artifact against row counts computed from that same artifact,
+    so a population defect was structurally invisible.
+    """
+    excluded = frozenset(schedule_table.excluded_session_ids)
+    sessions: set[int] = set()
+    relabelled = 0
+    for table in product.pipeline.assignment_tables.values():
+        for row in table.rows:
+            sessions.add(int(row.session_id))
+            if row.data_quality_status != "ok":
+                relabelled += 1
+    survivors = sorted(excluded.intersection(sessions))
+    if survivors:
+        raise SpineError(
+            f"excluded sessions survived in Phase 7 assignments: {survivors}; "
+            "contract section 6 requires their rows to disappear entirely, not "
+            "to carry an exclusion label"
+        )
+    checks = (
+        ("distinct retained sessions", len(sessions), FROZEN_RETAINED_SESSIONS),
+        (
+            "assignment rows",
+            int(product.row_counts["assignments"]),
+            FROZEN_RETAINED_ASSIGNMENT_ROWS,
+        ),
+        (
+            "seasonal profile rows",
+            int(product.row_counts["seasonal_profiles"]),
+            FROZEN_RETAINED_SEASONAL_PROFILE_ROWS,
+        ),
+        (
+            "threshold rows",
+            int(product.row_counts["thresholds"]),
+            FROZEN_RETAINED_THRESHOLD_ROWS,
+        ),
+        (
+            "relabelled assignment rows",
+            relabelled,
+            FROZEN_RELABELLED_ASSIGNMENT_ROWS,
+        ),
+    )
+    for name, observed, expected in checks:
+        if observed != expected:
+            raise SpineError(
+                f"frozen contract section 6 tripwire: {name} is {observed:,}, "
+                f"expected exactly {expected:,}"
+            )
+
+
+def _enforce_frozen_unit_o_population(row_count: int) -> None:
+    """Halt unless Unit O reproduces the frozen contract section 6 row count."""
+    if int(row_count) != FROZEN_RETAINED_UNIT_O_ROWS:
+        raise SpineError(
+            f"frozen contract section 6 tripwire: Unit O rows is {int(row_count):,}, "
+            f"expected exactly {FROZEN_RETAINED_UNIT_O_ROWS:,}"
+        )
+
+
 def run_shakedown() -> dict[str, Any]:
     """Execute the one authorized exploration-only mechanical shakedown."""
     output_root = _validate_output_root(OUTPUT_ROOT)
@@ -1113,11 +1220,16 @@ def run_shakedown() -> dict[str, Any]:
     store.verify_hashes()
     bars = validate_exploration_store(store)
     calendar = load_accepted_calendar()
+    # D32/D33: the canonical schedule and its exclusion registry are resolved
+    # ONCE here and handed to both products. Phase 7 and Unit O must share one
+    # exclusion interpretation; the v1 defect was that only Unit O had it.
+    schedule_table = load_session_schedule_table()
     timings["source_validation"] = time.perf_counter() - mark
     _enforce_peak_memory_ceiling("source validation")
 
     mark = time.perf_counter()
-    product = _build_phase7_product(store, bars, calendar)
+    product = _build_phase7_product(store, bars, calendar, schedule_table)
+    _enforce_frozen_phase7_population(product, schedule_table)
     timings["phase7_compute"] = time.perf_counter() - mark
     _enforce_peak_memory_ceiling("Phase 7 compute")
 
@@ -1134,17 +1246,16 @@ def run_shakedown() -> dict[str, Any]:
     _enforce_peak_memory_ceiling("Phase 7 write and release")
 
     mark = time.perf_counter()
-    # D32/D33: the canonical schedule is resolved once here and handed in. Unit O
-    # never loads a calendar itself and has no fallback close.
-    outcomes = build_outcome_table(
-        store, schedule_table=load_session_schedule_table()
-    )
+    # The same table resolved above. Unit O never loads a calendar itself and
+    # has no fallback close.
+    outcomes = build_outcome_table(store, schedule_table=schedule_table)
     timings["unit_o_compute"] = time.perf_counter() - mark
     _enforce_peak_memory_ceiling("Unit O compute")
 
     mark = time.perf_counter()
     _complete_stage(staging_root, store, outcomes, environment=environment)
     outcome_row_count = outcomes.row_count
+    _enforce_frozen_unit_o_population(outcome_row_count)
     del outcomes
     gc.collect()
     _enforce_peak_memory_ceiling("Unit O write and release")

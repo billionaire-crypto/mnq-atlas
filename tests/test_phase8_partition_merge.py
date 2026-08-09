@@ -9,6 +9,7 @@ import pytest
 
 from mnq_lab.phase8 import production
 from mnq_lab.phase8.diagnostics import status_decision
+from mnq_lab.phase8.preflight import BootstrapTermKey, build_term_support_record
 
 
 class _ConstantDigest:
@@ -76,6 +77,43 @@ def _snapshot(merged):
         ),
         merged.census,
     )
+
+
+def test_worker_deduplicates_support_sessions_before_retaining_partition():
+    sessions = np.asarray([9, 2, 9, 5, 2, 7, 5], dtype=np.int32)
+    weights = np.asarray([0.5, 0.5, 0.25, 0.0, 0.25, 0.0, 0.5])
+
+    compact = production._stable_unique_support_sessions(sessions, weights)
+    raw = tuple(sessions[weights > 0.0])
+
+    assert compact == (9, 2, 5)
+    assert len(compact) == 3
+    assert len(raw) == 5
+    # Negative control: uniqueness without first-seen ordering changes evidence.
+    assert tuple(sorted(set(raw))) != compact
+
+
+def test_worker_deduplication_is_identical_to_parent_support_normalization():
+    sessions = np.asarray([9, 2, 9, 5, 2, 5], dtype=np.int32)
+    weights = np.ones(sessions.size, dtype=np.float64)
+    key = BootstrapTermKey("contrast", ("declared",), "target")
+
+    raw_record = build_term_support_record(
+        key=key, session_ids=tuple(sessions), status="ok",
+    )
+    compact_record = build_term_support_record(
+        key=key,
+        session_ids=production._stable_unique_support_sessions(sessions, weights),
+        status="ok",
+    )
+
+    assert compact_record == raw_record
+    assert compact_record.session_ids == (9, 2, 5)
+    # Negative control: a non-stable unique order changes the final record.
+    reordered_record = build_term_support_record(
+        key=key, session_ids=tuple(sorted(set(sessions))), status="ok",
+    )
+    assert reordered_record != raw_record
 
 
 def test_central_merge_survives_partition_local_digest_collision(

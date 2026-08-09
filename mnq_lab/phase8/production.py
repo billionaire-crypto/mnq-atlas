@@ -365,6 +365,13 @@ class _ContrastEntry:
     request: tuple[Any, ...] | None
 
 
+def _stable_unique_support_sessions(
+    sessions: np.ndarray, weights: np.ndarray,
+) -> tuple[Hashable, ...]:
+    """Retain each positively weighted session once, in first-seen order."""
+    return tuple(dict.fromkeys(sessions[weights > 0.0]))
+
+
 @dataclass(frozen=True)
 class _ContrastPartition:
     entries: tuple[_ContrastEntry, ...]
@@ -687,7 +694,9 @@ def _contrast_partition(
         for role, condition in (("target", weights.target), ("baseline", weights.baseline)):
             if condition is None:
                 continue
-            support_sessions = tuple(sessions[condition.weights > 0.0])
+            support_sessions = _stable_unique_support_sessions(
+                sessions, condition.weights,
+            )
             census_key = BootstrapTermKey("contrast", _spec_key(spec), role)
             census_entries.append(_CensusEntry(
                 _census_identity(

@@ -8,6 +8,7 @@ O tree.  Private dependency seams exist only for synthetic tests.
 from __future__ import annotations
 
 import argparse
+import _thread
 from dataclasses import dataclass
 import ctypes
 import hashlib
@@ -15,6 +16,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import signal
 import sys
 import threading
 from typing import Any, Callable, Iterable, Mapping
@@ -46,8 +48,25 @@ PHASE8_CHECKPOINT_ROOT = PHASE8_OUTPUT_ROOT.with_name(
 PHASE8_PROGRESS_LOG = PHASE8_OUTPUT_ROOT.with_name(
     PHASE8_OUTPUT_ROOT.name + ".progress.log"
 )
-DEFAULT_AGGREGATE_MEMORY_CEILING_BYTES = int(5.5 * 1024**3)
-DEFAULT_LAUNCH_MINIMUM_AVAILABLE_BYTES = 7 * 1024**3
+# The rented Linux preflight measured about 7.85 GiB process-tree PSS while
+# eight Stage 1 workers were active. Keep a fixed, fail-closed ceiling with
+# about 2x measured headroom rather than disabling the boundary. The launch
+# check separately requires another 2 GiB beyond the process-tree ceiling.
+DEFAULT_AGGREGATE_MEMORY_CEILING_BYTES = 16 * 1024**3
+DEFAULT_LAUNCH_MINIMUM_AVAILABLE_BYTES = 18 * 1024**3
+AGGREGATE_MEMORY_CEILING_BASIS = {
+    "schema_version": "phase8-memory-ceiling-basis-v1",
+    "failed_attempt_execution_receipt_sha256": (
+        "465d0a48045f6ca2713ede54291ba4c5b100e94425a018f03b0e1812a67f4094"
+    ),
+    "observed_stage1_process_tree_pss_bytes": 7_845_995_520,
+    "observed_effective_available_bytes": 251_490_234_368,
+    "rationale": (
+        "fixed 16 GiB process-tree PSS ceiling provides more than two times "
+        "the measured eight-worker Stage 1 footprint while retaining a "
+        "fail-closed emergency stop"
+    ),
+}
 PHASE8_OUTPUT_VERSION = "phase8-session-aware-v2"
 
 LIMITATIONS = (
@@ -681,7 +700,7 @@ def aggregate_memory_measurement() -> MemoryMeasurement:
         # cgroup memory.current includes reclaimable file cache charged while
         # hashing the governed input and witness trees.  That cache can exceed
         # the fixed process-memory ceiling even when the complete process tree
-        # is nearly idle.  Enforce the 5.5 GiB aggregate ceiling against PSS,
+        # is nearly idle.  Enforce the fixed aggregate ceiling against PSS,
         # which accounts shared pages proportionally and excludes closed-file
         # cache.  Cgroup current/limit remain fail-closed launch-capacity inputs
         # in available_memory_observation().
@@ -705,11 +724,21 @@ class AggregateMemoryGate:
         launch_minimum_available_bytes: int,
         aggregate_sampler: Callable[[], int | MemoryMeasurement] = aggregate_memory_measurement,
         available_sampler: Callable[[], int] = _available_memory_bytes,
+        failure_interrupt: Callable[[SpineError], None] | None = None,
+        failure_terminate: Callable[[SpineError], None] | None = None,
+        monitor_interval_seconds: float = 0.5,
+        hard_stop_grace_seconds: float = 5.0,
     ) -> None:
         self.ceiling_bytes = int(ceiling_bytes)
         self.launch_minimum_available_bytes = int(launch_minimum_available_bytes)
         self._aggregate_sampler = aggregate_sampler
         self._available_sampler = available_sampler
+        self._failure_interrupt = failure_interrupt
+        self._failure_terminate = failure_terminate
+        self._monitor_interval_seconds = float(monitor_interval_seconds)
+        self._hard_stop_grace_seconds = float(hard_stop_grace_seconds)
+        if self._monitor_interval_seconds <= 0 or self._hard_stop_grace_seconds <= 0:
+            raise SpineError("Phase 8 memory-monitor timings must be positive")
         self.peak_bytes = 0
         self.metric: str | None = None
         self.source: str | None = None
@@ -755,11 +784,24 @@ class AggregateMemoryGate:
         return current
 
     def _monitor(self) -> None:
-        while not self._stop.wait(0.5):
+        while not self._stop.wait(self._monitor_interval_seconds):
             try:
                 self.sample()
             except SpineError as exc:
                 self._failure = exc
+                if self._failure_interrupt is not None:
+                    try:
+                        self._failure_interrupt(exc)
+                    except Exception as action_exc:
+                        self._failure = SpineError(
+                            "aggregate Phase 8 memory emergency interrupt failed"
+                        )
+                        self._failure.__cause__ = action_exc
+                if (
+                    self._failure_terminate is not None
+                    and not self._stop.wait(self._hard_stop_grace_seconds)
+                ):
+                    self._failure_terminate(exc)
                 return
 
     def start(self) -> None:
@@ -881,9 +923,17 @@ def run_phase8(
         launch_minimum_available_bytes=launch_minimum_available_bytes,
         process_start_method=process_start_method or default_process_start_method(),
     )
+    def interrupt_for_memory_failure(_failure: SpineError) -> None:
+        _thread.interrupt_main()
+
+    def terminate_for_memory_failure(_failure: SpineError) -> None:
+        os.kill(os.getpid(), signal.SIGTERM)
+
     gate = AggregateMemoryGate(
         ceiling_bytes=config.aggregate_memory_ceiling_bytes,
         launch_minimum_available_bytes=config.launch_minimum_available_bytes,
+        failure_interrupt=interrupt_for_memory_failure,
+        failure_terminate=terminate_for_memory_failure,
     )
     gate.preflight()
     guarded = load_ratified_inputs()
@@ -1064,6 +1114,7 @@ def run_phase8(
         "cpu_capacity_observations": cpu_capacity,
         "process_start_method": config.process_start_method,
         "aggregate_memory_ceiling_bytes": config.aggregate_memory_ceiling_bytes,
+        "aggregate_memory_ceiling_basis": dict(AGGREGATE_MEMORY_CEILING_BASIS),
         "launch_minimum_available_bytes": config.launch_minimum_available_bytes,
         "aggregate_peak_memory_bytes": gate.peak_bytes,
         "aggregate_memory_metric": gate.metric,

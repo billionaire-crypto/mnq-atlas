@@ -10,7 +10,11 @@ import sys
 import pytest
 
 from mnq_lab import SpineError
-from mnq_lab.phase8.runner import MemoryMeasurement
+from mnq_lab.phase8.runner import (
+    AGGREGATE_MEMORY_CEILING_BASIS,
+    DEFAULT_AGGREGATE_MEMORY_CEILING_BYTES,
+    MemoryMeasurement,
+)
 from mnq_lab.production.phase8_v2_run_receipt import (
     MINIMUM_AVAILABLE_MEMORY_BYTES,
     MINIMUM_FREE_DISK_BYTES,
@@ -60,7 +64,7 @@ def _paths(repo: Path) -> tuple[Path, Path, Path, Path]:
 def _passing_preflight() -> dict[str, object]:
     return {
         "certificate_id": "synthetic-v2-certificate",
-        "available_memory_bytes": 8 * 1024**3,
+        "available_memory_bytes": MINIMUM_AVAILABLE_MEMORY_BYTES,
         "minimum_available_memory_bytes": MINIMUM_AVAILABLE_MEMORY_BYTES,
         "free_disk_bytes": 8 * 1024**3,
         "minimum_free_disk_bytes": MINIMUM_FREE_DISK_BYTES,
@@ -68,6 +72,11 @@ def _passing_preflight() -> dict[str, object]:
         "stage1_workers": 2,
         "bootstrap_workers": 3,
         "process_start_method": "spawn",
+        "aggregate_memory_metric": "synthetic_pss_bytes",
+        "aggregate_memory_source": "synthetic test",
+        "aggregate_memory_observed_bytes": 1024,
+        "aggregate_memory_ceiling_bytes": DEFAULT_AGGREGATE_MEMORY_CEILING_BYTES,
+        "aggregate_memory_ceiling_basis": dict(AGGREGATE_MEMORY_CEILING_BASIS),
         "input_manifest_sha256": {"run": "a" * 64, "unit_o": "b" * 64, "phase7": "c" * 64},
     }
 
@@ -78,7 +87,7 @@ def _resource_probes() -> dict[str, object]:
             "effective_cpu_count": 8, "os_cpu_count": 8,
             "affinity_cpus": tuple(range(8)),
         },
-        "physical_memory_sampler": lambda: 16 * 1024**3,
+        "physical_memory_sampler": lambda: 32 * 1024**3,
         "aggregate_memory_probe": lambda: MemoryMeasurement(1024, "synthetic", "test"),
         "input_manifest_probe": lambda: {
             "run": "a" * 64, "unit_o": "b" * 64, "phase7": "c" * 64,
@@ -172,6 +181,13 @@ def test_success_receipt_records_complete_v2_output_and_unchanged_witness(tmp_pa
     assert receipt["phase8_executed"] is True
     assert receipt["outcome_values_inspected"] is False
     assert receipt["output_manifest"]["path"] == "output/manifest.json"
+    child_exit = json.loads(
+        (tmp_path / "evidence/child_exit.json").read_text(encoding="utf-8")
+    )
+    assert child_exit["aggregate_memory_ceiling_bytes"] == 16 * 1024**3
+    assert child_exit["aggregate_memory_ceiling_basis"] == dict(
+        AGGREGATE_MEMORY_CEILING_BASIS
+    )
     assert json.loads((tmp_path / "evidence/execution_receipt.json").read_text()) == receipt
 
 

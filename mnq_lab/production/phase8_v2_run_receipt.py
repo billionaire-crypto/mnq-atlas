@@ -18,7 +18,9 @@ from mnq_lab import SpineError
 from mnq_lab.constants import REPO_ROOT
 from mnq_lab.ledger.ratification import require_ratified_unit_o
 from mnq_lab.phase8.runner import (
+    AGGREGATE_MEMORY_CEILING_BASIS,
     DEFAULT_AGGREGATE_MEMORY_CEILING_BYTES,
+    DEFAULT_LAUNCH_MINIMUM_AVAILABLE_BYTES,
     PHASE8_CHECKPOINT_ROOT,
     PHASE8_OUTPUT_ROOT,
     PHASE8_PROGRESS_LOG,
@@ -50,7 +52,7 @@ RECEIPT_SCHEMA_VERSION = "phase8-session-aware-v2-external-execution-receipt-v2"
 SNAPSHOT_SCHEMA_VERSION = "phase8-v2-protected-pre-post-hashes-v1"
 PREFLIGHT_SCHEMA_VERSION = "phase8-session-aware-v2-rented-host-preflight-v2"
 CHECKPOINT_SNAPSHOT_SCHEMA_VERSION = "phase8-checkpoint-evidence-snapshot-v1"
-MINIMUM_AVAILABLE_MEMORY_BYTES = 8 * 1024**3
+MINIMUM_AVAILABLE_MEMORY_BYTES = DEFAULT_LAUNCH_MINIMUM_AVAILABLE_BYTES
 MINIMUM_FREE_DISK_BYTES = 4 * 1024**3
 V2_INPUT_RELATIVE_PATH = "data/exploration/derived/phase7-unit-o-session-aware-v2"
 RATIFICATION_PROFILE_RELATIVE_PATH = "mnq_lab/ledger/ratification_profile_entries"
@@ -621,6 +623,7 @@ def _preflight_phase8_run(
         "aggregate_memory_source": aggregate.source,
         "aggregate_memory_observed_bytes": aggregate.bytes,
         "aggregate_memory_ceiling_bytes": DEFAULT_AGGREGATE_MEMORY_CEILING_BYTES,
+        "aggregate_memory_ceiling_basis": dict(AGGREGATE_MEMORY_CEILING_BASIS),
         "free_disk_bytes": free_disk,
         "minimum_free_disk_bytes": MINIMUM_FREE_DISK_BYTES,
         "conflicting_processes": list(conflicts),
@@ -750,6 +753,19 @@ def _run_with_receipt(
         "cpu_capacity": preflight_record.get("cpu_capacity"),
         "aggregate_memory_metric": preflight_record.get("aggregate_memory_metric"),
         "aggregate_memory_source": preflight_record.get("aggregate_memory_source"),
+        "aggregate_memory_observed_bytes": preflight_record.get(
+            "aggregate_memory_observed_bytes"
+        ),
+        "aggregate_memory_ceiling_bytes": preflight_record.get(
+            "aggregate_memory_ceiling_bytes"
+        ),
+        "aggregate_memory_ceiling_basis": preflight_record.get(
+            "aggregate_memory_ceiling_basis"
+        ),
+        "available_memory_bytes": preflight_record.get("available_memory_bytes"),
+        "minimum_available_memory_bytes": preflight_record.get(
+            "minimum_available_memory_bytes"
+        ),
         "checkpoint_root": Path(checkpoint_root).resolve().as_posix(),
         "external_checkpoint_root": None if external_checkpoint_root is None else Path(external_checkpoint_root).resolve().as_posix(),
         "checkpoint_identity": checkpoint_identity,

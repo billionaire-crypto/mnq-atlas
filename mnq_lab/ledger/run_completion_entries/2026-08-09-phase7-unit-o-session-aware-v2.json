@@ -1,0 +1,10 @@
+{
+  "entry_id": "2026-08-09-phase7-unit-o-session-aware-v2",
+  "ledger_format": "run_completion_record_v1",
+  "recorder_identity": "Codex production operator; post-run record under explicit user authorization",
+  "run_commit": "6f1c506b462b8c4e6df93a4ffcc1be04cbbba76f",
+  "run_manifest_sha256": "456e3ea04532606042af9b505a6918f659c2ccffbbf1ceb66b8fde9dd809851d",
+  "tree_path": "data/exploration/derived/phase7-unit-o-session-aware-v2",
+  "tree_sha256": "dc7b3f607d28d2f2a1ccad1cc04340f48b03623a7448c8516734aa3c95e40a87",
+  "visible_at_utc": "2026-08-09T02:36:43.938894Z"
+}

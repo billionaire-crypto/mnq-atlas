@@ -11,6 +11,7 @@ import pytest
 
 from mnq_lab import SpineError
 from mnq_lab.production.phase7_unit_o_run_receipt import (
+    FAILED_V2_ARTIFACT_RELATIVE_PATH,
     PRIOR_V2_ARTIFACT_RELATIVE_PATH,
     PRODUCTION_COMMAND,
     PROTECTED_RELATIVE_PATHS,
@@ -206,6 +207,7 @@ def test_public_wrapper_is_fixed_to_the_governed_producer_and_safe_roots():
     assert "data" not in PROTECTED_RELATIVE_PATHS
     assert "data/exploration/bars_5m" in PROTECTED_RELATIVE_PATHS
     assert PRIOR_V2_ARTIFACT_RELATIVE_PATH in PROTECTED_RELATIVE_PATHS
+    assert FAILED_V2_ARTIFACT_RELATIVE_PATH in PROTECTED_RELATIVE_PATHS
     assert (
         "data/exploration/derived/phase7-unit-o-session-aware-v2"
         not in PROTECTED_RELATIVE_PATHS
@@ -217,3 +219,10 @@ def test_prior_v2_witness_is_a_fixed_archive_not_the_live_output_target():
         "data/exploration/derived/"
         ".archive-phase7-unit-o-session-aware-v2-f51482a"
     )
+
+
+def test_failed_v2_witness_is_a_fixed_quarantine_root():
+    assert FAILED_V2_ARTIFACT_RELATIVE_PATH == (
+        "data/exploration/derived/.quarantine-failed-v2-e8542c1"
+    )
+    assert FAILED_V2_ARTIFACT_RELATIVE_PATH != PRIOR_V2_ARTIFACT_RELATIVE_PATH

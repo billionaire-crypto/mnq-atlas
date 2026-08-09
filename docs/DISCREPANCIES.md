@@ -1910,3 +1910,67 @@ changes. No outcome magnitude informed any of it. Production and Phase 9 remain
 blocked.
 
 **Status:** `OPEN`.
+
+---
+
+## D36. Phase 7 + Unit O session-aware v2 production authorization and post-run record
+
+**Relationship to D31-D35.** This entry records narrow production
+authorizations that the user gave directly in the operator conversation. It
+supersedes only the production-blocked language in D33 section 11, D34 and D35
+for the failed preflight attempt and the separately authorized successful retry
+described below. It does not close, amend or withdraw any scientific ruling in
+D31-D35, and it does not authorize Phase 8 or Phase 9.
+
+**Authorization chronology.** The initial operator instruction explicitly
+authorized one production invocation. That attempt stopped at the child-side
+free-memory preflight and is preserved at external receipt root
+`C:\Users\kyawz\mnq_atlas_runs\phase7-unit-o-v2-final-6f1c506`. The user then
+separately authorized memory cleanup and one retry. The successful artifact was
+produced by that retry. Both authorizations existed outside the repository
+before their respective attempts while D33-D35 still stated that production
+was blocked. This entry is intentionally post-run and is not retro-dated. It
+records the user's scope now under the user's explicit instruction to close
+that governance gap; it does not claim that a repository-visible authorization
+preceded either attempt.
+
+**Authorized retry scope.** The second authorization covered exactly one Phase
+7 + Unit O session-aware v2 retry from commit
+`6f1c506b462b8c4e6df93a4ffcc1be04cbbba76f`, through
+`mnq_lab.production.phase7_unit_o_run_receipt`, with live output root
+`data/exploration/derived/phase7-unit-o-session-aware-v2` and external receipt
+root
+`C:\Users\kyawz\mnq_atlas_runs\phase7-unit-o-v2-final-6f1c506-attempt-2`.
+The authorization did not include Phase 8, publication, push, self-ratification
+or certificate issuance.
+
+**Execution record.** The wrapper and child both exited zero. The run began at
+`2026-08-09T01:24:51.253458Z`, finished at
+`2026-08-09T02:36:43.938894Z`, and recorded
+`outcome_values_inspected = false` and `phase8_executed = false`. The completed
+tree is bound by the append-only record
+`mnq_lab/ledger/run_completion_entries/2026-08-09-phase7-unit-o-session-aware-v2.json`:
+
+- run commit: `6f1c506b462b8c4e6df93a4ffcc1be04cbbba76f`;
+- run-manifest SHA-256:
+  `456e3ea04532606042af9b505a6918f659c2ccffbbf1ceb66b8fde9dd809851d`;
+- tree SHA-256 under the ratification ledger's canonical tree algorithm:
+  `dc7b3f607d28d2f2a1ccad1cc04340f48b03623a7448c8516734aa3c95e40a87`.
+
+**Independent audit.** A separate auditor independently reproduced the commit,
+archive, receipt, protected snapshots, structural populations, label counts and
+raw-byte artifact comparison. Its verdict was scientific content SOUND,
+mechanical execution SOUND and population correctness SOUND. It declined
+ratification because the authorization and run completion had not yet been
+recorded and because the historical failed-v2 quarantine tree was outside the
+receipt's protected roots. This entry and the run-completion record address the
+first gap. The receipt root list is separately hardened to include
+`data/exploration/derived/.quarantine-failed-v2-e8542c1`; that code change is
+post-run and does not claim retroactive receipt coverage.
+
+**No certificate.** Recording authorization and completion does not ratify or
+certify the artifact. A genuinely separate auditor must verify these new bytes
+and decide whether the remaining receipt-scope limitation is closed before any
+C1-C7 certificate may issue.
+
+**Status:** `OPEN; POST-RUN GOVERNANCE AND RECEIPT-SCOPE CLOSEOUT AUDIT PENDING`.

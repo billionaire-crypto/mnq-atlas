@@ -31,6 +31,9 @@ PRIOR_V2_ARTIFACT_RELATIVE_PATH = (
     "data/exploration/derived/"
     ".archive-phase7-unit-o-session-aware-v2-f51482a"
 )
+FAILED_V2_ARTIFACT_RELATIVE_PATH = (
+    "data/exploration/derived/.quarantine-failed-v2-e8542c1"
+)
 PRODUCTION_COMMAND = (
     sys.executable,
     "-m",
@@ -40,13 +43,14 @@ PRODUCTION_COMMAND = (
 # Exact roots only. No command or helper recursively starts at data/. Tracked
 # witnesses are protected twice: by these hashes and by the clean-worktree
 # checks. Gitignored data witnesses depend on these hashes, so both the
-# canonical source store and the preserved prior v2 artifact are explicit.
+# canonical source store and both preserved v2 witness trees are explicit.
 # The live OUTPUT_ROOT cannot be a pre-run witness because the producer
 # requires that target to be absent; before authorization, the existing f51482a
 # artifact must be moved intact to PRIOR_V2_ARTIFACT_RELATIVE_PATH.
 PROTECTED_RELATIVE_PATHS = (
     "data/exploration/bars_5m",
     PRIOR_V2_ARTIFACT_RELATIVE_PATH,
+    FAILED_V2_ARTIFACT_RELATIVE_PATH,
     "data/exploration/derived/phase7-unit-o-first-run-v1",
     "data/exploration/derived/phase7-unit-o-first-run-v1.baseline-4f185ea",
     "data/exploration/derived/phase8-first-run-v1",

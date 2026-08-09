@@ -105,13 +105,13 @@ def _phase8_snapshot(repo_root: Path, relative_paths: Iterable[str]) -> dict[str
 
 def _active_phase8_runner_processes() -> tuple[dict[str, Any], ...]:
     runner_pattern = re.compile(
-        r"(?:^|\s)-m\s+mnq_lab\.phase8\.runner(?:\s|$)", re.IGNORECASE
+        r"(?:^|\s)-m\s*mnq_lab\.phase8\.runner(?:\s|$)", re.IGNORECASE
     )
     if os.name == "nt":
         script = (
             "$selfPid=$PID; Get-CimInstance Win32_Process | "
             "Where-Object { $_.ProcessId -ne $selfPid -and "
-            "$_.CommandLine -match '(?i)(?:^|\\s)-m\\s+mnq_lab\\.phase8\\.runner(?:\\s|$)' } | "
+            "$_.CommandLine -match '(?i)(?:^|\\s)-m\\s*mnq_lab\\.phase8\\.runner(?:\\s|$)' } | "
             "Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress"
         )
         completed = subprocess.run(
@@ -136,8 +136,16 @@ def _active_phase8_runner_processes() -> tuple[dict[str, Any], ...]:
         stripped = line.strip()
         if not stripped:
             continue
-        pid_text, command = stripped.split(maxsplit=1)
-        pid = int(pid_text)
+        fields = stripped.split(maxsplit=1)
+        if len(fields) != 2:
+            raise SpineError("existing Phase 8 process metadata is malformed")
+        pid_text, command = fields
+        try:
+            pid = int(pid_text)
+        except ValueError as exc:
+            raise SpineError("existing Phase 8 process metadata is malformed") from exc
+        if pid <= 0:
+            raise SpineError("existing Phase 8 process metadata is malformed")
         if pid != os.getpid() and runner_pattern.search(command):
             found.append({"pid": pid, "command": command})
     return tuple(found)

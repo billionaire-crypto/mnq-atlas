@@ -94,6 +94,7 @@ def test_posix_process_probe_matches_only_module_launches(monkeypatch):
 104 python -m mnq_lab.phase8.runner_extra
 105 python -u -m mnq_lab.phase8.runner --resume
 106 python -m other.module mnq_lab.phase8.runner
+107 python -mmnq_lab.phase8.runner --bootstrap-workers 32
 """
     completed = subprocess.CompletedProcess(
         args=("ps",), returncode=0, stdout=process_list, stderr=""
@@ -116,7 +117,28 @@ def test_posix_process_probe_matches_only_module_launches(monkeypatch):
             "pid": 105,
             "command": "python -u -m mnq_lab.phase8.runner --resume",
         },
+        {
+            "pid": 107,
+            "command": "python -mmnq_lab.phase8.runner --bootstrap-workers 32",
+        },
     )
+
+
+@pytest.mark.parametrize("malformed", ("108", "not-a-pid command", "0 command"))
+def test_posix_process_probe_rejects_malformed_process_metadata(
+    malformed, monkeypatch,
+):
+    completed = subprocess.CompletedProcess(
+        args=("ps",), returncode=0, stdout=malformed + "\n", stderr=""
+    )
+    monkeypatch.setattr("mnq_lab.production.phase8_v2_run_receipt.os.name", "posix")
+    monkeypatch.setattr(
+        "mnq_lab.production.phase8_v2_run_receipt.subprocess.run",
+        lambda *_args, **_kwargs: completed,
+    )
+
+    with pytest.raises(SpineError, match="process metadata is malformed"):
+        _active_phase8_runner_processes()
 
 
 def test_success_receipt_records_complete_v2_output_and_unchanged_witness(tmp_path):

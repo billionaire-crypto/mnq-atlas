@@ -45,6 +45,23 @@ def test_ratified_input_root_is_the_session_aware_v2_artifact():
     assert "phase7-unit-o-first-run-v1" not in relative
 
 
+def test_phase8_v2_output_family_is_new_and_versioned():
+    expected = "data/exploration/derived/phase8-session-aware-v2"
+    assert runner_module.PHASE8_OUTPUT_ROOT.relative_to(
+        runner_module.REPO_ROOT
+    ).as_posix() == expected
+    assert runner_module.PHASE8_STAGING_ROOT == runner_module.PHASE8_OUTPUT_ROOT.with_name(
+        runner_module.PHASE8_OUTPUT_ROOT.name + ".staging"
+    )
+    assert runner_module.PHASE8_CHECKPOINT_ROOT == runner_module.PHASE8_OUTPUT_ROOT.with_name(
+        runner_module.PHASE8_OUTPUT_ROOT.name + ".checkpoint"
+    )
+    assert runner_module.PHASE8_PROGRESS_LOG == runner_module.PHASE8_OUTPUT_ROOT.with_name(
+        runner_module.PHASE8_OUTPUT_ROOT.name + ".progress.log"
+    )
+    assert "phase8-first-run-v1" not in expected
+
+
 def test_input_manifest_is_not_opened_until_ratification_passes(monkeypatch):
     events = []
 

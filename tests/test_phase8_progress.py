@@ -225,6 +225,9 @@ def test_runner_failure_resets_and_stops_heartbeat(
         raise RuntimeError("named runner failure")
 
     monkeypatch.setattr(runner, "PHASE8_PROGRESS_LOG", tmp_path / "failure.log")
+    monkeypatch.setattr(
+        runner, "require_absent_phase8_run_paths", lambda **_kwargs: None
+    )
     monkeypatch.setattr(runner, "run_phase8", named_runner_failure)
     monkeypatch.setattr(sys.modules["__main__"], "__spec__", object())
     with pytest.raises(RuntimeError, match="named runner failure"):
@@ -286,6 +289,9 @@ def test_runner_main_configures_stdout_and_real_log_before_running(
     events = []
     log_path = tmp_path / "phase8-production.progress.log"
     monkeypatch.setattr(runner, "PHASE8_PROGRESS_LOG", log_path)
+    monkeypatch.setattr(
+        runner, "require_absent_phase8_run_paths", lambda **_kwargs: None
+    )
     monkeypatch.setattr(
         runner._progress,
         "configure",

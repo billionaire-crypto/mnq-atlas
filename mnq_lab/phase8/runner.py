@@ -37,11 +37,17 @@ from mnq_lab.phase8.artifacts import (
 RATIFIED_INPUT_ROOT = (
     REPO_ROOT / "data/exploration/derived/phase7-unit-o-session-aware-v2"
 )
-PHASE8_OUTPUT_ROOT = REPO_ROOT / "data/exploration/derived/phase8-first-run-v1"
+PHASE8_OUTPUT_ROOT = REPO_ROOT / "data/exploration/derived/phase8-session-aware-v2"
+PHASE8_STAGING_ROOT = PHASE8_OUTPUT_ROOT.with_name(PHASE8_OUTPUT_ROOT.name + ".staging")
+PHASE8_CHECKPOINT_ROOT = PHASE8_OUTPUT_ROOT.with_name(
+    PHASE8_OUTPUT_ROOT.name + ".checkpoint"
+)
 # A real log file beside the output root. The first production attempt wrote
 # to a shell redirect that stayed empty for three hours, so progress must land
 # in a file this package owns and flushes itself.
-PHASE8_PROGRESS_LOG = REPO_ROOT / "data/exploration/derived/phase8-first-run-v1.progress.log"
+PHASE8_PROGRESS_LOG = PHASE8_OUTPUT_ROOT.with_name(
+    PHASE8_OUTPUT_ROOT.name + ".progress.log"
+)
 DEFAULT_AGGREGATE_MEMORY_CEILING_BYTES = int(5.5 * 1024**3)
 DEFAULT_LAUNCH_MINIMUM_AVAILABLE_BYTES = 7 * 1024**3
 
@@ -128,6 +134,32 @@ def load_ratified_inputs() -> RatifiedPhase8Inputs:
         ("phase7", _sha256(RATIFIED_INPUT_ROOT / "phase7/manifest.json")),
     )
     return RatifiedPhase8Inputs(certificate, run, unit, phase7, hashes)
+
+
+def require_absent_phase8_run_paths(*, include_progress_log: bool) -> None:
+    """Fail before computation if any fixed v2 production target is occupied."""
+    expected = {
+        "staging": PHASE8_OUTPUT_ROOT.with_name(PHASE8_OUTPUT_ROOT.name + ".staging"),
+        "checkpoint": PHASE8_OUTPUT_ROOT.with_name(PHASE8_OUTPUT_ROOT.name + ".checkpoint"),
+        "progress": PHASE8_OUTPUT_ROOT.with_name(PHASE8_OUTPUT_ROOT.name + ".progress.log"),
+    }
+    if PHASE8_STAGING_ROOT != expected["staging"]:
+        raise SpineError("Phase 8 staging root is not bound to the fixed v2 output root")
+    if PHASE8_CHECKPOINT_ROOT != expected["checkpoint"]:
+        raise SpineError("Phase 8 checkpoint root is not bound to the fixed v2 output root")
+    if PHASE8_PROGRESS_LOG != expected["progress"]:
+        raise SpineError("Phase 8 progress log is not bound to the fixed v2 output root")
+    candidates = [PHASE8_OUTPUT_ROOT, PHASE8_STAGING_ROOT, PHASE8_CHECKPOINT_ROOT]
+    if include_progress_log:
+        candidates.append(PHASE8_PROGRESS_LOG)
+    resolved = [Path(path).resolve() for path in candidates]
+    if len(resolved) != len(set(resolved)):
+        raise SpineError("Phase 8 fixed v2 run paths overlap")
+    if RATIFIED_INPUT_ROOT.resolve() in resolved:
+        raise SpineError("Phase 8 output paths alias the ratified Unit O input")
+    for path in candidates:
+        if Path(path).exists():
+            raise SpineError(f"Phase 8 fixed production path must be absent: {path}")
 
 
 def _available_memory_bytes() -> int:
@@ -399,6 +431,7 @@ def run_phase8(
             "Phase 8 production progress is not configured; "
             "launch with: python -m mnq_lab.phase8.runner"
         )
+    require_absent_phase8_run_paths(include_progress_log=False)
     config = RunnerOperatingConfig(
         workers=max(1, os.cpu_count() or 1) if workers is None else workers,
         aggregate_memory_ceiling_bytes=aggregate_memory_ceiling_bytes,
@@ -460,7 +493,7 @@ def run_phase8(
     contract = bootstrap_contract()
     contract_hash = hashlib.sha256(canonical_json_bytes(asdict(contract))).hexdigest()
     checkpoint = CheckpointStore(
-        PHASE8_OUTPUT_ROOT.with_name(PHASE8_OUTPUT_ROOT.name + ".checkpoint"),
+        PHASE8_CHECKPOINT_ROOT,
         CheckpointIdentity(
             code_commit=str(environment["commit"]),
             input_manifest_sha256=guarded.manifest_sha256,
@@ -584,6 +617,7 @@ def run_phase8(
 def main() -> None:
     if not getattr(sys.modules.get("__main__"), "__spec__", None):
         raise SpineError("launch Phase 8 only with: python -m mnq_lab.phase8.runner")
+    require_absent_phase8_run_paths(include_progress_log=True)
     _progress.configure(log_path=PHASE8_PROGRESS_LOG, stdout=True)
     try:
         run_phase8()
@@ -597,5 +631,6 @@ if __name__ == "__main__":
 
 __all__ = [
     "AggregateMemoryGate", "InventoryChunk", "RunnerOperatingConfig",
-    "execute_checkpointed_chunks", "load_ratified_inputs", "run_phase8",
+    "execute_checkpointed_chunks", "load_ratified_inputs",
+    "require_absent_phase8_run_paths", "run_phase8",
 ]

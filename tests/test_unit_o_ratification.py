@@ -404,6 +404,71 @@ def _mutate_certificate(path: Path, mutation) -> None:
     _write_json(path, certificate)
 
 
+V2_CERTIFICATE = (
+    REPO_ROOT
+    / "mnq_lab/ledger/ratification_entries"
+    / "2026-08-09-phase7-unit-o-session-aware-v2.json"
+)
+V2_TREE = REPO_ROOT / "data/exploration/derived/phase7-unit-o-session-aware-v2"
+V1_TREE = REPO_ROOT / "data/exploration/derived/phase7-unit-o-first-run-v1"
+
+
+def test_repository_v2_certificate_passes_every_condition():
+    result = evaluate_ratification_certificate(V2_CERTIFICATE, repo_root=REPO_ROOT)
+    assert result.passed and result.failures == ()
+    document = ratification._load_canonical_json(V2_CERTIFICATE, "v2 certificate")
+    assert document["ledger_format"] == ratification.V2_CERTIFICATE_FORMAT
+    assert document["run_commit"] == "6f1c506b462b8c4e6df93a4ffcc1be04cbbba76f"
+    assert document["tree"]["tree_sha256"] == (
+        "dc7b3f607d28d2f2a1ccad1cc04340f48b03623a7448c8516734aa3c95e40a87"
+    )
+    assert len(document["scientific_columns"]) == 110
+    # The reproduction is the preserved f51482a archive: a genuine distinct
+    # rerun, not the certified tree pointed back at itself.
+    assert document["reproduction"]["tree_path"] != document["tree"]["path"]
+
+
+def test_each_tree_resolves_to_its_own_certificate_and_v1_is_untouched():
+    """Two certificates coexist; neither answers for the other's tree."""
+    v2 = require_ratified_unit_o(V2_TREE, repo_root=REPO_ROOT)
+    v1 = require_ratified_unit_o(V1_TREE, repo_root=REPO_ROOT)
+
+    assert v2["ledger_format"] == ratification.V2_CERTIFICATE_FORMAT
+    assert v1["ledger_format"] == CERTIFICATE_FORMAT
+    assert v2["certificate_id"] != v1["certificate_id"]
+    # v1 still travels the legacy hard-pinned path and still passes.
+    assert evaluate_ratification_certificate(
+        REPO_ROOT
+        / "mnq_lab/ledger/ratification_entries"
+        / "2026-08-03-phase7-unit-o-first-run-v1.json",
+        repo_root=REPO_ROOT,
+    ).passed
+
+
+def test_negative_case_a_duplicate_certificate_for_one_tree_fails_closed(tmp_path):
+    """Proves the resolver above can fail: two certificates, one tree."""
+    directory = tmp_path / "ratification_entries"
+    directory.mkdir()
+    for name in ("first.json", "second.json"):
+        (directory / name).write_bytes(V2_CERTIFICATE.read_bytes())
+
+    with pytest.raises(SpineError, match="exactly one Unit O certificate"):
+        require_ratified_unit_o(
+            V2_TREE, repo_root=REPO_ROOT, certificate_directory=directory
+        )
+
+
+def test_negative_case_v2_certificate_with_a_tampered_profile_reference(tmp_path):
+    """The profile binding is load-bearing, not decorative."""
+    document = ratification._load_canonical_json(V2_CERTIFICATE, "v2 certificate")
+    document["ratification_profile"]["sha256"] = "0" * 64
+    tampered = tmp_path / "tampered.json"
+    _write_json(tampered, document)
+
+    with pytest.raises(SpineError, match="profile reference hash differs"):
+        evaluate_ratification_certificate(tampered, repo_root=REPO_ROOT)
+
+
 def test_repository_v2_ratification_profile_pins_distinct_artifact_facts():
     profiles = ratification.load_ratification_profiles()
     profile = next(

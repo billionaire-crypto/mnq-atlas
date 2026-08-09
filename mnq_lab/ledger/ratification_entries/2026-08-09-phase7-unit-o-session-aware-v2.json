@@ -1,0 +1,1473 @@
+{
+  "audit_entry": {
+    "path": "mnq_lab/ledger/audit_entries/2026-08-09-phase7-unit-o-session-aware-v2-run-commit.json",
+    "sha256": "a7e742379999ce3ed31c682555926360ff052262e40f52ab984049e40d953c6a"
+  },
+  "certificate_id": "2026-08-09-phase7-unit-o-session-aware-v2-ratification",
+  "claim_boundary": "Schema and byte-integrity checks passed for C1, C2, C3, C5 and C6; some checked inputs are producer-authored attestations. C4 is a retrospective attestation because no producer-side gate outcomes exist. C2 visibility rests on a recorded timestamp corroborated by the run manifest filesystem mtime but not externally anchored. C7 is a human attestation; code cannot prove blindness, competence or genuine independence. Append-only is repository policy, not code-enforced.",
+  "conditions": {
+    "C1": {
+      "passed": true
+    },
+    "C2": {
+      "passed": true
+    },
+    "C3": {
+      "passed": true
+    },
+    "C4": {
+      "attested": true
+    },
+    "C5": {
+      "passed": true
+    },
+    "C6": {
+      "passed": true
+    },
+    "C7": {
+      "attested_closed": true
+    }
+  },
+  "criteria": {
+    "commit": "5996e8f9791bda01d2957b903ae026e75347c36b",
+    "committed_at_utc": "2026-08-02T19:32:39-07:00",
+    "d22_sha256": "cf27329a329df856290a945eec47ad19e52b0298110b1bfe9c1a75581d0386cf",
+    "document_sha256": "e97f11f00b3ea898ff121773c5ea3203b825e4774f5df9ba792175bf37a70f97"
+  },
+  "decision_date": "2026-08-09",
+  "environment_fingerprint": {
+    "branch": "phase-7b-outcome-layer",
+    "commit": "6f1c506b462b8c4e6df93a4ffcc1be04cbbba76f",
+    "dirty": false,
+    "machine": "AMD64",
+    "numpy": "2.2.3",
+    "pandas": "3.0.1",
+    "pipeline_version": "spine-1.0.0",
+    "platform": "Windows-10-10.0.19045-SP0",
+    "python": "3.13.2",
+    "vcs": "git"
+  },
+  "gate_evidence": {
+    "all_gates_passed": true,
+    "fallback": {
+      "allowed": false,
+      "taken": false
+    },
+    "gate_records": [
+      {
+        "cause_class": "missing_bars",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "remove the 10:00 anchor bar",
+        "gate": "return.bar_absent",
+        "meaning": "declared anchor label is absent",
+        "passed": true
+      },
+      {
+        "cause_class": "missing_bars",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "set observed components to three",
+        "gate": "return.insufficient_components",
+        "meaning": "strict coverage rejects a partial bar",
+        "passed": true
+      },
+      {
+        "cause_class": "timestamps",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "place the next bar after the maintenance halt",
+        "gate": "return.spacing_break_scheduled",
+        "meaning": "session or weekend break resets state",
+        "passed": true
+      },
+      {
+        "cause_class": "missing_bars",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "remove an interior Globex bar",
+        "gate": "return.spacing_break_unscheduled",
+        "meaning": "an unexpected five-minute interval is absent",
+        "passed": true
+      },
+      {
+        "cause_class": "roll_mapping",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "change symbol code at a contract boundary",
+        "gate": "return.symbol_change",
+        "meaning": "a decoded-symbol change resets state",
+        "passed": true
+      },
+      {
+        "cause_class": "roll_mapping",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "set rollover true on the current bar",
+        "gate": "reset.roll_reset",
+        "meaning": "the first post-roll bar cannot bridge contracts",
+        "passed": true
+      },
+      {
+        "cause_class": "timestamps",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "insert a non-five-minute spacing",
+        "gate": "reset.gap_reset",
+        "meaning": "the first post-gap bar starts a new segment",
+        "passed": true
+      },
+      {
+        "cause_class": "timestamps",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "supply only 77 contiguous returns",
+        "gate": "ewma.warmup",
+        "meaning": "fewer than 78 contiguous returns are available",
+        "passed": true
+      },
+      {
+        "cause_class": "timestamps",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "supply only 77 contiguous returns",
+        "gate": "mad.warmup",
+        "meaning": "the exact 78-return MAD window is unavailable",
+        "passed": true
+      },
+      {
+        "cause_class": "aggregation",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "supply 78 equal returns",
+        "gate": "mad.zero_scale",
+        "meaning": "the admitted MAD window is constant",
+        "passed": true
+      },
+      {
+        "cause_class": "timestamps",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "supply 59 qualifying prior sessions",
+        "gate": "seasonal.warmup",
+        "meaning": "fewer than 60 qualifying prior sessions exist",
+        "passed": true
+      },
+      {
+        "cause_class": "missing_bars",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "remove every defined scale in the prior phase",
+        "gate": "seasonal.fallback_unavailable",
+        "meaning": "the prior phase has no defined scale fallback",
+        "passed": true
+      },
+      {
+        "cause_class": "source_revision",
+        "classification": "FATAL",
+        "failing_input": "delete one in-range calendar row",
+        "gate": "seasonal.calendar_classification_missing",
+        "meaning": "an in-range session lacks its accepted calendar row",
+        "passed": true
+      },
+      {
+        "cause_class": "aggregation",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "supply a zero seasonal profile",
+        "gate": "vol_rel.zero_scale",
+        "meaning": "the seasonal denominator is exactly zero",
+        "passed": true
+      },
+      {
+        "cause_class": "missing_bars",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "make the current scale undefined",
+        "gate": "vol_rel.upstream_undefined",
+        "meaning": "scale or seasonal input is unavailable",
+        "passed": true
+      },
+      {
+        "cause_class": "timestamps",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "supply 59 qualifying sessions",
+        "gate": "threshold.insufficient_history",
+        "meaning": "fewer than 60 qualifying prior sessions exist",
+        "passed": true
+      },
+      {
+        "cause_class": "aggregation",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "supply tied prior vol_rel values",
+        "gate": "threshold.degenerate_boundaries",
+        "meaning": "lower and upper frozen quantiles coincide",
+        "passed": true
+      },
+      {
+        "cause_class": "timestamps",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "request assignment on the 60th qualifying session",
+        "gate": "assignment.warmup",
+        "meaning": "defined current vol_rel lacks prior thresholds",
+        "passed": true
+      },
+      {
+        "cause_class": "missing_bars",
+        "classification": "EXPECTED_DIAGNOSTIC",
+        "failing_input": "remove the current anchor bar",
+        "gate": "assignment.upstream_undefined",
+        "meaning": "current vol_rel is unavailable",
+        "passed": true
+      },
+      {
+        "cause_class": "source_revision",
+        "classification": "FATAL",
+        "failing_input": "flip one source-column byte",
+        "gate": "store.hash_or_manifest",
+        "meaning": "sealed source bytes differ from their manifest",
+        "passed": true
+      },
+      {
+        "cause_class": "timestamps",
+        "classification": "FATAL",
+        "failing_input": "swap two adjacent labels",
+        "gate": "store.timestamp_order",
+        "meaning": "timestamps are not strictly increasing",
+        "passed": true
+      },
+      {
+        "cause_class": "duplicates",
+        "classification": "FATAL",
+        "failing_input": "duplicate one timestamp",
+        "gate": "store.duplicate_timestamp",
+        "meaning": "two rows share one UTC label",
+        "passed": true
+      },
+      {
+        "cause_class": "aggregation",
+        "classification": "FATAL",
+        "failing_input": "set high below close",
+        "gate": "store.ohlc_or_components",
+        "meaning": "bar aggregation invariants are corrupt",
+        "passed": true
+      },
+      {
+        "cause_class": "timestamps",
+        "classification": "FATAL",
+        "failing_input": "drop one arm's 10:00 anchor row",
+        "gate": "phase7.anchor_or_arm_support",
+        "meaning": "grid or arm supports differ",
+        "passed": true
+      },
+      {
+        "cause_class": "aggregation",
+        "classification": "FATAL",
+        "failing_input": "pair an ok return with gap_reset",
+        "gate": "phase7.impossible_status",
+        "meaning": "a closed status combination is inconsistent",
+        "passed": true
+      },
+      {
+        "cause_class": "source_revision",
+        "classification": "FATAL",
+        "failing_input": "change one frozen-input digest",
+        "gate": "artifact.protected_input",
+        "meaning": "a frozen or preregistered input changed",
+        "passed": true
+      },
+      {
+        "cause_class": "aggregation",
+        "classification": "FATAL",
+        "failing_input": "add one to the expected anchor row count",
+        "gate": "artifact.row_count",
+        "meaning": "an emitted table differs from declared cardinality",
+        "passed": true
+      },
+      {
+        "cause_class": "source_revision",
+        "classification": "FATAL",
+        "failing_input": "flip one written column byte",
+        "gate": "artifact.column_hash",
+        "meaning": "a written column no longer matches its manifest",
+        "passed": true
+      },
+      {
+        "cause_class": "source_revision",
+        "classification": "FATAL",
+        "failing_input": "remove the layer manifest",
+        "gate": "artifact.missing_manifest",
+        "meaning": "a staged layer is incomplete",
+        "passed": true
+      },
+      {
+        "cause_class": "source_revision",
+        "classification": "FATAL",
+        "failing_input": "place a file in the staging root",
+        "gate": "artifact.nonempty_root",
+        "meaning": "the immutable run target is already occupied",
+        "passed": true
+      },
+      {
+        "cause_class": "source_revision",
+        "classification": "FATAL",
+        "failing_input": "point output at the canonical store root",
+        "gate": "artifact.canonical_store_target",
+        "meaning": "an output target could overwrite the source store",
+        "passed": true
+      }
+    ],
+    "peak_memory_bytes": 1802035200,
+    "producing_code_sha256": "4aed08c7d8dfcf342fe18d0a1b07ac65ed09947dc3136a5a489c3e1fae8e7fa9",
+    "thresholds": {
+      "free_memory_preflight_bytes": 4294967296,
+      "peak_memory_ceiling_bytes": 6442450944,
+      "scientific_column_count": 110
+    },
+    "tolerances": {}
+  },
+  "ledger_format": "unit_o_ratification_certificate_v2",
+  "non_admissible_override": {
+    "audit_entry": {
+      "path": "mnq_lab/ledger/audit_entries/2026-08-09-phase7-unit-o-session-aware-v2-run-commit.json",
+      "sha256": "a7e742379999ce3ed31c682555926360ff052262e40f52ab984049e40d953c6a"
+    },
+    "basis": "The MNQ Atlas owner accepts the independently audited Phase 7 + Unit O session-aware v2 artifact solely as the bounded input to Phase 8 v2 diagnostic production, notwithstanding its NON-ADMISSIBLE DIAGNOSTIC ARTIFACTS stamp. This override is limited to the exact tree SHA-256 and run commit recorded in this certificate. It does not authorize trading use, publication, Phase 9, or any broader admissibility or scientific claim.",
+    "decider_identity": "MNQ Atlas owner - kyawz",
+    "decision_date": "2026-08-09",
+    "scope_run_commit": "6f1c506b462b8c4e6df93a4ffcc1be04cbbba76f",
+    "scope_tree_sha256": "dc7b3f607d28d2f2a1ccad1cc04340f48b03623a7448c8516734aa3c95e40a87",
+    "stamp": "NON-ADMISSIBLE DIAGNOSTIC ARTIFACTS"
+  },
+  "pinned_inputs": {
+    "REV6_FROZEN_SPEC.md": "70dae16c8b12fe26d38a7bfdabf0202066fe7149f790d0d2942279d9c3b8ff50",
+    "analysis_constants_v1.yaml": "1c95aa595c30c48b853303291a7dbaabceaf5b7331bca565a30863e8dcf138d4",
+    "canonical_source_store_manifest": "1cf6ec5ce7822ce1333984909b52d5c937e4ccc06e280030bcacda22620ffd73",
+    "docs/OUTCOME_LAYER_PREREGISTRATION.md": "4b5bc97fdfd4b0219c69e6a8adf76f18072091a9389700191d3ddcd10f8207c8",
+    "docs/PHASE8_PREREGISTRATION.md": "d07174ed0acc9e60ab6b255f4b33fc08141969c64e04f66e1e08c0aca98b4680"
+  },
+  "program_id": "mnq-atlas-001",
+  "ratification_profile": {
+    "path": "mnq_lab/ledger/ratification_profile_entries/2026-08-09-phase7-unit-o-session-aware-v2.json",
+    "sha256": "cde38f4afc03f24166462bede5d970aa30913283fc3a4f8bcef1a480466bf179"
+  },
+  "reproduction": {
+    "environment_fingerprint": {
+      "branch": "phase-7b-outcome-layer",
+      "commit": "f51482ac88167b1a66fea762c4b715fa95c2ce3a",
+      "dirty": false,
+      "machine": "AMD64",
+      "numpy": "2.2.3",
+      "pandas": "3.0.1",
+      "pipeline_version": "spine-1.0.0",
+      "platform": "Windows-10-10.0.19045-SP0",
+      "python": "3.13.2",
+      "vcs": "git"
+    },
+    "scientific_columns": [
+      {
+        "column": "anchor_scales.arm_id",
+        "relative_path": "phase7/anchor_scales/00_arm_id.npy",
+        "sha256": "de88616a4e6251b525d9843e61476dd28aa2fe99d39a9d84d5579fd8acda22e2"
+      },
+      {
+        "column": "anchor_scales.session_id",
+        "relative_path": "phase7/anchor_scales/01_session_id.npy",
+        "sha256": "22dea9315b837fafef04d15f78301792498547dba194ee52c14a3ee4e9ec387a"
+      },
+      {
+        "column": "anchor_scales.ts_event_ns",
+        "relative_path": "phase7/anchor_scales/02_ts_event_ns.npy",
+        "sha256": "3b0649a32af04e2d8c60ee99979c24a58be0b038c85bf05df868cfa4f5dbfdcc"
+      },
+      {
+        "column": "anchor_scales.tau_ns",
+        "relative_path": "phase7/anchor_scales/03_tau_ns.npy",
+        "sha256": "efbc9f982cb13a102981bcd4fa31fbc3be3edf2ba430f6e687e01ad24e80ca02"
+      },
+      {
+        "column": "anchor_scales.observation_bucket_ct",
+        "relative_path": "phase7/anchor_scales/04_observation_bucket_ct.npy",
+        "sha256": "831aa897ccd9208e0cb6add224a003019a14e108f95fd0632289012109647370"
+      },
+      {
+        "column": "anchor_scales.session_phase",
+        "relative_path": "phase7/anchor_scales/05_session_phase.npy",
+        "sha256": "6a1275056f3bbb02adb40b6c7737281a8bd85e8be6b89c9b88f6687ac7860ac5"
+      },
+      {
+        "column": "anchor_scales.symbol_code",
+        "relative_path": "phase7/anchor_scales/06_symbol_code.npy",
+        "sha256": "ed7f9b7728b4ae397a85eaf872b435ee5f75ad6efb08237c2df658b9e3a30957"
+      },
+      {
+        "column": "anchor_scales.observed_1m_components",
+        "relative_path": "phase7/anchor_scales/07_observed_1m_components.npy",
+        "sha256": "6d2025933f803038c07aa9ec88e81b958e4af68693cf86b31886179e66fd4163"
+      },
+      {
+        "column": "anchor_scales.component_coverage_rate",
+        "relative_path": "phase7/anchor_scales/08_component_coverage_rate.npy",
+        "sha256": "33b1014024e2dea109bdbaed65014b035091c58c269805da50cb9b266a3d4fab"
+      },
+      {
+        "column": "anchor_scales.anchor_status",
+        "relative_path": "phase7/anchor_scales/09_anchor_status.npy",
+        "sha256": "2651d987ece5097ce941757992abdae6114d1b52a195602b85ef6fd7a804c64c"
+      },
+      {
+        "column": "anchor_scales.return_status",
+        "relative_path": "phase7/anchor_scales/10_return_status.npy",
+        "sha256": "3d097625e53c440bed09292d9aa736ad0a67a4669c8ebbec23f279dc0b7053f8"
+      },
+      {
+        "column": "anchor_scales.return_missing_reason",
+        "relative_path": "phase7/anchor_scales/11_return_missing_reason.npy",
+        "sha256": "ee6a34471255ff6bc66cfd17e8545acafc881b07bdac87466ee2606940602a51"
+      },
+      {
+        "column": "anchor_scales.reset_reason",
+        "relative_path": "phase7/anchor_scales/12_reset_reason.npy",
+        "sha256": "c0269c3439e4326754f67cf85a23a6d0c93afbda2f3202c421b0345e0bbc4e8d"
+      },
+      {
+        "column": "anchor_scales.scheduled_break",
+        "relative_path": "phase7/anchor_scales/13_scheduled_break.npy",
+        "sha256": "002c3b15340a09af2034c690b2d2e9af8f689071f5fc545f0a0d610043aad18d"
+      },
+      {
+        "column": "anchor_scales.contiguous_return_count",
+        "relative_path": "phase7/anchor_scales/14_contiguous_return_count.npy",
+        "sha256": "5fcae0c93f6d18c25aad617c6b9a6eabef8ee37d4970fdefde09e2a216a7fdcd"
+      },
+      {
+        "column": "anchor_scales.scale_value",
+        "relative_path": "phase7/anchor_scales/15_scale_value.npy",
+        "sha256": "16b3b1b0b037172386f5974ca26f4ec5f60ea957b9700ea004b31078382476ec"
+      },
+      {
+        "column": "anchor_scales.scale_valid",
+        "relative_path": "phase7/anchor_scales/16_scale_valid.npy",
+        "sha256": "708d108517020d0ac4e4a7b9b3589e3f2182ac744937a5098950ae68b2fe9e74"
+      },
+      {
+        "column": "anchor_scales.ewma_status",
+        "relative_path": "phase7/anchor_scales/17_ewma_status.npy",
+        "sha256": "2b7ed7338cf042fbe86bff3f21bf243e131b19efb66948d84488d1c6f340c7eb"
+      },
+      {
+        "column": "anchor_scales.mad_status",
+        "relative_path": "phase7/anchor_scales/18_mad_status.npy",
+        "sha256": "00e6710be6256be571311de1c5c6060e5f56350c7cdf230be01a2978a3adb307"
+      },
+      {
+        "column": "assignments.arm_id",
+        "relative_path": "phase7/assignments/00_arm_id.npy",
+        "sha256": "73ac6992c46d92b6450ed11bae0bf1f68d6eaa65ae3804c6caf486a3cc348293"
+      },
+      {
+        "column": "assignments.session_id",
+        "relative_path": "phase7/assignments/01_session_id.npy",
+        "sha256": "2dbd56e10aa2d502a647664e7ce9b2e12161a5783191c3226a775c490f0b3a19"
+      },
+      {
+        "column": "assignments.ts_event_ns",
+        "relative_path": "phase7/assignments/02_ts_event_ns.npy",
+        "sha256": "09ae2ac15ee246ef0a909342e9d3b18945b64dfedc6f2718036f0ffac6f45b57"
+      },
+      {
+        "column": "assignments.tau_ns",
+        "relative_path": "phase7/assignments/03_tau_ns.npy",
+        "sha256": "ee68b76278da024c25d03a360fb56769c3f0de0bd2c5fd64605c48ba5924de92"
+      },
+      {
+        "column": "assignments.observation_bucket_ct",
+        "relative_path": "phase7/assignments/04_observation_bucket_ct.npy",
+        "sha256": "b67ef05c25090b2ef58c2c6ed251778c2648357fffd3bf6f4f6bf4c424b60e3e"
+      },
+      {
+        "column": "assignments.session_phase",
+        "relative_path": "phase7/assignments/05_session_phase.npy",
+        "sha256": "3b6a67eb75c72849daa39567b31759db1cfb51461216c501f2d96869bd2955f5"
+      },
+      {
+        "column": "assignments.scale_value",
+        "relative_path": "phase7/assignments/06_scale_value.npy",
+        "sha256": "9660b8127f345c66b2281a76d98f208fee0526ea327187f09a8a8511503874e3"
+      },
+      {
+        "column": "assignments.scale_valid",
+        "relative_path": "phase7/assignments/07_scale_valid.npy",
+        "sha256": "4f33431f571df2d46f94840a52f430ae81de7aefbd866ebed60e29259591a8e3"
+      },
+      {
+        "column": "assignments.seasonal_profile",
+        "relative_path": "phase7/assignments/08_seasonal_profile.npy",
+        "sha256": "e95e2921d4a3ba92e5bef031510786d05823b32dc2d7d88c96206683999dfc21"
+      },
+      {
+        "column": "assignments.seasonal_valid",
+        "relative_path": "phase7/assignments/09_seasonal_valid.npy",
+        "sha256": "eb5a1bad6f620cf47f695eabe7fd1d44d0e2f62a40b0050cff0c157493f43d80"
+      },
+      {
+        "column": "assignments.vol_rel",
+        "relative_path": "phase7/assignments/10_vol_rel.npy",
+        "sha256": "93da8078185311828646e703d902859aedab6750a26f79335fe8fc522385a117"
+      },
+      {
+        "column": "assignments.vol_rel_valid",
+        "relative_path": "phase7/assignments/11_vol_rel_valid.npy",
+        "sha256": "9770a940a4778fd4578093a34dd0e0ac0dabf40c44f61e8942f78363c0c1b70c"
+      },
+      {
+        "column": "assignments.vol_rel_status",
+        "relative_path": "phase7/assignments/12_vol_rel_status.npy",
+        "sha256": "bfcc0495ef8798bc7098ade2a027942a0023ad7f3bfc53ebae50a200b35d290c"
+      },
+      {
+        "column": "assignments.upstream_stage",
+        "relative_path": "phase7/assignments/13_upstream_stage.npy",
+        "sha256": "6cf67fd09065dbce6f82d253e7716d52946b6defa2c8c3ecc64931da2ae3982a"
+      },
+      {
+        "column": "assignments.lower_threshold",
+        "relative_path": "phase7/assignments/14_lower_threshold.npy",
+        "sha256": "e6f6a070bf1268d77e4e702c369886d3f2e859d06679a647148925a24a19e7bb"
+      },
+      {
+        "column": "assignments.upper_threshold",
+        "relative_path": "phase7/assignments/15_upper_threshold.npy",
+        "sha256": "0e206bcae9ba427211eaa82be591cd0a5ed52d754744c7c24c7ce4e37477c9ce"
+      },
+      {
+        "column": "assignments.threshold_status",
+        "relative_path": "phase7/assignments/16_threshold_status.npy",
+        "sha256": "e9d5ffdf4d0080694ab61ece887582c07b257d08592cb0a36a7c605f32f6b718"
+      },
+      {
+        "column": "assignments.category_code",
+        "relative_path": "phase7/assignments/17_category_code.npy",
+        "sha256": "f3d930410a769cf7cebd6cfc13bc9aa5c6608433207a6f1900a405e60694aa9f"
+      },
+      {
+        "column": "assignments.category_name",
+        "relative_path": "phase7/assignments/18_category_name.npy",
+        "sha256": "5da06a0ef584b6fcda0e96bb4d32939d4e07959c8df240b3793fa013396e6420"
+      },
+      {
+        "column": "assignments.assignment_status",
+        "relative_path": "phase7/assignments/19_assignment_status.npy",
+        "sha256": "6bc107588a01b6f9801feeca267ecb340b1f6815ce63c5ecfd14460abfcab219"
+      },
+      {
+        "column": "assignments.calendar_session_class",
+        "relative_path": "phase7/assignments/20_calendar_session_class.npy",
+        "sha256": "3477e851f4a656057e3fb810f5d241701e089bc0798a495ee1fb7ebb39750e71"
+      },
+      {
+        "column": "assignments.holiday_adjacent",
+        "relative_path": "phase7/assignments/21_holiday_adjacent.npy",
+        "sha256": "472c44491707c26b133d865a22daa72c867448bdd7ec7bc47616ed23aa936dbe"
+      },
+      {
+        "column": "assignments.data_quality_status",
+        "relative_path": "phase7/assignments/22_data_quality_status.npy",
+        "sha256": "c329d73afa51d5c2a9864852bbe604927d0a165443cb1753e6b01b77a2e5504d"
+      },
+      {
+        "column": "seasonal_profiles.arm_id",
+        "relative_path": "phase7/seasonal_profiles/00_arm_id.npy",
+        "sha256": "de88616a4e6251b525d9843e61476dd28aa2fe99d39a9d84d5579fd8acda22e2"
+      },
+      {
+        "column": "seasonal_profiles.session_id",
+        "relative_path": "phase7/seasonal_profiles/01_session_id.npy",
+        "sha256": "22dea9315b837fafef04d15f78301792498547dba194ee52c14a3ee4e9ec387a"
+      },
+      {
+        "column": "seasonal_profiles.observation_bucket_ct",
+        "relative_path": "phase7/seasonal_profiles/02_observation_bucket_ct.npy",
+        "sha256": "831aa897ccd9208e0cb6add224a003019a14e108f95fd0632289012109647370"
+      },
+      {
+        "column": "seasonal_profiles.session_phase",
+        "relative_path": "phase7/seasonal_profiles/03_session_phase.npy",
+        "sha256": "6a1275056f3bbb02adb40b6c7737281a8bd85e8be6b89c9b88f6687ac7860ac5"
+      },
+      {
+        "column": "seasonal_profiles.qualifying_prior_sessions",
+        "relative_path": "phase7/seasonal_profiles/04_qualifying_prior_sessions.npy",
+        "sha256": "f65a28847a361447cf2f98b34fb730a21de48ddee52f458df5816b4a895d0a4e"
+      },
+      {
+        "column": "seasonal_profiles.bucket_n",
+        "relative_path": "phase7/seasonal_profiles/05_bucket_n.npy",
+        "sha256": "f0b00de7b475b7719293f869ef10e5c4ab720a9ea6d15bdc53942cc66d118952"
+      },
+      {
+        "column": "seasonal_profiles.bucket_median",
+        "relative_path": "phase7/seasonal_profiles/06_bucket_median.npy",
+        "sha256": "7dfc26370f17643618aadc8f87258d29da130514b895d4b2d25ffc19f50be884"
+      },
+      {
+        "column": "seasonal_profiles.bucket_median_valid",
+        "relative_path": "phase7/seasonal_profiles/07_bucket_median_valid.npy",
+        "sha256": "d2545b24fa5c7074c698a92018c6ead754f304839c6a77d153cfa16437f1098c"
+      },
+      {
+        "column": "seasonal_profiles.phase_session_median",
+        "relative_path": "phase7/seasonal_profiles/08_phase_session_median.npy",
+        "sha256": "a8aa0bd4e1bb2bce1856d70fb5a1567a867bece1c7659d51cf3af47ed1dbce5c"
+      },
+      {
+        "column": "seasonal_profiles.phase_session_median_valid",
+        "relative_path": "phase7/seasonal_profiles/09_phase_session_median_valid.npy",
+        "sha256": "d2545b24fa5c7074c698a92018c6ead754f304839c6a77d153cfa16437f1098c"
+      },
+      {
+        "column": "seasonal_profiles.shrink_weight",
+        "relative_path": "phase7/seasonal_profiles/10_shrink_weight.npy",
+        "sha256": "d9e2d8d5cea3fe6f7b8bac089bff77b3c5bb2825fcbdf8f77d97f15fd00a668e"
+      },
+      {
+        "column": "seasonal_profiles.seasonal_profile",
+        "relative_path": "phase7/seasonal_profiles/11_seasonal_profile.npy",
+        "sha256": "7dfc26370f17643618aadc8f87258d29da130514b895d4b2d25ffc19f50be884"
+      },
+      {
+        "column": "seasonal_profiles.seasonal_valid",
+        "relative_path": "phase7/seasonal_profiles/12_seasonal_valid.npy",
+        "sha256": "d2545b24fa5c7074c698a92018c6ead754f304839c6a77d153cfa16437f1098c"
+      },
+      {
+        "column": "seasonal_profiles.seasonal_status",
+        "relative_path": "phase7/seasonal_profiles/13_seasonal_status.npy",
+        "sha256": "0eed98298b88ee73d3f4a646699c18345b93ebff3fcc06c6371a4062248674e3"
+      },
+      {
+        "column": "seasonal_profiles.calendar_version",
+        "relative_path": "phase7/seasonal_profiles/14_calendar_version.npy",
+        "sha256": "076d48f56cfcb2dae7b92ab97d467b0b6347986fdce75b6f9a82ae6212ce26d1"
+      },
+      {
+        "column": "seasonal_profiles.calendar_sha256",
+        "relative_path": "phase7/seasonal_profiles/15_calendar_sha256.npy",
+        "sha256": "f3fe8287b14b2f1b326f66c158ea11bb337e649879f46d35354731afc0796590"
+      },
+      {
+        "column": "state_validity.metric",
+        "relative_path": "phase7/state_validity/00_metric.npy",
+        "sha256": "e830c502ebd6931e3f05e4bedc8a42f4375a04f1f77ac5a702c5778687dca104"
+      },
+      {
+        "column": "state_validity.arm_id",
+        "relative_path": "phase7/state_validity/01_arm_id.npy",
+        "sha256": "7be7d1da0983b84b0dc87c7cb7b420958832008ca37d49637b53bcd4b048c93d"
+      },
+      {
+        "column": "state_validity.session_phase",
+        "relative_path": "phase7/state_validity/02_session_phase.npy",
+        "sha256": "8359f7bc0d12749e3d2d624a4a7ea77d01518637358cacd80c76f783348e0c9e"
+      },
+      {
+        "column": "state_validity.detail",
+        "relative_path": "phase7/state_validity/03_detail.npy",
+        "sha256": "19fc329677a115d82d3141bddcfc119ba9b1900155f68ba9d7cb0b192a0a7db6"
+      },
+      {
+        "column": "state_validity.comparison_arm_id",
+        "relative_path": "phase7/state_validity/04_comparison_arm_id.npy",
+        "sha256": "798a8848aaa92e29c71e274870e3b8096e98191bbb8a7bcec11c6db5e27176e3"
+      },
+      {
+        "column": "state_validity.category_code",
+        "relative_path": "phase7/state_validity/05_category_code.npy",
+        "sha256": "83c2c4ccb7d2a3d45c25d799c1964a197d7dfc95ee41b8d5162583807149c919"
+      },
+      {
+        "column": "state_validity.category_to_code",
+        "relative_path": "phase7/state_validity/06_category_to_code.npy",
+        "sha256": "8fdf4fdf36484b7395dcfc4043b29cf0d154f40c9194edb67686025d56e7716b"
+      },
+      {
+        "column": "state_validity.session_id",
+        "relative_path": "phase7/state_validity/07_session_id.npy",
+        "sha256": "98b3708e9e6a070bda1e744ea3d4ed526b29128cd87e6184edb44bcf1a72a092"
+      },
+      {
+        "column": "state_validity.year",
+        "relative_path": "phase7/state_validity/08_year.npy",
+        "sha256": "f671895d5d7ffce241259452207c53514cdcb4516fc4140fdfc5b64b2b2cd19d"
+      },
+      {
+        "column": "state_validity.horizon",
+        "relative_path": "phase7/state_validity/09_horizon.npy",
+        "sha256": "de6aa2dbc86ae024ffd1f86dd5f24db2dd3b648d0a5a7888f80e0644427c739f"
+      },
+      {
+        "column": "state_validity.count",
+        "relative_path": "phase7/state_validity/10_count.npy",
+        "sha256": "b14f7c7ed792ecb94237be2dd050e5983b91e44fa0f8a032c67c9553fc5fdf99"
+      },
+      {
+        "column": "state_validity.denominator",
+        "relative_path": "phase7/state_validity/11_denominator.npy",
+        "sha256": "f5e6b99820c2c6f339a70cfbec3db83ca126ff086499a532aa8e4f3b831bc370"
+      },
+      {
+        "column": "state_validity.value",
+        "relative_path": "phase7/state_validity/12_value.npy",
+        "sha256": "c622df1d379b5adee5dbf66958171e43d5981bcebd141eba1f09f7fb9345273c"
+      },
+      {
+        "column": "state_validity.value_valid",
+        "relative_path": "phase7/state_validity/13_value_valid.npy",
+        "sha256": "163519c7265b6db2810f97d3b0bf86bbffd10d26aa36b1dd771e362cfb72922a"
+      },
+      {
+        "column": "state_validity.status",
+        "relative_path": "phase7/state_validity/14_status.npy",
+        "sha256": "167b7af80cf036d36420aa25d4342538b5a96ac6f646cadf5e512cf2c96a563b"
+      },
+      {
+        "column": "thresholds.arm_id",
+        "relative_path": "phase7/thresholds/00_arm_id.npy",
+        "sha256": "795e1ed589759661b5c5a107e4082d2ae2ed167061ab3e2b775f9e68182e6788"
+      },
+      {
+        "column": "thresholds.session_id",
+        "relative_path": "phase7/thresholds/01_session_id.npy",
+        "sha256": "2f7f75d0d8fe6744a1e1c40bfbd550c90a804dfe748b620151e9bcbed9b267b5"
+      },
+      {
+        "column": "thresholds.session_phase",
+        "relative_path": "phase7/thresholds/02_session_phase.npy",
+        "sha256": "178154a101087e67e970c4f90b543ea4f8bf02406aedf7e0b5827178a5127af2"
+      },
+      {
+        "column": "thresholds.history_kind",
+        "relative_path": "phase7/thresholds/03_history_kind.npy",
+        "sha256": "82e0c70134bec1ce13fb53e854560afee5d19db79d0491edfd32a5b654c11e82"
+      },
+      {
+        "column": "thresholds.qualifying_prior_sessions",
+        "relative_path": "phase7/thresholds/04_qualifying_prior_sessions.npy",
+        "sha256": "7525ba1108765f46ab33ea6fa22a9e3bd639fe5bb0d7fefb42d3ce62793b318f"
+      },
+      {
+        "column": "thresholds.lower_probability",
+        "relative_path": "phase7/thresholds/05_lower_probability.npy",
+        "sha256": "ca48d9d16b97c2767af886fb1dd563c8b3105329997368597948cb94f4ae8f84"
+      },
+      {
+        "column": "thresholds.upper_probability",
+        "relative_path": "phase7/thresholds/06_upper_probability.npy",
+        "sha256": "a5def7b08bb97c0f3158816b3b71759ce09fd665515b0a1771eb9bc66f3a0d14"
+      },
+      {
+        "column": "thresholds.lower_threshold",
+        "relative_path": "phase7/thresholds/07_lower_threshold.npy",
+        "sha256": "dd2761481e84dd993f0434cb78d9bd31771b60fe3ccbadf12cc86b9ff1efb20c"
+      },
+      {
+        "column": "thresholds.upper_threshold",
+        "relative_path": "phase7/thresholds/08_upper_threshold.npy",
+        "sha256": "aa14df2a5c91857634a51b5fb24d80ad926ac02c282175cec9f03dfa0d6945ff"
+      },
+      {
+        "column": "thresholds.threshold_valid",
+        "relative_path": "phase7/thresholds/09_threshold_valid.npy",
+        "sha256": "94a2455eccfcf590ac26a9174574b4e9e23bc43c8f8401b4c3dd0eb16a9d531f"
+      },
+      {
+        "column": "thresholds.threshold_status",
+        "relative_path": "phase7/thresholds/10_threshold_status.npy",
+        "sha256": "9faaf9b6a6a0f243b64d39026b10988994321ac8bdb4f1f650b72c7e61ce81e9"
+      },
+      {
+        "column": "unit_o.estimand",
+        "relative_path": "unit_o/00_estimand.npy",
+        "sha256": "b2132103abfc199425d0bd51ae953aa3a58628c52c180be16d33fa2000f2bc9b"
+      },
+      {
+        "column": "unit_o.session_id",
+        "relative_path": "unit_o/01_session_id.npy",
+        "sha256": "d63bc0bdaa41ba5f10cc75ec7565fcee54bf5e0ac57f40256af03213616fb031"
+      },
+      {
+        "column": "unit_o.ts_event_ns",
+        "relative_path": "unit_o/02_ts_event_ns.npy",
+        "sha256": "4f8e704c008eaaae87717cea6d2b07a98cde726f8693d4df90b4c2b37beea271"
+      },
+      {
+        "column": "unit_o.tau_ns",
+        "relative_path": "unit_o/03_tau_ns.npy",
+        "sha256": "87d9cff64c18839a1e33c52dd7a8c15602952e527ae26f09b1f9607670bd1455"
+      },
+      {
+        "column": "unit_o.observation_time_ct",
+        "relative_path": "unit_o/04_observation_time_ct.npy",
+        "sha256": "c5645b088625ed345153b02309ff7982a6cc81e1bd5c5605cb856715f257c912"
+      },
+      {
+        "column": "unit_o.session_phase",
+        "relative_path": "unit_o/05_session_phase.npy",
+        "sha256": "27f00e180010625086c7705c6d7d8a10e6cea1b99c20a2bec755f402eae81eef"
+      },
+      {
+        "column": "unit_o.horizon_minutes",
+        "relative_path": "unit_o/06_horizon_minutes.npy",
+        "sha256": "ed0087daafd7239030bf46614c70e87a84ab639448654dc46e92d068c613364b"
+      },
+      {
+        "column": "unit_o.anchor_symbol_code",
+        "relative_path": "unit_o/07_anchor_symbol_code.npy",
+        "sha256": "655322ec133807e50a48fdc044052f19a4fa70f19e3807c9a4e7eeb3da2bb949"
+      },
+      {
+        "column": "unit_o.anchor_close_ticks",
+        "relative_path": "unit_o/08_anchor_close_ticks.npy",
+        "sha256": "424b903f32a6b262c65cfbc62961ce4e036def17ff30ed6bb12391f76012b09c"
+      },
+      {
+        "column": "unit_o.anchor_close_valid",
+        "relative_path": "unit_o/09_anchor_close_valid.npy",
+        "sha256": "a260aac45e06fb4f8f5af223c1572192b5443004f99993b1833a66e26968679c"
+      },
+      {
+        "column": "unit_o.n_required_bars",
+        "relative_path": "unit_o/10_n_required_bars.npy",
+        "sha256": "b290036541124baba50228ce0902e1126505c95d8d0f623fba1870d5f29efc70"
+      },
+      {
+        "column": "unit_o.n_present_bars",
+        "relative_path": "unit_o/11_n_present_bars.npy",
+        "sha256": "bfc83865104a7f51980c8139daddc5bb130e3123641284e365e44346b3d8807a"
+      },
+      {
+        "column": "unit_o.n_fully_labeled_bars",
+        "relative_path": "unit_o/12_n_fully_labeled_bars.npy",
+        "sha256": "5248ff76aa5f71f8870ac2570c5fe40cd069834c13a0e2fa5495da22e297ed3b"
+      },
+      {
+        "column": "unit_o.window_fits_rth",
+        "relative_path": "unit_o/13_window_fits_rth.npy",
+        "sha256": "e9d706d250adaa104532a0628cb94be3fdcfdf7e186429737873f4ee171cdfdd"
+      },
+      {
+        "column": "unit_o.common_support",
+        "relative_path": "unit_o/14_common_support.npy",
+        "sha256": "75b72b67a8357084aeea88dbe6319901248b6e1f3ae0375ee2a31c0e437f1c57"
+      },
+      {
+        "column": "unit_o.outcome_status",
+        "relative_path": "unit_o/15_outcome_status.npy",
+        "sha256": "6f23e54bd7df2d6266d0ba57b41259266e3651836fca96e340fa81096125839a"
+      },
+      {
+        "column": "unit_o.structural_unavailability_reason",
+        "relative_path": "unit_o/16_structural_unavailability_reason.npy",
+        "sha256": "a02ae6fef5b35ba3ecf202a203a761275d1ca9412359e75e59ddd57a174fa3ed"
+      },
+      {
+        "column": "unit_o.path_timestamp_missing",
+        "relative_path": "unit_o/17_path_timestamp_missing.npy",
+        "sha256": "405693c5b853294a22283bdeb48b121fb327be3dbdddf33e80b88d0d4ae234ab"
+      },
+      {
+        "column": "unit_o.path_session_mismatch",
+        "relative_path": "unit_o/18_path_session_mismatch.npy",
+        "sha256": "cfbfc80b3681b3cee08696803139da7c14c738fe62639132bae2959553697942"
+      },
+      {
+        "column": "unit_o.path_symbol_mismatch",
+        "relative_path": "unit_o/19_path_symbol_mismatch.npy",
+        "sha256": "cfbfc80b3681b3cee08696803139da7c14c738fe62639132bae2959553697942"
+      },
+      {
+        "column": "unit_o.insufficient_components",
+        "relative_path": "unit_o/20_insufficient_components.npy",
+        "sha256": "cff862cd273e1c4e72302acd733f477b2049e2e2039088be23c583c8beefc80b"
+      },
+      {
+        "column": "unit_o.downward_excursion_ticks",
+        "relative_path": "unit_o/21_downward_excursion_ticks.npy",
+        "sha256": "99181f207f4879c1dbeac149da5470c5869541e3013fa4294084deec5dc9d076"
+      },
+      {
+        "column": "unit_o.upward_excursion_ticks",
+        "relative_path": "unit_o/22_upward_excursion_ticks.npy",
+        "sha256": "53f8ee6e555ba14a25ec78b01a529525fdb346cbd1b0e75b5dd0cb21495c6441"
+      },
+      {
+        "column": "unit_o.signed_downward_extreme_ticks",
+        "relative_path": "unit_o/23_signed_downward_extreme_ticks.npy",
+        "sha256": "dc94f695b808dd2d9263177321789673290c046c88608bda22410b82719ae098"
+      },
+      {
+        "column": "unit_o.signed_upward_extreme_ticks",
+        "relative_path": "unit_o/24_signed_upward_extreme_ticks.npy",
+        "sha256": "15b805b77c98d53ac5e91481306e5c98f5357f764073d4547c6fbe856114903e"
+      },
+      {
+        "column": "unit_o.outcome_valid",
+        "relative_path": "unit_o/25_outcome_valid.npy",
+        "sha256": "92f4c38791f78e40aff1374941a6f7b4edb6cc4021d2ee66337016189037a0d7"
+      }
+    ],
+    "tree_path": "data/exploration/derived/.archive-phase7-unit-o-session-aware-v2-f51482a",
+    "tree_sha256": "05c61a59e67d07ac1289a74aca8504da9c4f16b301181a20552846022f1c80bc"
+  },
+  "run_commit": "6f1c506b462b8c4e6df93a4ffcc1be04cbbba76f",
+  "run_completion_record": {
+    "path": "mnq_lab/ledger/run_completion_entries/2026-08-09-phase7-unit-o-session-aware-v2.json",
+    "sha256": "50ed45f793e73abfb999556d0993af26cefe649f751b0ceee928de9dbe73943d"
+  },
+  "scientific_column_protocol": "npy-file-sha256-v1",
+  "scientific_columns": [
+    {
+      "column": "anchor_scales.arm_id",
+      "relative_path": "phase7/anchor_scales/00_arm_id.npy",
+      "sha256": "de88616a4e6251b525d9843e61476dd28aa2fe99d39a9d84d5579fd8acda22e2"
+    },
+    {
+      "column": "anchor_scales.session_id",
+      "relative_path": "phase7/anchor_scales/01_session_id.npy",
+      "sha256": "22dea9315b837fafef04d15f78301792498547dba194ee52c14a3ee4e9ec387a"
+    },
+    {
+      "column": "anchor_scales.ts_event_ns",
+      "relative_path": "phase7/anchor_scales/02_ts_event_ns.npy",
+      "sha256": "3b0649a32af04e2d8c60ee99979c24a58be0b038c85bf05df868cfa4f5dbfdcc"
+    },
+    {
+      "column": "anchor_scales.tau_ns",
+      "relative_path": "phase7/anchor_scales/03_tau_ns.npy",
+      "sha256": "efbc9f982cb13a102981bcd4fa31fbc3be3edf2ba430f6e687e01ad24e80ca02"
+    },
+    {
+      "column": "anchor_scales.observation_bucket_ct",
+      "relative_path": "phase7/anchor_scales/04_observation_bucket_ct.npy",
+      "sha256": "831aa897ccd9208e0cb6add224a003019a14e108f95fd0632289012109647370"
+    },
+    {
+      "column": "anchor_scales.session_phase",
+      "relative_path": "phase7/anchor_scales/05_session_phase.npy",
+      "sha256": "6a1275056f3bbb02adb40b6c7737281a8bd85e8be6b89c9b88f6687ac7860ac5"
+    },
+    {
+      "column": "anchor_scales.symbol_code",
+      "relative_path": "phase7/anchor_scales/06_symbol_code.npy",
+      "sha256": "ed7f9b7728b4ae397a85eaf872b435ee5f75ad6efb08237c2df658b9e3a30957"
+    },
+    {
+      "column": "anchor_scales.observed_1m_components",
+      "relative_path": "phase7/anchor_scales/07_observed_1m_components.npy",
+      "sha256": "6d2025933f803038c07aa9ec88e81b958e4af68693cf86b31886179e66fd4163"
+    },
+    {
+      "column": "anchor_scales.component_coverage_rate",
+      "relative_path": "phase7/anchor_scales/08_component_coverage_rate.npy",
+      "sha256": "33b1014024e2dea109bdbaed65014b035091c58c269805da50cb9b266a3d4fab"
+    },
+    {
+      "column": "anchor_scales.anchor_status",
+      "relative_path": "phase7/anchor_scales/09_anchor_status.npy",
+      "sha256": "2651d987ece5097ce941757992abdae6114d1b52a195602b85ef6fd7a804c64c"
+    },
+    {
+      "column": "anchor_scales.return_status",
+      "relative_path": "phase7/anchor_scales/10_return_status.npy",
+      "sha256": "3d097625e53c440bed09292d9aa736ad0a67a4669c8ebbec23f279dc0b7053f8"
+    },
+    {
+      "column": "anchor_scales.return_missing_reason",
+      "relative_path": "phase7/anchor_scales/11_return_missing_reason.npy",
+      "sha256": "ee6a34471255ff6bc66cfd17e8545acafc881b07bdac87466ee2606940602a51"
+    },
+    {
+      "column": "anchor_scales.reset_reason",
+      "relative_path": "phase7/anchor_scales/12_reset_reason.npy",
+      "sha256": "c0269c3439e4326754f67cf85a23a6d0c93afbda2f3202c421b0345e0bbc4e8d"
+    },
+    {
+      "column": "anchor_scales.scheduled_break",
+      "relative_path": "phase7/anchor_scales/13_scheduled_break.npy",
+      "sha256": "002c3b15340a09af2034c690b2d2e9af8f689071f5fc545f0a0d610043aad18d"
+    },
+    {
+      "column": "anchor_scales.contiguous_return_count",
+      "relative_path": "phase7/anchor_scales/14_contiguous_return_count.npy",
+      "sha256": "5fcae0c93f6d18c25aad617c6b9a6eabef8ee37d4970fdefde09e2a216a7fdcd"
+    },
+    {
+      "column": "anchor_scales.scale_value",
+      "relative_path": "phase7/anchor_scales/15_scale_value.npy",
+      "sha256": "16b3b1b0b037172386f5974ca26f4ec5f60ea957b9700ea004b31078382476ec"
+    },
+    {
+      "column": "anchor_scales.scale_valid",
+      "relative_path": "phase7/anchor_scales/16_scale_valid.npy",
+      "sha256": "708d108517020d0ac4e4a7b9b3589e3f2182ac744937a5098950ae68b2fe9e74"
+    },
+    {
+      "column": "anchor_scales.ewma_status",
+      "relative_path": "phase7/anchor_scales/17_ewma_status.npy",
+      "sha256": "2b7ed7338cf042fbe86bff3f21bf243e131b19efb66948d84488d1c6f340c7eb"
+    },
+    {
+      "column": "anchor_scales.mad_status",
+      "relative_path": "phase7/anchor_scales/18_mad_status.npy",
+      "sha256": "00e6710be6256be571311de1c5c6060e5f56350c7cdf230be01a2978a3adb307"
+    },
+    {
+      "column": "assignments.arm_id",
+      "relative_path": "phase7/assignments/00_arm_id.npy",
+      "sha256": "73ac6992c46d92b6450ed11bae0bf1f68d6eaa65ae3804c6caf486a3cc348293"
+    },
+    {
+      "column": "assignments.session_id",
+      "relative_path": "phase7/assignments/01_session_id.npy",
+      "sha256": "2dbd56e10aa2d502a647664e7ce9b2e12161a5783191c3226a775c490f0b3a19"
+    },
+    {
+      "column": "assignments.ts_event_ns",
+      "relative_path": "phase7/assignments/02_ts_event_ns.npy",
+      "sha256": "09ae2ac15ee246ef0a909342e9d3b18945b64dfedc6f2718036f0ffac6f45b57"
+    },
+    {
+      "column": "assignments.tau_ns",
+      "relative_path": "phase7/assignments/03_tau_ns.npy",
+      "sha256": "ee68b76278da024c25d03a360fb56769c3f0de0bd2c5fd64605c48ba5924de92"
+    },
+    {
+      "column": "assignments.observation_bucket_ct",
+      "relative_path": "phase7/assignments/04_observation_bucket_ct.npy",
+      "sha256": "b67ef05c25090b2ef58c2c6ed251778c2648357fffd3bf6f4f6bf4c424b60e3e"
+    },
+    {
+      "column": "assignments.session_phase",
+      "relative_path": "phase7/assignments/05_session_phase.npy",
+      "sha256": "3b6a67eb75c72849daa39567b31759db1cfb51461216c501f2d96869bd2955f5"
+    },
+    {
+      "column": "assignments.scale_value",
+      "relative_path": "phase7/assignments/06_scale_value.npy",
+      "sha256": "9660b8127f345c66b2281a76d98f208fee0526ea327187f09a8a8511503874e3"
+    },
+    {
+      "column": "assignments.scale_valid",
+      "relative_path": "phase7/assignments/07_scale_valid.npy",
+      "sha256": "4f33431f571df2d46f94840a52f430ae81de7aefbd866ebed60e29259591a8e3"
+    },
+    {
+      "column": "assignments.seasonal_profile",
+      "relative_path": "phase7/assignments/08_seasonal_profile.npy",
+      "sha256": "e95e2921d4a3ba92e5bef031510786d05823b32dc2d7d88c96206683999dfc21"
+    },
+    {
+      "column": "assignments.seasonal_valid",
+      "relative_path": "phase7/assignments/09_seasonal_valid.npy",
+      "sha256": "eb5a1bad6f620cf47f695eabe7fd1d44d0e2f62a40b0050cff0c157493f43d80"
+    },
+    {
+      "column": "assignments.vol_rel",
+      "relative_path": "phase7/assignments/10_vol_rel.npy",
+      "sha256": "93da8078185311828646e703d902859aedab6750a26f79335fe8fc522385a117"
+    },
+    {
+      "column": "assignments.vol_rel_valid",
+      "relative_path": "phase7/assignments/11_vol_rel_valid.npy",
+      "sha256": "9770a940a4778fd4578093a34dd0e0ac0dabf40c44f61e8942f78363c0c1b70c"
+    },
+    {
+      "column": "assignments.vol_rel_status",
+      "relative_path": "phase7/assignments/12_vol_rel_status.npy",
+      "sha256": "bfcc0495ef8798bc7098ade2a027942a0023ad7f3bfc53ebae50a200b35d290c"
+    },
+    {
+      "column": "assignments.upstream_stage",
+      "relative_path": "phase7/assignments/13_upstream_stage.npy",
+      "sha256": "6cf67fd09065dbce6f82d253e7716d52946b6defa2c8c3ecc64931da2ae3982a"
+    },
+    {
+      "column": "assignments.lower_threshold",
+      "relative_path": "phase7/assignments/14_lower_threshold.npy",
+      "sha256": "e6f6a070bf1268d77e4e702c369886d3f2e859d06679a647148925a24a19e7bb"
+    },
+    {
+      "column": "assignments.upper_threshold",
+      "relative_path": "phase7/assignments/15_upper_threshold.npy",
+      "sha256": "0e206bcae9ba427211eaa82be591cd0a5ed52d754744c7c24c7ce4e37477c9ce"
+    },
+    {
+      "column": "assignments.threshold_status",
+      "relative_path": "phase7/assignments/16_threshold_status.npy",
+      "sha256": "e9d5ffdf4d0080694ab61ece887582c07b257d08592cb0a36a7c605f32f6b718"
+    },
+    {
+      "column": "assignments.category_code",
+      "relative_path": "phase7/assignments/17_category_code.npy",
+      "sha256": "f3d930410a769cf7cebd6cfc13bc9aa5c6608433207a6f1900a405e60694aa9f"
+    },
+    {
+      "column": "assignments.category_name",
+      "relative_path": "phase7/assignments/18_category_name.npy",
+      "sha256": "5da06a0ef584b6fcda0e96bb4d32939d4e07959c8df240b3793fa013396e6420"
+    },
+    {
+      "column": "assignments.assignment_status",
+      "relative_path": "phase7/assignments/19_assignment_status.npy",
+      "sha256": "6bc107588a01b6f9801feeca267ecb340b1f6815ce63c5ecfd14460abfcab219"
+    },
+    {
+      "column": "assignments.calendar_session_class",
+      "relative_path": "phase7/assignments/20_calendar_session_class.npy",
+      "sha256": "3477e851f4a656057e3fb810f5d241701e089bc0798a495ee1fb7ebb39750e71"
+    },
+    {
+      "column": "assignments.holiday_adjacent",
+      "relative_path": "phase7/assignments/21_holiday_adjacent.npy",
+      "sha256": "472c44491707c26b133d865a22daa72c867448bdd7ec7bc47616ed23aa936dbe"
+    },
+    {
+      "column": "assignments.data_quality_status",
+      "relative_path": "phase7/assignments/22_data_quality_status.npy",
+      "sha256": "c329d73afa51d5c2a9864852bbe604927d0a165443cb1753e6b01b77a2e5504d"
+    },
+    {
+      "column": "seasonal_profiles.arm_id",
+      "relative_path": "phase7/seasonal_profiles/00_arm_id.npy",
+      "sha256": "de88616a4e6251b525d9843e61476dd28aa2fe99d39a9d84d5579fd8acda22e2"
+    },
+    {
+      "column": "seasonal_profiles.session_id",
+      "relative_path": "phase7/seasonal_profiles/01_session_id.npy",
+      "sha256": "22dea9315b837fafef04d15f78301792498547dba194ee52c14a3ee4e9ec387a"
+    },
+    {
+      "column": "seasonal_profiles.observation_bucket_ct",
+      "relative_path": "phase7/seasonal_profiles/02_observation_bucket_ct.npy",
+      "sha256": "831aa897ccd9208e0cb6add224a003019a14e108f95fd0632289012109647370"
+    },
+    {
+      "column": "seasonal_profiles.session_phase",
+      "relative_path": "phase7/seasonal_profiles/03_session_phase.npy",
+      "sha256": "6a1275056f3bbb02adb40b6c7737281a8bd85e8be6b89c9b88f6687ac7860ac5"
+    },
+    {
+      "column": "seasonal_profiles.qualifying_prior_sessions",
+      "relative_path": "phase7/seasonal_profiles/04_qualifying_prior_sessions.npy",
+      "sha256": "f65a28847a361447cf2f98b34fb730a21de48ddee52f458df5816b4a895d0a4e"
+    },
+    {
+      "column": "seasonal_profiles.bucket_n",
+      "relative_path": "phase7/seasonal_profiles/05_bucket_n.npy",
+      "sha256": "f0b00de7b475b7719293f869ef10e5c4ab720a9ea6d15bdc53942cc66d118952"
+    },
+    {
+      "column": "seasonal_profiles.bucket_median",
+      "relative_path": "phase7/seasonal_profiles/06_bucket_median.npy",
+      "sha256": "7dfc26370f17643618aadc8f87258d29da130514b895d4b2d25ffc19f50be884"
+    },
+    {
+      "column": "seasonal_profiles.bucket_median_valid",
+      "relative_path": "phase7/seasonal_profiles/07_bucket_median_valid.npy",
+      "sha256": "d2545b24fa5c7074c698a92018c6ead754f304839c6a77d153cfa16437f1098c"
+    },
+    {
+      "column": "seasonal_profiles.phase_session_median",
+      "relative_path": "phase7/seasonal_profiles/08_phase_session_median.npy",
+      "sha256": "a8aa0bd4e1bb2bce1856d70fb5a1567a867bece1c7659d51cf3af47ed1dbce5c"
+    },
+    {
+      "column": "seasonal_profiles.phase_session_median_valid",
+      "relative_path": "phase7/seasonal_profiles/09_phase_session_median_valid.npy",
+      "sha256": "d2545b24fa5c7074c698a92018c6ead754f304839c6a77d153cfa16437f1098c"
+    },
+    {
+      "column": "seasonal_profiles.shrink_weight",
+      "relative_path": "phase7/seasonal_profiles/10_shrink_weight.npy",
+      "sha256": "d9e2d8d5cea3fe6f7b8bac089bff77b3c5bb2825fcbdf8f77d97f15fd00a668e"
+    },
+    {
+      "column": "seasonal_profiles.seasonal_profile",
+      "relative_path": "phase7/seasonal_profiles/11_seasonal_profile.npy",
+      "sha256": "7dfc26370f17643618aadc8f87258d29da130514b895d4b2d25ffc19f50be884"
+    },
+    {
+      "column": "seasonal_profiles.seasonal_valid",
+      "relative_path": "phase7/seasonal_profiles/12_seasonal_valid.npy",
+      "sha256": "d2545b24fa5c7074c698a92018c6ead754f304839c6a77d153cfa16437f1098c"
+    },
+    {
+      "column": "seasonal_profiles.seasonal_status",
+      "relative_path": "phase7/seasonal_profiles/13_seasonal_status.npy",
+      "sha256": "0eed98298b88ee73d3f4a646699c18345b93ebff3fcc06c6371a4062248674e3"
+    },
+    {
+      "column": "seasonal_profiles.calendar_version",
+      "relative_path": "phase7/seasonal_profiles/14_calendar_version.npy",
+      "sha256": "076d48f56cfcb2dae7b92ab97d467b0b6347986fdce75b6f9a82ae6212ce26d1"
+    },
+    {
+      "column": "seasonal_profiles.calendar_sha256",
+      "relative_path": "phase7/seasonal_profiles/15_calendar_sha256.npy",
+      "sha256": "f3fe8287b14b2f1b326f66c158ea11bb337e649879f46d35354731afc0796590"
+    },
+    {
+      "column": "state_validity.metric",
+      "relative_path": "phase7/state_validity/00_metric.npy",
+      "sha256": "e830c502ebd6931e3f05e4bedc8a42f4375a04f1f77ac5a702c5778687dca104"
+    },
+    {
+      "column": "state_validity.arm_id",
+      "relative_path": "phase7/state_validity/01_arm_id.npy",
+      "sha256": "7be7d1da0983b84b0dc87c7cb7b420958832008ca37d49637b53bcd4b048c93d"
+    },
+    {
+      "column": "state_validity.session_phase",
+      "relative_path": "phase7/state_validity/02_session_phase.npy",
+      "sha256": "8359f7bc0d12749e3d2d624a4a7ea77d01518637358cacd80c76f783348e0c9e"
+    },
+    {
+      "column": "state_validity.detail",
+      "relative_path": "phase7/state_validity/03_detail.npy",
+      "sha256": "19fc329677a115d82d3141bddcfc119ba9b1900155f68ba9d7cb0b192a0a7db6"
+    },
+    {
+      "column": "state_validity.comparison_arm_id",
+      "relative_path": "phase7/state_validity/04_comparison_arm_id.npy",
+      "sha256": "798a8848aaa92e29c71e274870e3b8096e98191bbb8a7bcec11c6db5e27176e3"
+    },
+    {
+      "column": "state_validity.category_code",
+      "relative_path": "phase7/state_validity/05_category_code.npy",
+      "sha256": "83c2c4ccb7d2a3d45c25d799c1964a197d7dfc95ee41b8d5162583807149c919"
+    },
+    {
+      "column": "state_validity.category_to_code",
+      "relative_path": "phase7/state_validity/06_category_to_code.npy",
+      "sha256": "8fdf4fdf36484b7395dcfc4043b29cf0d154f40c9194edb67686025d56e7716b"
+    },
+    {
+      "column": "state_validity.session_id",
+      "relative_path": "phase7/state_validity/07_session_id.npy",
+      "sha256": "98b3708e9e6a070bda1e744ea3d4ed526b29128cd87e6184edb44bcf1a72a092"
+    },
+    {
+      "column": "state_validity.year",
+      "relative_path": "phase7/state_validity/08_year.npy",
+      "sha256": "f671895d5d7ffce241259452207c53514cdcb4516fc4140fdfc5b64b2b2cd19d"
+    },
+    {
+      "column": "state_validity.horizon",
+      "relative_path": "phase7/state_validity/09_horizon.npy",
+      "sha256": "de6aa2dbc86ae024ffd1f86dd5f24db2dd3b648d0a5a7888f80e0644427c739f"
+    },
+    {
+      "column": "state_validity.count",
+      "relative_path": "phase7/state_validity/10_count.npy",
+      "sha256": "b14f7c7ed792ecb94237be2dd050e5983b91e44fa0f8a032c67c9553fc5fdf99"
+    },
+    {
+      "column": "state_validity.denominator",
+      "relative_path": "phase7/state_validity/11_denominator.npy",
+      "sha256": "f5e6b99820c2c6f339a70cfbec3db83ca126ff086499a532aa8e4f3b831bc370"
+    },
+    {
+      "column": "state_validity.value",
+      "relative_path": "phase7/state_validity/12_value.npy",
+      "sha256": "c622df1d379b5adee5dbf66958171e43d5981bcebd141eba1f09f7fb9345273c"
+    },
+    {
+      "column": "state_validity.value_valid",
+      "relative_path": "phase7/state_validity/13_value_valid.npy",
+      "sha256": "163519c7265b6db2810f97d3b0bf86bbffd10d26aa36b1dd771e362cfb72922a"
+    },
+    {
+      "column": "state_validity.status",
+      "relative_path": "phase7/state_validity/14_status.npy",
+      "sha256": "167b7af80cf036d36420aa25d4342538b5a96ac6f646cadf5e512cf2c96a563b"
+    },
+    {
+      "column": "thresholds.arm_id",
+      "relative_path": "phase7/thresholds/00_arm_id.npy",
+      "sha256": "795e1ed589759661b5c5a107e4082d2ae2ed167061ab3e2b775f9e68182e6788"
+    },
+    {
+      "column": "thresholds.session_id",
+      "relative_path": "phase7/thresholds/01_session_id.npy",
+      "sha256": "2f7f75d0d8fe6744a1e1c40bfbd550c90a804dfe748b620151e9bcbed9b267b5"
+    },
+    {
+      "column": "thresholds.session_phase",
+      "relative_path": "phase7/thresholds/02_session_phase.npy",
+      "sha256": "178154a101087e67e970c4f90b543ea4f8bf02406aedf7e0b5827178a5127af2"
+    },
+    {
+      "column": "thresholds.history_kind",
+      "relative_path": "phase7/thresholds/03_history_kind.npy",
+      "sha256": "82e0c70134bec1ce13fb53e854560afee5d19db79d0491edfd32a5b654c11e82"
+    },
+    {
+      "column": "thresholds.qualifying_prior_sessions",
+      "relative_path": "phase7/thresholds/04_qualifying_prior_sessions.npy",
+      "sha256": "7525ba1108765f46ab33ea6fa22a9e3bd639fe5bb0d7fefb42d3ce62793b318f"
+    },
+    {
+      "column": "thresholds.lower_probability",
+      "relative_path": "phase7/thresholds/05_lower_probability.npy",
+      "sha256": "ca48d9d16b97c2767af886fb1dd563c8b3105329997368597948cb94f4ae8f84"
+    },
+    {
+      "column": "thresholds.upper_probability",
+      "relative_path": "phase7/thresholds/06_upper_probability.npy",
+      "sha256": "a5def7b08bb97c0f3158816b3b71759ce09fd665515b0a1771eb9bc66f3a0d14"
+    },
+    {
+      "column": "thresholds.lower_threshold",
+      "relative_path": "phase7/thresholds/07_lower_threshold.npy",
+      "sha256": "dd2761481e84dd993f0434cb78d9bd31771b60fe3ccbadf12cc86b9ff1efb20c"
+    },
+    {
+      "column": "thresholds.upper_threshold",
+      "relative_path": "phase7/thresholds/08_upper_threshold.npy",
+      "sha256": "aa14df2a5c91857634a51b5fb24d80ad926ac02c282175cec9f03dfa0d6945ff"
+    },
+    {
+      "column": "thresholds.threshold_valid",
+      "relative_path": "phase7/thresholds/09_threshold_valid.npy",
+      "sha256": "94a2455eccfcf590ac26a9174574b4e9e23bc43c8f8401b4c3dd0eb16a9d531f"
+    },
+    {
+      "column": "thresholds.threshold_status",
+      "relative_path": "phase7/thresholds/10_threshold_status.npy",
+      "sha256": "9faaf9b6a6a0f243b64d39026b10988994321ac8bdb4f1f650b72c7e61ce81e9"
+    },
+    {
+      "column": "unit_o.estimand",
+      "relative_path": "unit_o/00_estimand.npy",
+      "sha256": "b2132103abfc199425d0bd51ae953aa3a58628c52c180be16d33fa2000f2bc9b"
+    },
+    {
+      "column": "unit_o.session_id",
+      "relative_path": "unit_o/01_session_id.npy",
+      "sha256": "d63bc0bdaa41ba5f10cc75ec7565fcee54bf5e0ac57f40256af03213616fb031"
+    },
+    {
+      "column": "unit_o.ts_event_ns",
+      "relative_path": "unit_o/02_ts_event_ns.npy",
+      "sha256": "4f8e704c008eaaae87717cea6d2b07a98cde726f8693d4df90b4c2b37beea271"
+    },
+    {
+      "column": "unit_o.tau_ns",
+      "relative_path": "unit_o/03_tau_ns.npy",
+      "sha256": "87d9cff64c18839a1e33c52dd7a8c15602952e527ae26f09b1f9607670bd1455"
+    },
+    {
+      "column": "unit_o.observation_time_ct",
+      "relative_path": "unit_o/04_observation_time_ct.npy",
+      "sha256": "c5645b088625ed345153b02309ff7982a6cc81e1bd5c5605cb856715f257c912"
+    },
+    {
+      "column": "unit_o.session_phase",
+      "relative_path": "unit_o/05_session_phase.npy",
+      "sha256": "27f00e180010625086c7705c6d7d8a10e6cea1b99c20a2bec755f402eae81eef"
+    },
+    {
+      "column": "unit_o.horizon_minutes",
+      "relative_path": "unit_o/06_horizon_minutes.npy",
+      "sha256": "ed0087daafd7239030bf46614c70e87a84ab639448654dc46e92d068c613364b"
+    },
+    {
+      "column": "unit_o.anchor_symbol_code",
+      "relative_path": "unit_o/07_anchor_symbol_code.npy",
+      "sha256": "655322ec133807e50a48fdc044052f19a4fa70f19e3807c9a4e7eeb3da2bb949"
+    },
+    {
+      "column": "unit_o.anchor_close_ticks",
+      "relative_path": "unit_o/08_anchor_close_ticks.npy",
+      "sha256": "424b903f32a6b262c65cfbc62961ce4e036def17ff30ed6bb12391f76012b09c"
+    },
+    {
+      "column": "unit_o.anchor_close_valid",
+      "relative_path": "unit_o/09_anchor_close_valid.npy",
+      "sha256": "a260aac45e06fb4f8f5af223c1572192b5443004f99993b1833a66e26968679c"
+    },
+    {
+      "column": "unit_o.n_required_bars",
+      "relative_path": "unit_o/10_n_required_bars.npy",
+      "sha256": "b290036541124baba50228ce0902e1126505c95d8d0f623fba1870d5f29efc70"
+    },
+    {
+      "column": "unit_o.n_present_bars",
+      "relative_path": "unit_o/11_n_present_bars.npy",
+      "sha256": "bfc83865104a7f51980c8139daddc5bb130e3123641284e365e44346b3d8807a"
+    },
+    {
+      "column": "unit_o.n_fully_labeled_bars",
+      "relative_path": "unit_o/12_n_fully_labeled_bars.npy",
+      "sha256": "5248ff76aa5f71f8870ac2570c5fe40cd069834c13a0e2fa5495da22e297ed3b"
+    },
+    {
+      "column": "unit_o.window_fits_rth",
+      "relative_path": "unit_o/13_window_fits_rth.npy",
+      "sha256": "e9d706d250adaa104532a0628cb94be3fdcfdf7e186429737873f4ee171cdfdd"
+    },
+    {
+      "column": "unit_o.common_support",
+      "relative_path": "unit_o/14_common_support.npy",
+      "sha256": "75b72b67a8357084aeea88dbe6319901248b6e1f3ae0375ee2a31c0e437f1c57"
+    },
+    {
+      "column": "unit_o.outcome_status",
+      "relative_path": "unit_o/15_outcome_status.npy",
+      "sha256": "6f23e54bd7df2d6266d0ba57b41259266e3651836fca96e340fa81096125839a"
+    },
+    {
+      "column": "unit_o.structural_unavailability_reason",
+      "relative_path": "unit_o/16_structural_unavailability_reason.npy",
+      "sha256": "a02ae6fef5b35ba3ecf202a203a761275d1ca9412359e75e59ddd57a174fa3ed"
+    },
+    {
+      "column": "unit_o.path_timestamp_missing",
+      "relative_path": "unit_o/17_path_timestamp_missing.npy",
+      "sha256": "405693c5b853294a22283bdeb48b121fb327be3dbdddf33e80b88d0d4ae234ab"
+    },
+    {
+      "column": "unit_o.path_session_mismatch",
+      "relative_path": "unit_o/18_path_session_mismatch.npy",
+      "sha256": "cfbfc80b3681b3cee08696803139da7c14c738fe62639132bae2959553697942"
+    },
+    {
+      "column": "unit_o.path_symbol_mismatch",
+      "relative_path": "unit_o/19_path_symbol_mismatch.npy",
+      "sha256": "cfbfc80b3681b3cee08696803139da7c14c738fe62639132bae2959553697942"
+    },
+    {
+      "column": "unit_o.insufficient_components",
+      "relative_path": "unit_o/20_insufficient_components.npy",
+      "sha256": "cff862cd273e1c4e72302acd733f477b2049e2e2039088be23c583c8beefc80b"
+    },
+    {
+      "column": "unit_o.downward_excursion_ticks",
+      "relative_path": "unit_o/21_downward_excursion_ticks.npy",
+      "sha256": "99181f207f4879c1dbeac149da5470c5869541e3013fa4294084deec5dc9d076"
+    },
+    {
+      "column": "unit_o.upward_excursion_ticks",
+      "relative_path": "unit_o/22_upward_excursion_ticks.npy",
+      "sha256": "53f8ee6e555ba14a25ec78b01a529525fdb346cbd1b0e75b5dd0cb21495c6441"
+    },
+    {
+      "column": "unit_o.signed_downward_extreme_ticks",
+      "relative_path": "unit_o/23_signed_downward_extreme_ticks.npy",
+      "sha256": "dc94f695b808dd2d9263177321789673290c046c88608bda22410b82719ae098"
+    },
+    {
+      "column": "unit_o.signed_upward_extreme_ticks",
+      "relative_path": "unit_o/24_signed_upward_extreme_ticks.npy",
+      "sha256": "15b805b77c98d53ac5e91481306e5c98f5357f764073d4547c6fbe856114903e"
+    },
+    {
+      "column": "unit_o.outcome_valid",
+      "relative_path": "unit_o/25_outcome_valid.npy",
+      "sha256": "92f4c38791f78e40aff1374941a6f7b4edb6cc4021d2ee66337016189037a0d7"
+    }
+  ],
+  "tree": {
+    "path": "data/exploration/derived/phase7-unit-o-session-aware-v2",
+    "run_manifest_sha256": "456e3ea04532606042af9b505a6918f659c2ccffbbf1ceb66b8fde9dd809851d",
+    "tree_sha256": "dc7b3f607d28d2f2a1ccad1cc04340f48b03623a7448c8516734aa3c95e40a87",
+    "unit_o_manifest_sha256": "21781d099c9a9562311c57d157f42447033772f77ac2fd62a595d5f66a6517ae"
+  },
+  "unit": "Unit O"
+}

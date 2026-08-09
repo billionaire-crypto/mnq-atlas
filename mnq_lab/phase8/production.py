@@ -442,12 +442,44 @@ class _ContrastInvariantCache:
     """Process-local reuse of values invariant across declared contrast rows."""
 
     def __init__(self) -> None:
-        self._quarters: dict[tuple[str, int], np.ndarray] = {}
+        self._session_entries: list[dict[str, Any]] = []
+        self._session_entry_by_slice: dict[tuple[str, int], dict[str, Any]] = {}
+        self._sessions_by_slice: dict[tuple[str, int], np.ndarray] = {}
         self._ordinary: dict[str, np.ndarray] = {}
         self._completed: dict[tuple[tuple[str, int], str], np.ndarray] = {}
         self._eligible: dict[tuple[tuple[str, int], str, str], np.ndarray] = {}
-        self._calendar_years: dict[tuple[str, int], np.ndarray] = {}
         self._verified: set[tuple[tuple[str, int], str]] = set()
+
+    def _session_entry(
+        self, slice_key: tuple[str, int], sessions: np.ndarray,
+    ) -> dict[str, Any]:
+        if slice_key in self._session_entry_by_slice:
+            if self._sessions_by_slice[slice_key] is not sessions:
+                raise SpineError(
+                    "Phase 8 invariant cache slice sessions changed"
+                )
+            return self._session_entry_by_slice[slice_key]
+        for entry in self._session_entries:
+            source = entry["sessions"]
+            if (
+                sessions is source
+                or (
+                    sessions.dtype == source.dtype
+                    and sessions.shape == source.shape
+                    and np.array_equal(sessions, source)
+                )
+            ):
+                break
+        else:
+            entry = {
+                "sessions": sessions,
+                "quarters": None,
+                "calendar_years": None,
+            }
+            self._session_entries.append(entry)
+        self._sessions_by_slice[slice_key] = sessions
+        self._session_entry_by_slice[slice_key] = entry
+        return entry
 
     def verify(
         self, slice_key: tuple[str, int], sessions: np.ndarray,
@@ -461,9 +493,10 @@ class _ContrastInvariantCache:
     def quarters(
         self, slice_key: tuple[str, int], sessions: np.ndarray,
     ) -> np.ndarray:
-        if slice_key not in self._quarters:
-            self._quarters[slice_key] = _readonly(_year_quarter(sessions))
-        return self._quarters[slice_key]
+        entry = self._session_entry(slice_key, sessions)
+        if entry["quarters"] is None:
+            entry["quarters"] = _readonly(_year_quarter(sessions))
+        return entry["quarters"]
 
     def ordinary(self, arm: ArmFrame) -> np.ndarray:
         if arm.arm_id not in self._ordinary:
@@ -497,11 +530,12 @@ class _ContrastInvariantCache:
     def calendar_years(
         self, slice_key: tuple[str, int], sessions: np.ndarray,
     ) -> np.ndarray:
-        if slice_key not in self._calendar_years:
-            self._calendar_years[slice_key] = _readonly(
+        entry = self._session_entry(slice_key, sessions)
+        if entry["calendar_years"] is None:
+            entry["calendar_years"] = _readonly(
                 _calendar_years(sessions), dtype=np.int64
             )
-        return self._calendar_years[slice_key]
+        return entry["calendar_years"]
 
 
 def _contrast_partition(

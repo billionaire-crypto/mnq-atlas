@@ -278,6 +278,9 @@ def test_contrast_invariant_cache_hoists_every_complete_identity(monkeypatch):
     quarters_a = cache.quarters(slice_a, sessions_a)
     assert cache.quarters(slice_a, sessions_a) is quarters_a
     quarters_b = cache.quarters(slice_b, sessions_b)
+    slice_a_copy = ("path-copy", 15)
+    sessions_a_copy = sessions_a.copy()
+    quarters_a_copy = cache.quarters(slice_a_copy, sessions_a_copy)
     ordinary_a = cache.ordinary(arm_a)
     assert cache.ordinary(arm_a) is ordinary_a
     ordinary_b = cache.ordinary(arm_b)
@@ -292,11 +295,14 @@ def test_contrast_invariant_cache_hoists_every_complete_identity(monkeypatch):
     years_a = cache.calendar_years(slice_a, sessions_a)
     assert cache.calendar_years(slice_a, sessions_a) is years_a
     years_b = cache.calendar_years(slice_b, sessions_b)
+    years_a_copy = cache.calendar_years(slice_a_copy, sessions_a_copy)
 
     assert counters == {
         "quarters": 2, "ordinary": 2, "completed": 2,
         "eligible": 2, "years": 2, "verify": 2,
     }
+    assert quarters_a_copy is quarters_a
+    assert years_a_copy is years_a
     expected = (
         real["quarters"](sessions_a), real["quarters"](sessions_b),
         real["ordinary"](arm_a), real["ordinary"](arm_b),
@@ -328,5 +334,62 @@ def test_contrast_invariant_cache_hoists_every_complete_identity(monkeypatch):
         sessions=np.asarray([20200102, 20200104], dtype=np.int32),
     )
     # A verification set keyed only by slice would silently skip this check.
-    with pytest.raises(production.SpineError, match="assignment keys differ"):
-        cache.verify(slice_a, sessions_a, timestamps, mismatched)
+    for _ in range(2):
+        with pytest.raises(production.SpineError, match="assignment keys differ"):
+            cache.verify(slice_a, sessions_a, timestamps, mismatched)
+    assert counters["verify"] == 4
+
+
+def test_contrast_invariant_cache_rejects_changed_sessions_for_bound_slice():
+    cache = production._ContrastInvariantCache()
+    slice_key = ("path", 15)
+    sessions = np.asarray([20200102, 20200103], dtype=np.int32)
+    cache.quarters(slice_key, sessions)
+
+    with pytest.raises(production.SpineError, match="slice sessions changed"):
+        cache.quarters(slice_key, sessions.copy())
+
+
+def test_contrast_invariant_cache_deduplicates_equal_session_content(
+    monkeypatch,
+):
+    calls = {"quarters": 0, "years": 0}
+    real_quarters = production._year_quarter
+    real_years = production._calendar_years
+
+    def quarters(session_ids):
+        calls["quarters"] += 1
+        return real_quarters(session_ids)
+
+    def years(session_ids):
+        calls["years"] += 1
+        return real_years(session_ids)
+
+    monkeypatch.setattr(production, "_year_quarter", quarters)
+    monkeypatch.setattr(production, "_calendar_years", years)
+    cache = production._ContrastInvariantCache()
+    canonical = np.asarray([20200102, 20200403], dtype=np.int32)
+    sessions = [canonical.copy() for _ in range(6)]
+    slice_keys = [(f"path-{index}", 15) for index in range(6)]
+
+    quarter_results = [
+        cache.quarters(key, value)
+        for key, value in zip(slice_keys, sessions, strict=True)
+    ]
+    year_results = [
+        cache.calendar_years(key, value)
+        for key, value in zip(slice_keys, sessions, strict=True)
+    ]
+
+    assert calls == {"quarters": 1, "years": 1}
+    assert all(value is quarter_results[0] for value in quarter_results)
+    assert all(value is year_results[0] for value in year_results)
+    assert quarter_results[0].flags.writeable is False
+    assert year_results[0].flags.writeable is False
+
+    different = np.asarray([20210102, 20210403], dtype=np.int32)
+    different_quarters = cache.quarters(("different", 15), different)
+    different_years = cache.calendar_years(("different", 15), different)
+    assert calls == {"quarters": 2, "years": 2}
+    assert not np.array_equal(quarter_results[0], different_quarters)
+    assert not np.array_equal(year_results[0], different_years)

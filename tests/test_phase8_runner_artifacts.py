@@ -180,6 +180,34 @@ def test_aggregate_memory_gate_measures_parent_plus_descendants():
     assert gate.peak_bytes == 600
 
 
+def test_memory_sample_duration_observation_is_persisted_in_manifest(tmp_path):
+    gate = AggregateMemoryGate(
+        ceiling_bytes=500, launch_minimum_available_bytes=700,
+        aggregate_sampler=lambda: 100, available_sampler=lambda: 700,
+        monitor_interval_seconds=7.0,
+    )
+    gate.sample()
+    operating = {
+        "workers": 1, "aggregate_peak_memory_bytes": gate.peak_bytes,
+        **gate.sampling_observation(),
+    }
+    manifest = write_phase8_artifacts(
+        tmp_path / "memory-evidence", _tables(),
+        provenance={"synthetic": True}, operating=operating,
+        limitations=("synthetic memory evidence only",),
+    )
+
+    recorded = manifest["operating"]
+    assert recorded["aggregate_memory_sample_interval_seconds"] == 7.0
+    assert recorded["aggregate_memory_sample_count"] == 1
+    assert recorded["aggregate_memory_sample_total_seconds"] >= 0.0
+    assert recorded["aggregate_memory_sample_mean_seconds"] >= 0.0
+    assert recorded["aggregate_memory_sample_max_seconds"] >= 0.0
+    # Negative control: recording the module default instead of the enforced
+    # custom cadence would write 30.0 here.
+    assert recorded["aggregate_memory_sample_interval_seconds"] != 30.0
+
+
 def test_launch_preflight_fails_before_any_chunk_computation(tmp_path):
     called = False
 

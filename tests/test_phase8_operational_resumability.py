@@ -161,16 +161,137 @@ def test_default_pss_sampling_interval_avoids_continuous_page_table_walks():
         available_sampler=lambda: 700,
     )
     assert DEFAULT_AGGREGATE_MEMORY_SAMPLE_INTERVAL_SECONDS == 30.0
-    assert gate._monitor_interval_seconds == 30.0
+    assert gate.monitor_interval_seconds == 30.0
     gate.start()
     try:
         time.sleep(0.7)
         assert samples == 1
     finally:
         gate.stop()
-    assert gate._thread is None
+    assert gate.monitor_running is False
     # Negative control: the former 0.5-second cadence would have sampled at
     # least twice during the same witness window.
+
+
+def test_memory_samples_are_serialized_across_threads():
+    entered = threading.Event()
+    release = threading.Event()
+    state_lock = threading.Lock()
+    calls = 0
+    active = 0
+    max_active = 0
+
+    def sample():
+        nonlocal calls, active, max_active
+        with state_lock:
+            calls += 1
+            active += 1
+            max_active = max(max_active, active)
+            position = calls
+        if position == 1:
+            entered.set()
+            assert release.wait(2)
+        with state_lock:
+            active -= 1
+        return 100
+
+    gate = AggregateMemoryGate(
+        ceiling_bytes=500, launch_minimum_available_bytes=700,
+        aggregate_sampler=sample, available_sampler=lambda: 700,
+    )
+    first = threading.Thread(target=gate.sample)
+    second = threading.Thread(target=gate.sample)
+    first.start()
+    assert entered.wait(1)
+    second.start()
+    time.sleep(0.05)
+    assert calls == 1
+    release.set()
+    first.join(1)
+    second.join(1)
+    assert not first.is_alive() and not second.is_alive()
+    assert calls == 2
+    assert max_active == 1
+    assert gate.peak_bytes == 100
+
+
+def test_memory_sample_durations_drive_evidence_and_stop_timeout(monkeypatch):
+    clock = iter((10.0, 10.25, 20.0, 20.75))
+    monkeypatch.setattr(runner_module.time, "monotonic", lambda: next(clock))
+    gate = AggregateMemoryGate(
+        ceiling_bytes=500, launch_minimum_available_bytes=700,
+        aggregate_sampler=lambda: 100, available_sampler=lambda: 700,
+        monitor_interval_seconds=7.0, hard_stop_grace_seconds=5.0,
+    )
+
+    assert gate.sample() == 100
+    assert gate.sample() == 100
+    assert gate.sample_count == 2
+    assert gate.sample_total_seconds == 1.0
+    assert gate.sample_max_seconds == 0.75
+    assert gate.sample_mean_seconds == 0.5
+    assert gate.stop_join_timeout_seconds == 13.5
+    assert gate.sampling_observation() == {
+        "aggregate_memory_sample_interval_seconds": 7.0,
+        "aggregate_memory_sample_count": 2,
+        "aggregate_memory_sample_total_seconds": 1.0,
+        "aggregate_memory_sample_mean_seconds": 0.5,
+        "aggregate_memory_sample_max_seconds": 0.75,
+    }
+    # Negative controls: a constant-backed interval would report 30.0, and
+    # the abb55fb timeout ignored the observed 0.75-second measurement.
+    assert gate.monitor_interval_seconds != 30.0
+    assert gate.stop_join_timeout_seconds != 12.0
+
+
+def test_memory_monitor_rejects_double_start_and_allows_clean_restart():
+    gate = AggregateMemoryGate(
+        ceiling_bytes=500, launch_minimum_available_bytes=700,
+        aggregate_sampler=lambda: 100, available_sampler=lambda: 700,
+    )
+    gate.start()
+    assert gate.monitor_running is True
+    with pytest.raises(SpineError, match="already running"):
+        gate.start()
+    gate.stop()
+    assert gate.monitor_running is False
+    gate.start()
+    assert gate.monitor_running is True
+    gate.stop()
+    assert gate.monitor_running is False
+    assert gate.sample_count == 2
+
+
+def test_memory_monitor_fails_closed_when_sampler_outlives_measured_timeout():
+    entered = threading.Event()
+    release = threading.Event()
+    calls = 0
+
+    def sample():
+        nonlocal calls
+        calls += 1
+        if calls > 1:
+            entered.set()
+            assert release.wait(5)
+        return 100
+
+    gate = AggregateMemoryGate(
+        ceiling_bytes=500, launch_minimum_available_bytes=700,
+        aggregate_sampler=sample, available_sampler=lambda: 700,
+        monitor_interval_seconds=0.01, hard_stop_grace_seconds=0.01,
+    )
+    gate.start()
+    assert entered.wait(1)
+    try:
+        with pytest.raises(SpineError, match="monitor did not stop"):
+            gate.stop()
+        assert gate.monitor_running is True
+    finally:
+        release.set()
+    deadline = time.monotonic() + 1.0
+    while gate.monitor_running and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert gate.monitor_running is False
 
 
 def test_memory_monitor_interrupts_and_arms_hard_stop_on_breach():

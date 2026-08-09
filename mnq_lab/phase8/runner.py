@@ -761,6 +761,57 @@ class AggregateMemoryGate:
         self._failure: SpineError | None = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._sample_lock = threading.Lock()
+        self._sample_count = 0
+        self._sample_total_seconds = 0.0
+        self._sample_max_seconds = 0.0
+
+    @property
+    def monitor_interval_seconds(self) -> float:
+        return self._monitor_interval_seconds
+
+    @property
+    def monitor_running(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
+
+    @property
+    def sample_count(self) -> int:
+        return self._sample_count
+
+    @property
+    def sample_total_seconds(self) -> float:
+        return self._sample_total_seconds
+
+    @property
+    def sample_max_seconds(self) -> float:
+        return self._sample_max_seconds
+
+    @property
+    def sample_mean_seconds(self) -> float:
+        if self._sample_count == 0:
+            return 0.0
+        return self._sample_total_seconds / self._sample_count
+
+    @property
+    def stop_join_timeout_seconds(self) -> float:
+        observed = self._sample_max_seconds if self._sample_count else 2.0
+        return max(
+            2.0,
+            self._monitor_interval_seconds
+            + self._hard_stop_grace_seconds
+            + (2.0 * observed),
+        )
+
+    def sampling_observation(self) -> dict[str, int | float]:
+        return {
+            "aggregate_memory_sample_interval_seconds": (
+                self.monitor_interval_seconds
+            ),
+            "aggregate_memory_sample_count": self.sample_count,
+            "aggregate_memory_sample_total_seconds": self.sample_total_seconds,
+            "aggregate_memory_sample_mean_seconds": self.sample_mean_seconds,
+            "aggregate_memory_sample_max_seconds": self.sample_max_seconds,
+        }
 
     def preflight(self) -> int:
         available = int(self._available_sampler())
@@ -772,32 +823,52 @@ class AggregateMemoryGate:
         return available
 
     def sample(self) -> int:
-        try:
-            sampled = self._aggregate_sampler()
-        except SpineError:
-            raise
-        except Exception as exc:
-            raise SpineError("aggregate Phase 8 memory measurement failed") from exc
-        if isinstance(sampled, MemoryMeasurement):
-            current = sampled.bytes
-            if self.metric is None:
-                self.metric, self.source = sampled.metric, sampled.source
-            elif (self.metric, self.source) != (sampled.metric, sampled.source):
-                raise SpineError("aggregate Phase 8 memory source changed during execution")
-        elif isinstance(sampled, bool) or not isinstance(sampled, int) or sampled <= 0:
-            raise SpineError("aggregate Phase 8 memory measurement is invalid")
-        else:
-            current = sampled
-            if self.metric is None:
-                self.metric, self.source = "injected_aggregate_bytes", "injected sampler"
-        self.current_bytes = current
-        self.peak_bytes = max(self.peak_bytes, current)
-        if current > self.ceiling_bytes:
-            self._breach = max(self._breach or 0, current)
-            raise SpineError(
-                f"aggregate Phase 8 memory {current} exceeded ceiling {self.ceiling_bytes}"
-            )
-        return current
+        with self._sample_lock:
+            started = time.monotonic()
+            try:
+                try:
+                    sampled = self._aggregate_sampler()
+                except SpineError:
+                    raise
+                except Exception as exc:
+                    raise SpineError(
+                        "aggregate Phase 8 memory measurement failed"
+                    ) from exc
+            finally:
+                elapsed = max(0.0, time.monotonic() - started)
+                self._sample_count += 1
+                self._sample_total_seconds += elapsed
+                self._sample_max_seconds = max(
+                    self._sample_max_seconds, elapsed
+                )
+            if isinstance(sampled, MemoryMeasurement):
+                current = sampled.bytes
+                if self.metric is None:
+                    self.metric, self.source = sampled.metric, sampled.source
+                elif (self.metric, self.source) != (sampled.metric, sampled.source):
+                    raise SpineError(
+                        "aggregate Phase 8 memory source changed during execution"
+                    )
+            elif (
+                isinstance(sampled, bool)
+                or not isinstance(sampled, int)
+                or sampled <= 0
+            ):
+                raise SpineError("aggregate Phase 8 memory measurement is invalid")
+            else:
+                current = sampled
+                if self.metric is None:
+                    self.metric = "injected_aggregate_bytes"
+                    self.source = "injected sampler"
+            self.current_bytes = current
+            self.peak_bytes = max(self.peak_bytes, current)
+            if current > self.ceiling_bytes:
+                self._breach = max(self._breach or 0, current)
+                raise SpineError(
+                    f"aggregate Phase 8 memory {current} exceeded ceiling "
+                    f"{self.ceiling_bytes}"
+                )
+            return current
 
     def _monitor(self) -> None:
         while not self._stop.wait(self._monitor_interval_seconds):
@@ -861,12 +932,11 @@ class AggregateMemoryGate:
 
     def stop(self) -> None:
         self._stop.set()
+        monitor_did_not_stop = False
         if self._thread is not None:
-            self._thread.join(timeout=max(
-                2.0,
-                self._monitor_interval_seconds + self._hard_stop_grace_seconds,
-            ))
+            self._thread.join(timeout=self.stop_join_timeout_seconds)
             if self._thread.is_alive():
+                monitor_did_not_stop = True
                 self._failure = SpineError(
                     "aggregate Phase 8 memory monitor did not stop"
                 )
@@ -876,6 +946,8 @@ class AggregateMemoryGate:
             raise SpineError(
                 f"aggregate Phase 8 memory {self._breach} exceeded ceiling {self.ceiling_bytes}"
             )
+        if monitor_did_not_stop:
+            raise SpineError("aggregate Phase 8 memory monitor did not stop")
         if self._failure is not None:
             raise SpineError("aggregate Phase 8 memory monitor failed closed") from self._failure
 
@@ -1183,9 +1255,7 @@ def run_phase8(
         "process_start_method": config.process_start_method,
         "aggregate_memory_ceiling_bytes": config.aggregate_memory_ceiling_bytes,
         "aggregate_memory_ceiling_basis": dict(AGGREGATE_MEMORY_CEILING_BASIS),
-        "aggregate_memory_sample_interval_seconds": (
-            DEFAULT_AGGREGATE_MEMORY_SAMPLE_INTERVAL_SECONDS
-        ),
+        **gate.sampling_observation(),
         "launch_minimum_available_bytes": config.launch_minimum_available_bytes,
         "aggregate_peak_memory_bytes": gate.peak_bytes,
         "aggregate_memory_metric": gate.metric,

@@ -595,6 +595,53 @@ def test_v2_audit_entry_records_the_audited_commit_tree_and_closed_verdict():
     )
 
 
+def _v2_run_commit_audit_entry() -> dict:
+    entries = ratification.load_audit_entries(V2_AUDIT_ENTRY.parent)
+    return next(
+        entry
+        for entry in entries
+        if entry["entry_id"]
+        == "2026-08-09-phase7-unit-o-session-aware-v2-run-commit-audit"
+    )
+
+
+def test_v2_run_commit_entry_carries_the_scope_c7_actually_compares():
+    """C7 matches audited_commit against the certificate run_commit.
+
+    The producing commit is 6f1c506; the closeout commit cfe5223a is a
+    different question. Both entries stand -- this one is the C7-usable scope.
+    """
+    entry = _v2_run_commit_audit_entry()
+
+    assert entry["verdict"] == "CLOSED"
+    assert entry["unit"] == UNIT_NAME
+    assert entry["audited_commit"] == "6f1c506b462b8c4e6df93a4ffcc1be04cbbba76f"
+    assert entry["audited_tree"] == _v2_audit_entry()["audited_tree"]
+    assert (
+        entry["auditor_identity"].strip().casefold()
+        != entry["producer_identity"].strip().casefold()
+    )
+    # It binds the closeout entry it accompanies, so neither can be read alone.
+    prior = "mnq_lab/ledger/audit_entries/2026-08-09-phase7-unit-o-session-aware-v2.json"
+    assert entry["evidence_hashes"][prior] == hashlib.sha256(
+        (REPO_ROOT / prior).read_bytes()
+    ).hexdigest()
+    assert _mismatched_evidence(entry) == []
+
+
+def test_the_two_v2_entries_disagree_only_about_scope():
+    """A superseding entry must not quietly change the verdict."""
+    closeout, run_commit = _v2_audit_entry(), _v2_run_commit_audit_entry()
+
+    assert closeout["audited_commit"] != run_commit["audited_commit"]
+    for field in ("verdict", "unit", "audited_tree", "auditor_identity"):
+        assert closeout[field] == run_commit[field]
+    for entry in (closeout, run_commit):
+        joined = "\n".join(entry["findings"])
+        assert ".quarantine-failed-v2-e8542c1" in joined
+        assert "prospective only" in joined
+
+
 def test_v2_audit_entry_records_the_tree_digest_and_quarantine_limitation():
     """The two facts the verdict must not lose: what was audited, and what was not."""
     findings = "\n".join(entry for entry in _v2_audit_entry()["findings"])
@@ -724,6 +771,7 @@ def test_repository_unit_o_audit_and_certificate_validate_exact_completed_tree()
     # must fail here. The v2 entry is appended, never edited into the v1 one.
     assert [entry["entry_id"] for entry in entries] == [
         "2026-08-02-unit-o-first-run-v1-audit",
+        "2026-08-09-phase7-unit-o-session-aware-v2-run-commit-audit",
         "2026-08-09-phase7-unit-o-session-aware-v2-audit",
     ]
     result = evaluate_ratification_certificate(

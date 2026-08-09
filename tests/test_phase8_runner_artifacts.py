@@ -26,16 +26,19 @@ from mnq_lab.phase8.diagnostics import status_decision
 from mnq_lab.phase8.uncertainty import BootstrapIntervalRequest, BootstrapQuantileTerm
 
 
-def _identity(*, workers=2):
+def _identity(*, workers=2, stage1_workers=2):
     return CheckpointIdentity(
         code_commit="a" * 40,
         input_manifest_sha256=(
             ("phase7", "b" * 64),
             ("unit_o", "c" * 64),
         ),
-        workers=workers,
+        stage1_workers=stage1_workers,
+        bootstrap_workers=workers,
         process_start_method="spawn",
         bootstrap_contract_sha256="d" * 64,
+        phase8_output_version="phase8-session-aware-v2",
+        producing_code_sha256=(("runner.py", "e" * 64),),
     )
 
 

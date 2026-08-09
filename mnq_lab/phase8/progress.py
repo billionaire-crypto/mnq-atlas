@@ -261,10 +261,12 @@ class ProgressSink:
         contrast_rows: int,
         day_type_rows: int,
         interaction_rows: int,
-        workers: int,
+        bootstrap_workers: int,
         stage1_workers: int,
         aggregate_memory_ceiling_bytes: int,
         distinct_bootstrap_terms: int | None = None,
+        resume: bool = False,
+        external_checkpoint: bool = False,
     ) -> None:
         """Record the fixed totals and operating parameters at startup.
 
@@ -278,11 +280,15 @@ class ProgressSink:
         interaction_rows = _builtin_nonnegative_int(
             interaction_rows, "interaction_rows"
         )
-        workers = _builtin_nonnegative_int(workers, "workers")
+        bootstrap_workers = _builtin_nonnegative_int(
+            bootstrap_workers, "bootstrap_workers"
+        )
         stage1_workers = _builtin_nonnegative_int(stage1_workers, "stage1_workers")
         aggregate_memory_ceiling_bytes = _builtin_nonnegative_int(
             aggregate_memory_ceiling_bytes, "aggregate_memory_ceiling_bytes"
         )
+        if not isinstance(resume, bool) or not isinstance(external_checkpoint, bool):
+            raise SpineError("Phase 8 progress resume facts must be built-in booleans")
         terms = (
             _PENDING
             if distinct_bootstrap_terms is None
@@ -293,8 +299,9 @@ class ProgressSink:
         self._write(
             f"{_timestamp()} phase=startup contrast_rows={contrast_rows} "
             f"day_type_rows={day_type_rows} interaction_rows={interaction_rows} "
-            f"workers={workers} stage1_workers={stage1_workers} "
+            f"bootstrap_workers={bootstrap_workers} stage1_workers={stage1_workers} "
             f"aggregate_memory_ceiling_bytes={aggregate_memory_ceiling_bytes} "
+            f"resume={int(resume)} external_checkpoint={int(external_checkpoint)} "
             f"distinct_bootstrap_terms={terms}"
         )
 

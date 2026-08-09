@@ -225,13 +225,11 @@ def test_runner_failure_resets_and_stops_heartbeat(
         raise RuntimeError("named runner failure")
 
     monkeypatch.setattr(runner, "PHASE8_PROGRESS_LOG", tmp_path / "failure.log")
-    monkeypatch.setattr(
-        runner, "require_absent_phase8_run_paths", lambda **_kwargs: None
-    )
-    monkeypatch.setattr(runner, "run_phase8", named_runner_failure)
+    monkeypatch.setattr(runner, "require_phase8_run_paths", lambda **_kwargs: None)
+    monkeypatch.setattr(runner, "run_phase8", lambda **_kwargs: named_runner_failure())
     monkeypatch.setattr(sys.modules["__main__"], "__spec__", object())
     with pytest.raises(RuntimeError, match="named runner failure"):
-        runner.main()
+        runner.main(["--stage1-workers", "1", "--bootstrap-workers", "1", "--process-start-method", "spawn"])
     assert thread_holder[0] is not None
     assert not thread_holder[0].is_alive()
     assert not progress.is_configured()
@@ -242,7 +240,7 @@ def test_progress_lines_contain_no_scientific_result_fields():
     sink = progress.ProgressSink((stream,))
     sink.banner(
         contrast_rows=29_430, day_type_rows=216, interaction_rows=720,
-        workers=8, stage1_workers=4, aggregate_memory_ceiling_bytes=1 << 30,
+        bootstrap_workers=8, stage1_workers=4, aggregate_memory_ceiling_bytes=1 << 30,
     )
     for name in sorted(progress.PHASE_NAMES):
         phase = sink.phase(name, 2)
@@ -256,9 +254,9 @@ def test_progress_lines_contain_no_scientific_result_fields():
         assert token not in text, f"progress output leaked {token!r}"
     allowed_keys = {
         "phase", "done", "total", "pct", "rate", "elapsed", "eta",
-        "contrast_rows", "day_type_rows", "interaction_rows", "workers",
+        "contrast_rows", "day_type_rows", "interaction_rows", "bootstrap_workers",
         "stage1_workers", "aggregate_memory_ceiling_bytes",
-        "distinct_bootstrap_terms",
+        "distinct_bootstrap_terms", "resume", "external_checkpoint",
     }
     for line in _lines(text):
         for key in re.findall(r"(\w+)=", line):
@@ -270,7 +268,7 @@ def test_distinct_term_count_is_pending_until_measured():
     sink = progress.ProgressSink((stream,))
     sink.banner(
         contrast_rows=29_430, day_type_rows=216, interaction_rows=720,
-        workers=8, stage1_workers=4, aggregate_memory_ceiling_bytes=1 << 30,
+        bootstrap_workers=8, stage1_workers=4, aggregate_memory_ceiling_bytes=1 << 30,
     )
     assert "distinct_bootstrap_terms=pending" in stream.getvalue()
     sink.realized_terms(4_325)
@@ -289,9 +287,7 @@ def test_runner_main_configures_stdout_and_real_log_before_running(
     events = []
     log_path = tmp_path / "phase8-production.progress.log"
     monkeypatch.setattr(runner, "PHASE8_PROGRESS_LOG", log_path)
-    monkeypatch.setattr(
-        runner, "require_absent_phase8_run_paths", lambda **_kwargs: None
-    )
+    monkeypatch.setattr(runner, "require_phase8_run_paths", lambda **_kwargs: None)
     monkeypatch.setattr(
         runner._progress,
         "configure",
@@ -300,14 +296,21 @@ def test_runner_main_configures_stdout_and_real_log_before_running(
     monkeypatch.setattr(
         runner._progress, "reset", lambda: events.append(("reset", {}))
     )
-    monkeypatch.setattr(runner, "run_phase8", lambda: events.append(("run", {})))
+    monkeypatch.setattr(runner, "run_phase8", lambda **kwargs: events.append(("run", kwargs)))
     monkeypatch.setattr(sys.modules["__main__"], "__spec__", object())
 
-    runner.main()
+    runner.main(["--stage1-workers", "2", "--bootstrap-workers", "3", "--process-start-method", "spawn"])
 
     assert events == [
         ("configure", {"log_path": log_path, "stdout": True}),
-        ("run", {}),
+        ("run", {
+            "stage1_workers": 2,
+            "bootstrap_workers": 3,
+            "resume": False,
+            "external_checkpoint_root": None,
+            "progress_log": log_path,
+            "process_start_method": "spawn",
+        }),
         ("reset", {}),
     ]
 
@@ -320,7 +323,7 @@ def test_public_runner_refuses_to_enter_a_long_phase_silently(monkeypatch):
         lambda: pytest.fail("silent runner reached the ratified input"),
     )
     with pytest.raises(SpineError, match="progress is not configured"):
-        runner.run_phase8()
+        runner.run_phase8(stage1_workers=1, bootstrap_workers=1)
 
 
 def test_bootstrap_chunk_reports_completion_only_after_compute(tmp_path):
@@ -329,9 +332,12 @@ def test_bootstrap_chunk_reports_completion_only_after_compute(tmp_path):
     identity = CheckpointIdentity(
         code_commit="a" * 40,
         input_manifest_sha256=(("unit_o", "b" * 64),),
-        workers=1,
+        stage1_workers=1,
+        bootstrap_workers=1,
         process_start_method="spawn",
         bootstrap_contract_sha256="c" * 64,
+        phase8_output_version="phase8-session-aware-v2",
+        producing_code_sha256=(("runner.py", "d" * 64),),
     )
     observed = []
 

@@ -154,7 +154,7 @@ def test_stage1_pool_recycles_each_one_partition_worker(monkeypatch, tmp_path):
             captured["function"] = function
             captured["chunksize"] = chunksize
             return iter(
-                _partition(index, 10 + index)
+                (index, _partition(index, 10 + index))
                 for index, _ in enumerate(partitions)
             )
 
@@ -178,14 +178,20 @@ def test_stage1_pool_recycles_each_one_partition_worker(monkeypatch, tmp_path):
         phase7_manifest={},
         input_manifest_sha256=(),
     )
-    partitions = ((object(),), (object(),))
+    partitions = ((0, (object(),)), (1, (object(),)))
+    completed = []
 
-    results = production._run_contrast_partitions(inputs, partitions, None)
+    results = production._run_contrast_partitions(
+        inputs, partitions, None, process_start_method="spawn",
+        completed_specs=0,
+        on_complete=lambda index, result: completed.append((index, result)),
+    )
 
     assert len(results) == 2
     assert captured["processes"] == 2
     assert captured["chunksize"] == 1
     assert captured["maxtasksperchild"] == 1
+    assert completed == results
 
 
 def test_post_contrast_inventory_rebuilds_worker_local_slice_cache(monkeypatch):

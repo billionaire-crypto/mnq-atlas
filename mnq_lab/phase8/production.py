@@ -12,10 +12,8 @@ from dataclasses import dataclass
 import hashlib
 import json
 import os
-import sys
-import time
 from pathlib import Path
-from typing import Any, Hashable, Mapping
+from typing import Any, Callable, Hashable, Mapping
 
 import numpy as np
 
@@ -24,7 +22,7 @@ from mnq_lab.conditioners.calendar import CALENDAR_SHA256, CALENDAR_VERSION
 from mnq_lab.constants import CONSTANTS_PATH, REPO_ROOT, SPEC_PATH
 from mnq_lab.phase8.artifacts import (
     CONTRAST_COLUMNS, DAY_TYPE_COLUMNS, INTERACTION_COLUMNS, INTERVAL_COLUMNS,
-    Phase8Table,
+    CheckpointStore, Phase8Table,
 )
 from mnq_lab.phase8.contrasts import (
     OUTCOME_NAMES, SESSION_PHASES, VOLATILITY_STATES, CellKey,
@@ -651,36 +649,15 @@ def _partition_indexed_specs(
     return tuple(tuple(bucket) for bucket in buckets if bucket)
 
 
-PHASE8_STAGE1_WORKERS_ENV = "MNQ_PHASE8_STAGE1_WORKERS"
-
-
-def _contrast_worker_count() -> int:
-    """Resolve stage 1 worker count.
-
-    Defaults to serial. Parallelism is opt-in through the environment so no
-    existing caller, test or fixture silently changes execution mode, and so
-    the single-core path stays available as the identity oracle. ``0`` or a
-    negative value means every available core.
-    """
-    raw = os.environ.get(PHASE8_STAGE1_WORKERS_ENV)
-    if raw is None or not raw.strip():
-        return 1
-    try:
-        requested = int(raw)
-    except ValueError as exc:
-        raise SpineError(
-            f"{PHASE8_STAGE1_WORKERS_ENV} must be an integer, got {raw!r}"
-        ) from exc
-    if requested <= 0:
-        return max(1, os.cpu_count() or 1)
-    return requested
-
-
 def _run_contrast_partitions(
     inputs: ProductionInputs,
-    partitions: tuple[tuple[tuple[int, ResultRowSpec], ...], ...],
+    partitions: tuple[tuple[int, tuple[tuple[int, ResultRowSpec], ...]], ...],
     progress: Any,
-) -> list[_ContrastPartition]:
+    *,
+    process_start_method: str,
+    completed_specs: int,
+    on_complete: Callable[[int, _ContrastPartition], None],
+) -> list[tuple[int, _ContrastPartition]]:
     """Run contrast partitions in worker processes and collect their results.
 
     Results are returned in completion order; the caller restores declared
@@ -693,9 +670,7 @@ def _run_contrast_partitions(
     # default: spawn on Windows, fork on POSIX. Under spawn, each child
     # re-imports the entry module, so any caller must guard its entry point
     # with ``if __name__ == "__main__"`` or the pool cannot start.
-    context = multiprocessing.get_context(
-        "spawn" if os.name == "nt" else "fork"
-    )
+    context = multiprocessing.get_context(process_start_method)
     # Each worker owns one complete cache-preserving partition and can retain
     # tens of GiB in its Python allocator after returning that partition.  A
     # persistent executor therefore keeps the worker heap resident while the
@@ -712,15 +687,15 @@ def _run_contrast_partitions(
         ),
         maxtasksperchild=1,
     )
-    results: list[_ContrastPartition] = []
-    completed_specs = 0
+    results: list[tuple[int, _ContrastPartition]] = []
     try:
         completed = pool.imap_unordered(
-            _worker_contrast_partition, partitions, chunksize=1
+            _worker_contrast_partition_indexed, partitions, chunksize=1
         )
         pool.close()
-        for result in completed:
-            results.append(result)
+        for partition_index, result in completed:
+            on_complete(partition_index, result)
+            results.append((partition_index, result))
             completed_specs += len(result.entries)
             if progress is not None:
                 progress.advance(completed_specs)
@@ -765,6 +740,13 @@ def _worker_contrast_partition(
     return _contrast_partition(
         _WORKER_STATE["inputs"], indexed_specs, _WORKER_STATE["migrations"],
     )
+
+
+def _worker_contrast_partition_indexed(
+    item: tuple[int, tuple[tuple[int, ResultRowSpec], ...]],
+) -> tuple[int, _ContrastPartition]:
+    index, indexed_specs = item
+    return index, _worker_contrast_partition(indexed_specs)
 
 
 def _merge_contrast_partitions(
@@ -890,9 +872,81 @@ def _structural_completion_eligibility(
     return np.asarray(arm.active, dtype=np.bool_) & structural_fit
 
 
-def build_production_computation(inputs: ProductionInputs) -> ProductionComputation:
+def _partition_checkpoint_identity(
+    partition: tuple[tuple[int, ResultRowSpec], ...],
+) -> str:
+    structural = tuple((index, _spec_key(spec)) for index, spec in partition)
+    return hashlib.sha256(_json(structural).encode("utf-8")).hexdigest()
+
+
+def _stage1_row_ids() -> tuple[str, ...]:
+    contrast_ids = tuple(
+        _row_id("contrast", _spec_key(spec)) for spec in declared_result_rows()
+    )
+    day_ids = tuple(
+        _row_id("day_type", (
+            spec.arm_id, spec.day_type, spec.outcome_name, spec.path_estimand,
+            spec.support_kind, spec.horizon_minutes, spec.statistic,
+        ))
+        for spec in declared_day_type_rows()
+    )
+    interaction_ids = tuple(
+        _row_id("interaction", (
+            spec.arm_id, spec.outcome_name, spec.path_estimand, spec.support_kind,
+            spec.horizon_minutes, spec.population_estimand, spec.statistic,
+            *_cell_tuple(spec.target_cell),
+        ))
+        for spec in declared_interaction_rows()
+    )
+    return contrast_ids + day_ids + interaction_ids
+
+
+def build_production_computation(
+    inputs: ProductionInputs,
+    *,
+    stage1_workers: int = 1,
+    process_start_method: str | None = None,
+    checkpoint: CheckpointStore | None = None,
+) -> ProductionComputation:
     """Compute all point inventories and construct only status-ok interval requests."""
+    if isinstance(stage1_workers, bool) or not isinstance(stage1_workers, int) or stage1_workers <= 0:
+        raise SpineError("Stage 1 workers must be a positive integer")
+    method = process_start_method or ("spawn" if os.name == "nt" else "fork")
+    if method not in {"spawn", "fork"}:
+        raise SpineError("Stage 1 process start method is invalid")
     declared = declared_result_rows()
+    expected_stage1_row_ids = _stage1_row_ids()
+    final_identity = hashlib.sha256(
+        _json(("phase8-stage1-final-v1", expected_stage1_row_ids)).encode("utf-8")
+    ).hexdigest()
+    if checkpoint is not None and checkpoint.has_stage1_unit("final"):
+        computation = checkpoint.read_stage1_unit(
+            "final",
+            declared_indices=tuple(range(len(expected_stage1_row_ids))),
+            declared_identity_sha256=final_identity,
+            row_ids=expected_stage1_row_ids,
+        )
+        if not isinstance(computation, ProductionComputation):
+            raise SpineError("Stage 1 final checkpoint has the wrong type")
+        actual_ids = tuple(
+            str(value)
+            for table in (
+                computation.contrast_table,
+                computation.day_type_table,
+                computation.interaction_table,
+            )
+            for value in dict(table.columns)["row_id"]
+        )
+        if actual_ids != expected_stage1_row_ids:
+            raise SpineError("Stage 1 final checkpoint row order differs")
+        sink = _progress.get_sink()
+        for phase_name, total in (
+            (_progress.PHASE_CONTRASTS, len(declared)),
+            (_progress.PHASE_DAY_TYPES, 216),
+            (_progress.PHASE_INTERACTIONS, 720),
+        ):
+            sink.phase(phase_name, total).advance(total)
+        return computation
     contrast_rows: list[dict[str, Any]] = []
     day_rows: list[dict[str, Any]] = []
     interaction_rows: list[dict[str, Any]] = []
@@ -937,11 +991,60 @@ def build_production_computation(inputs: ProductionInputs) -> ProductionComputat
     sink = _progress.get_sink()
     contrast_progress = sink.phase(_progress.PHASE_CONTRASTS, len(declared))
     indexed_specs = tuple(enumerate(declared))
-    partitions = _partition_indexed_specs(indexed_specs, _contrast_worker_count())
-    if len(partitions) <= 1:
-        results = [_contrast_partition(inputs, indexed_specs, migrations, contrast_progress)]
-    else:
-        results = _run_contrast_partitions(inputs, partitions, contrast_progress)
+    partitions = _partition_indexed_specs(indexed_specs, stage1_workers)
+    results_by_index: dict[int, _ContrastPartition] = {}
+    completed_specs = 0
+    missing: list[tuple[int, tuple[tuple[int, ResultRowSpec], ...]]] = []
+    for partition_index, partition in enumerate(partitions):
+        name = f"partition-{partition_index:06d}"
+        identity = _partition_checkpoint_identity(partition)
+        declared_indices = tuple(index for index, _spec in partition)
+        if checkpoint is not None and checkpoint.has_stage1_unit(name):
+            result = checkpoint.read_stage1_unit(
+                name,
+                declared_indices=declared_indices,
+                declared_identity_sha256=identity,
+                row_ids=tuple(
+                    _row_id("contrast", _spec_key(spec)) for _index, spec in partition
+                ),
+            )
+            if not isinstance(result, _ContrastPartition):
+                raise SpineError("Stage 1 partition checkpoint has the wrong type")
+            if tuple(entry.index for entry in result.entries) != declared_indices:
+                raise SpineError("Stage 1 partition checkpoint row order differs")
+            results_by_index[partition_index] = result
+            completed_specs += len(result.entries)
+        else:
+            missing.append((partition_index, partition))
+    if completed_specs:
+        contrast_progress.advance(completed_specs)
+
+    def preserve(partition_index: int, result: _ContrastPartition) -> None:
+        partition = partitions[partition_index]
+        if checkpoint is not None:
+            checkpoint.write_stage1_unit(
+                f"partition-{partition_index:06d}", result,
+                declared_indices=tuple(index for index, _spec in partition),
+                declared_identity_sha256=_partition_checkpoint_identity(partition),
+                row_ids=tuple(entry.row["row_id"] for entry in result.entries),
+            )
+        results_by_index[partition_index] = result
+
+    if len(missing) == 1 or stage1_workers == 1:
+        for partition_index, partition in missing:
+            result = _contrast_partition(inputs, partition, migrations)
+            preserve(partition_index, result)
+            completed_specs += len(result.entries)
+            contrast_progress.advance(completed_specs)
+    elif missing:
+        for partition_index, result in _run_contrast_partitions(
+            inputs, tuple(missing), contrast_progress,
+            process_start_method=method,
+            completed_specs=completed_specs,
+            on_complete=preserve,
+        ):
+            results_by_index[partition_index] = result
+    results = [results_by_index[index] for index in range(len(partitions))]
 
     merged = _merge_contrast_partitions(tuple(results))
     contrast_rows = list(merged.rows)
@@ -1088,12 +1191,20 @@ def build_production_computation(inputs: ProductionInputs) -> ProductionComputat
     if len(contrast_rows) != 29_430 or len(day_rows) != 216 or len(interaction_rows) != 720:
         raise SpineError("Phase 8 point inventory differs from the complete declared counts")
     group_ids = np.asarray(primary.sessions)
-    return ProductionComputation(
+    computation = ProductionComputation(
         _table_from_rows("contrasts", CONTRAST_COLUMNS, contrast_rows),
         _table_from_rows("day_type_descriptives", DAY_TYPE_COLUMNS, day_rows),
         _table_from_rows("interactions", INTERACTION_COLUMNS, interaction_rows),
         group_ids, registry.recipes, tuple(requests), tuple(census),
     )
+    if checkpoint is not None:
+        checkpoint.write_stage1_unit(
+            "final", computation,
+            declared_indices=tuple(range(len(expected_stage1_row_ids))),
+            declared_identity_sha256=final_identity,
+            row_ids=expected_stage1_row_ids,
+        )
+    return computation
 
 
 def interval_table_from_rows(rows: list[dict[str, Any]]) -> Phase8Table:

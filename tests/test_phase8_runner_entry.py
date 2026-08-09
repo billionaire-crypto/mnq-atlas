@@ -30,10 +30,11 @@ def _ok():
 
 def test_public_entry_accepts_operating_controls_but_no_data_paths():
     parameters = inspect.signature(runner_module.run_phase8).parameters
-    assert "workers" in parameters
+    assert "stage1_workers" in parameters
+    assert "bootstrap_workers" in parameters
     assert "aggregate_memory_ceiling_bytes" in parameters
     assert "launch_minimum_available_bytes" in parameters
-    assert not ({"path", "root", "corpus", "tree", "input"} & set(parameters))
+    assert not ({"corpus", "tree", "input"} & set(parameters))
 
 
 def test_ratified_input_root_is_the_session_aware_v2_artifact():
@@ -131,9 +132,12 @@ def test_worker_count_and_explicit_start_method_reach_process_executor(monkeypat
 
 def test_invalid_worker_and_start_method_halt_before_bootstrap():
     with pytest.raises(SpineError, match="positive integer"):
-        RunnerOperatingConfig(workers=0)
+        RunnerOperatingConfig(stage1_workers=0, bootstrap_workers=1, effective_cpu_count=2)
     with pytest.raises(SpineError, match="process start method"):
-        RunnerOperatingConfig(process_start_method="platform-default")
+        RunnerOperatingConfig(
+            stage1_workers=1, bootstrap_workers=1, effective_cpu_count=2,
+            process_start_method="platform-default",
+        )
 
 
 def test_checkpoint_chunks_reuse_one_frozen_19996_plan_set(monkeypatch):

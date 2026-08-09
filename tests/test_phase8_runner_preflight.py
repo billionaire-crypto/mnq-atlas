@@ -75,14 +75,19 @@ def test_support_record_rejects_a_stale_caller_supplied_count():
 
 
 def test_runner_operating_defaults_and_boundaries_are_explicit():
-    config = RunnerOperatingConfig()
+    config = RunnerOperatingConfig(
+        stage1_workers=2, bootstrap_workers=3, effective_cpu_count=4
+    )
     assert config.aggregate_memory_ceiling_bytes == int(5.5 * 1024**3)
     assert config.launch_minimum_available_bytes == 7 * 1024**3
-    assert config.workers >= 1
+    assert config.stage1_workers == 2
+    assert config.bootstrap_workers == 3
     assert config.process_start_method in {"spawn", "fork"}
 
     with pytest.raises(SpineError, match="positive integer"):
-        RunnerOperatingConfig(workers=0)
+        RunnerOperatingConfig(stage1_workers=0, bootstrap_workers=1, effective_cpu_count=2)
     with pytest.raises(SpineError, match="memory ceiling"):
-        RunnerOperatingConfig(aggregate_memory_ceiling_bytes=0)
-
+        RunnerOperatingConfig(
+            stage1_workers=1, bootstrap_workers=1, effective_cpu_count=2,
+            aggregate_memory_ceiling_bytes=0,
+        )

@@ -10,6 +10,7 @@ import sys
 import pytest
 
 from mnq_lab import SpineError
+from mnq_lab.phase8.runner import MemoryMeasurement
 from mnq_lab.production.phase8_v2_run_receipt import (
     MINIMUM_AVAILABLE_MEMORY_BYTES,
     MINIMUM_FREE_DISK_BYTES,
@@ -63,6 +64,24 @@ def _passing_preflight() -> dict[str, object]:
         "free_disk_bytes": 8 * 1024**3,
         "minimum_free_disk_bytes": MINIMUM_FREE_DISK_BYTES,
         "conflicting_processes": [],
+        "stage1_workers": 2,
+        "bootstrap_workers": 3,
+        "process_start_method": "spawn",
+        "input_manifest_sha256": {"run": "a" * 64, "unit_o": "b" * 64, "phase7": "c" * 64},
+    }
+
+
+def _resource_probes() -> dict[str, object]:
+    return {
+        "cpu_probe": lambda: {
+            "effective_cpu_count": 8, "os_cpu_count": 8,
+            "affinity_cpus": tuple(range(8)),
+        },
+        "physical_memory_sampler": lambda: 16 * 1024**3,
+        "aggregate_memory_probe": lambda: MemoryMeasurement(1024, "synthetic", "test"),
+        "input_manifest_probe": lambda: {
+            "run": "a" * 64, "unit_o": "b" * 64, "phase7": "c" * 64,
+        },
     }
 
 
@@ -78,6 +97,8 @@ def test_success_receipt_records_complete_v2_output_and_unchanged_witness(tmp_pa
     )
     receipt, exit_code = _run_with_receipt(
         tmp_path / "evidence",
+        stage1_workers=2,
+        bootstrap_workers=3,
         repo_root=repo,
         command=(sys.executable, "-c", script),
         protected_paths=("protected.txt",),
@@ -103,6 +124,8 @@ def test_failed_child_is_preserved_and_never_retried(tmp_path):
     output, staging, checkpoint, progress = _paths(repo)
     receipt, exit_code = _run_with_receipt(
         tmp_path / "evidence",
+        stage1_workers=2,
+        bootstrap_workers=3,
         repo_root=repo,
         command=(sys.executable, "-c", "raise SystemExit(7)"),
         protected_paths=("protected.txt",),
@@ -129,6 +152,8 @@ def test_preflight_failure_launches_no_child_and_consumes_no_receipt_root(tmp_pa
     with pytest.raises(SpineError, match="named preflight failure"):
         _run_with_receipt(
             tmp_path / "evidence",
+            stage1_workers=2,
+            bootstrap_workers=3,
             repo_root=repo,
             command=(
                 sys.executable, "-c",
@@ -152,6 +177,8 @@ def test_existing_output_halts_before_certificate_or_resource_checks(tmp_path):
     reached = []
     with pytest.raises(SpineError, match="must be absent"):
         _preflight_phase8_run(
+            stage1_workers=2,
+            bootstrap_workers=3,
             repo_root=repo,
             output_root=output,
             staging_root=staging,
@@ -176,6 +203,8 @@ def test_protected_witness_drift_forces_wrapper_evidence_failure(tmp_path):
     )
     receipt, exit_code = _run_with_receipt(
         tmp_path / "evidence",
+        stage1_workers=2,
+        bootstrap_workers=3,
         repo_root=repo,
         command=(sys.executable, "-c", script),
         protected_paths=("protected.txt",),
@@ -196,6 +225,8 @@ def test_zero_exit_without_complete_output_forces_wrapper_failure(tmp_path):
     output, staging, checkpoint, progress = _paths(repo)
     receipt, exit_code = _run_with_receipt(
         tmp_path / "evidence",
+        stage1_workers=2,
+        bootstrap_workers=3,
         repo_root=repo,
         command=(sys.executable, "-c", "pass"),
         protected_paths=("protected.txt",),
@@ -229,6 +260,8 @@ def test_preflight_rejects_inadequate_resources_before_launch(tmp_path, resource
         "process": "already running",
     }[resource]):
         _preflight_phase8_run(
+            stage1_workers=2,
+            bootstrap_workers=3,
             repo_root=repo,
             output_root=output,
             staging_root=staging,
@@ -238,6 +271,7 @@ def test_preflight_rejects_inadequate_resources_before_launch(tmp_path, resource
             disk_sampler=disk,
             process_probe=processes,
             certificate_validator=lambda: {"certificate_id": "synthetic"},
+            **_resource_probes(),
         )
 
 

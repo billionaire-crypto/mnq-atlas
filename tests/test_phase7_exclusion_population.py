@@ -22,6 +22,7 @@ here against constructed populations, not by an end-to-end unit test.
 
 from __future__ import annotations
 
+from copy import deepcopy
 import re
 from pathlib import Path
 from types import SimpleNamespace
@@ -31,15 +32,20 @@ import pytest
 from mnq_lab import SpineError
 from mnq_lab.production import first_exploration_run as run_module
 from mnq_lab.production.first_exploration_run import (
+    EXPECTED_RETAINED_ANCHOR_SCALE_ROWS,
+    EXPECTED_RETAINED_GRID_ROWS,
     FROZEN_RELABELLED_ASSIGNMENT_ROWS,
     FROZEN_RETAINED_ASSIGNMENT_ROWS,
-    FROZEN_RETAINED_SEASONAL_PROFILE_ROWS,
     FROZEN_RETAINED_SESSIONS,
-    FROZEN_RETAINED_THRESHOLD_ROWS,
     FROZEN_RETAINED_UNIT_O_ROWS,
+    EXPECTED_RETAINED_SEASONAL_PROFILE_ROWS,
+    EXPECTED_RETAINED_STATE_VALIDITY_ROWS,
+    EXPECTED_RETAINED_THRESHOLD_ROWS,
+    EXPECTED_RETAINED_VOL_REL_ROWS,
     _build_phase7_product,
-    _enforce_frozen_phase7_population,
+    _enforce_frozen_phase7_counts,
     _enforce_frozen_unit_o_population,
+    _validate_phase7_population_surfaces,
 )
 from mnq_lab.spine.exploration import validate_exploration_store
 from tests.test_first_exploration_run import _calendar
@@ -112,31 +118,25 @@ def test_schedule_table_is_required_and_fails_closed(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def _row(session_id: int, status: str = "ok"):
-    return SimpleNamespace(session_id=session_id, data_quality_status=status)
-
-
-def _population(
+def _counts(
     *,
-    sessions: int = FROZEN_RETAINED_SESSIONS,
-    relabelled: int = FROZEN_RELABELLED_ASSIGNMENT_ROWS,
+    grid: int = EXPECTED_RETAINED_GRID_ROWS,
+    anchor_scales: int = EXPECTED_RETAINED_ANCHOR_SCALE_ROWS,
     assignments: int = FROZEN_RETAINED_ASSIGNMENT_ROWS,
-    seasonal: int = FROZEN_RETAINED_SEASONAL_PROFILE_ROWS,
-    thresholds: int = FROZEN_RETAINED_THRESHOLD_ROWS,
-    extra_sessions: tuple[int, ...] = (),
+    seasonal: int = EXPECTED_RETAINED_SEASONAL_PROFILE_ROWS,
+    vol_rel: int = EXPECTED_RETAINED_VOL_REL_ROWS,
+    thresholds: int = EXPECTED_RETAINED_THRESHOLD_ROWS,
+    state_validity: int = EXPECTED_RETAINED_STATE_VALIDITY_ROWS,
 ):
-    """A product shaped exactly as the enforcer reads it."""
-    rows = [_row(30000000 + index) for index in range(sessions)]
-    rows.extend(_row(session) for session in extra_sessions)
-    rows.extend(_row(30000000, "scheduled_early_close") for _ in range(relabelled))
-    return SimpleNamespace(
-        pipeline=SimpleNamespace(assignment_tables={"primary": SimpleNamespace(rows=rows)}),
-        row_counts={
-            "assignments": assignments,
-            "seasonal_profiles": seasonal,
-            "thresholds": thresholds,
-        },
-    )
+    return {
+        "declared_grid": grid,
+        "anchor_scales": anchor_scales,
+        "seasonal_profiles": seasonal,
+        "vol_rel": vol_rel,
+        "thresholds": thresholds,
+        "assignments": assignments,
+        "state_validity": state_validity,
+    }
 
 
 def _schedule(excluded):
@@ -144,54 +144,173 @@ def _schedule(excluded):
 
 
 def test_tripwire_accepts_the_frozen_contract_population():
-    _enforce_frozen_phase7_population(_population(), _schedule(EXCLUDED))
+    _enforce_frozen_phase7_counts(
+        _counts(),
+        session_count=FROZEN_RETAINED_SESSIONS,
+        relabelled_assignment_rows=FROZEN_RELABELLED_ASSIGNMENT_ROWS,
+    )
 
 
-def test_tripwire_kills_the_unit_o_only_mutant():
+def test_tripwire_kills_the_unit_o_only_mutant(tmp_path):
     """The exact defect that shipped: Unit O filtered, Phase 7 not.
 
     The excluded sessions are present and merely labelled. The guard must name
     them rather than pass.
     """
-    mutant = _population(extra_sessions=EXCLUDED)
-
+    store, bars = _store(tmp_path)
+    retained = _build_phase7_product(
+        store, bars, _calendar(SESSION), schedule_for_store(store)
+    )
     with pytest.raises(SpineError, match="excluded sessions survived"):
-        _enforce_frozen_phase7_population(mutant, _schedule(EXCLUDED))
+        _validate_phase7_population_surfaces(retained, _schedule((SESSION,)))
 
 
-def test_tripwire_kills_a_relabelled_but_retained_excluded_session():
-    rows = [_row(30000000 + i) for i in range(FROZEN_RETAINED_SESSIONS)]
-    rows.extend(
-        _row(session, "excluded_unresolved_official_interruption")
-        for session in EXCLUDED
+def _surface_mutant(product, surface: str, excluded_session: int):
+    pipeline_fields = {
+        name: dict(getattr(product.pipeline, name))
+        for name in (
+            "seasonal_profiles",
+            "vol_rel_tables",
+            "threshold_tables",
+            "assignment_tables",
+        )
+    }
+    anchor_columns = dict(product.anchor_scale_columns)
+    grid_session_ids = product.grid_session_ids
+    completion_session_ids = product.completion_session_ids
+    state_validity = product.state_validity
+    completion_diagnostic = deepcopy(product.completion_diagnostic)
+    row_counts = dict(product.row_counts)
+    extra = SimpleNamespace(session_id=excluded_session)
+    if surface == "declared grid":
+        grid_session_ids = frozenset((*grid_session_ids, excluded_session))
+    elif surface == "completion frame":
+        completion_session_ids = frozenset(
+            (*completion_session_ids, excluded_session)
+        )
+    elif surface == "anchor scales":
+        anchor_columns["session_id"] = list(anchor_columns["session_id"]) + [
+            excluded_session
+        ]
+        row_counts["anchor_scales"] += 1
+    elif surface == "state validity":
+        state_validity = SimpleNamespace(rows=tuple(state_validity.rows) + (extra,))
+        row_counts["state_validity"] += 1
+    elif surface == "completion diagnostic":
+        completion_diagnostic["rows"][0]["source_session_count"] += 1
+    else:
+        field = {
+            "seasonal profiles": "seasonal_profiles",
+            "vol-rel tables": "vol_rel_tables",
+            "threshold tables": "threshold_tables",
+            "assignment tables": "assignment_tables",
+        }[surface]
+        key = next(iter(pipeline_fields[field]))
+        table = pipeline_fields[field][key]
+        pipeline_fields[field][key] = SimpleNamespace(rows=tuple(table.rows) + (extra,))
+        row_name = {
+            "seasonal profiles": "seasonal_profiles",
+            "threshold tables": "thresholds",
+            "assignment tables": "assignments",
+        }.get(surface)
+        if row_name is not None:
+            row_counts[row_name] += 1
+    return SimpleNamespace(
+        grid_rows=product.grid_rows,
+        grid_session_ids=grid_session_ids,
+        completion_session_ids=completion_session_ids,
+        anchor_scale_columns=anchor_columns,
+        pipeline=SimpleNamespace(**pipeline_fields),
+        state_validity=state_validity,
+        completion_diagnostic=completion_diagnostic,
+        row_counts=row_counts,
     )
-    mutant = SimpleNamespace(
-        pipeline=SimpleNamespace(assignment_tables={"a": SimpleNamespace(rows=rows)}),
-        row_counts={
-            "assignments": FROZEN_RETAINED_ASSIGNMENT_ROWS,
-            "seasonal_profiles": FROZEN_RETAINED_SEASONAL_PROFILE_ROWS,
-            "thresholds": FROZEN_RETAINED_THRESHOLD_ROWS,
-        },
-    )
-
-    with pytest.raises(SpineError, match="disappear entirely"):
-        _enforce_frozen_phase7_population(mutant, _schedule(EXCLUDED))
 
 
 @pytest.mark.parametrize(
-    "kwargs,expected",
+    "surface",
     [
-        ({"sessions": 1_009}, "distinct retained sessions"),
-        ({"assignments": 787_020}, "assignment rows"),
-        ({"seasonal": 393_510}, "seasonal profile rows"),
-        ({"thresholds": 50_450}, "threshold rows"),
-        ({"relabelled": 30_420}, "relabelled assignment rows"),
+        "declared grid",
+        "completion frame",
+        "anchor scales",
+        "seasonal profiles",
+        "vol-rel tables",
+        "threshold tables",
+        "assignment tables",
+        "state validity",
     ],
 )
-def test_tripwire_rejects_each_v1_shaped_count(kwargs, expected):
+def test_each_phase7_surface_rejects_an_excluded_session(tmp_path, surface):
+    store, bars = _store(tmp_path)
+    product = _build_phase7_product(
+        store, bars, _calendar(SESSION), schedule_for_store(store)
+    )
+    mutant = _surface_mutant(product, surface, 20200309)
+    with pytest.raises(SpineError, match=rf"excluded sessions survived.*{surface}"):
+        _validate_phase7_population_surfaces(mutant, _schedule((20200309,)))
+
+
+def test_completion_diagnostic_is_bound_to_retained_sessions(tmp_path):
+    store, bars = _store(tmp_path)
+    product = _build_phase7_product(
+        store, bars, _calendar(SESSION), schedule_for_store(store)
+    )
+    mutant = _surface_mutant(product, "completion diagnostic", 20200309)
+    with pytest.raises(SpineError, match="completion diagnostic describes"):
+        _validate_phase7_population_surfaces(mutant, schedule_for_store(store))
+
+
+def test_state_validity_threshold_series_is_bound_to_threshold_rows(tmp_path):
+    store, bars = _store(tmp_path)
+    product = _build_phase7_product(
+        store, bars, _calendar(SESSION), schedule_for_store(store)
+    )
+    rows = list(product.state_validity.rows)
+    position = next(
+        index
+        for index, row in enumerate(rows)
+        if row.metric == "threshold_drift"
+        and row.detail in {"lower_threshold_series", "upper_threshold_series"}
+    )
+    del rows[position]
+    mutant = SimpleNamespace(
+        grid_rows=product.grid_rows,
+        grid_session_ids=product.grid_session_ids,
+        completion_session_ids=product.completion_session_ids,
+        anchor_scale_columns=product.anchor_scale_columns,
+        pipeline=product.pipeline,
+        state_validity=SimpleNamespace(rows=tuple(rows)),
+        completion_diagnostic=product.completion_diagnostic,
+        row_counts={**product.row_counts, "state_validity": len(rows)},
+    )
+    with pytest.raises(SpineError, match="threshold series differs"):
+        _validate_phase7_population_surfaces(mutant, schedule_for_store(store))
+
+
+@pytest.mark.parametrize(
+    "counts,session_count,relabelled,expected",
+    [
+        (_counts(grid=78_702), FROZEN_RETAINED_SESSIONS, FROZEN_RELABELLED_ASSIGNMENT_ROWS, "declared grid rows"),
+        (_counts(anchor_scales=393_510), FROZEN_RETAINED_SESSIONS, FROZEN_RELABELLED_ASSIGNMENT_ROWS, "anchor scale rows"),
+        (_counts(assignments=787_020), FROZEN_RETAINED_SESSIONS, FROZEN_RELABELLED_ASSIGNMENT_ROWS, "assignment rows"),
+        (_counts(seasonal=393_510), FROZEN_RETAINED_SESSIONS, FROZEN_RELABELLED_ASSIGNMENT_ROWS, "seasonal profile rows"),
+        (_counts(vol_rel=393_510), FROZEN_RETAINED_SESSIONS, FROZEN_RELABELLED_ASSIGNMENT_ROWS, "vol-rel rows"),
+        (_counts(thresholds=50_450), FROZEN_RETAINED_SESSIONS, FROZEN_RELABELLED_ASSIGNMENT_ROWS, "threshold rows"),
+        (_counts(state_validity=107_505), FROZEN_RETAINED_SESSIONS, FROZEN_RELABELLED_ASSIGNMENT_ROWS, "state-validity rows"),
+        (_counts(), 1_009, FROZEN_RELABELLED_ASSIGNMENT_ROWS, "distinct retained sessions"),
+        (_counts(), FROZEN_RETAINED_SESSIONS, 30_420, "relabelled assignment rows"),
+    ],
+)
+def test_tripwire_rejects_each_v1_shaped_count(
+    counts, session_count, relabelled, expected
+):
     """Every literal is load-bearing: the v1 value of each must halt the run."""
     with pytest.raises(SpineError, match=expected):
-        _enforce_frozen_phase7_population(_population(**kwargs), _schedule(EXCLUDED))
+        _enforce_frozen_phase7_counts(
+            counts,
+            session_count=session_count,
+            relabelled_assignment_rows=relabelled,
+        )
 
 
 def test_unit_o_tripwire_accepts_only_the_frozen_row_count():
@@ -210,8 +329,8 @@ def test_unit_o_tripwire_accepts_only_the_frozen_row_count():
 # ---------------------------------------------------------------------------
 
 
-def test_frozen_expectations_are_transcribed_from_the_contract_document():
-    """Kills the 'derive expectations from the output' mutant structurally.
+def test_contract_literals_are_transcribed_from_the_contract_document():
+    """Kills the 'derive contract expectations from the output' mutant.
 
     If a constant were ever recomputed from a produced artifact it would drift
     from the frozen contract and this fails. The contract file is the authority.
@@ -231,6 +350,34 @@ def test_frozen_expectations_are_transcribed_from_the_contract_document():
     )
 
 
+def test_mechanical_population_literals_follow_the_registered_shapes():
+    """The remaining literals are consequences, not contract quotations."""
+    assert EXPECTED_RETAINED_GRID_ROWS == 78 * FROZEN_RETAINED_SESSIONS
+    assert EXPECTED_RETAINED_ANCHOR_SCALE_ROWS == 5 * EXPECTED_RETAINED_GRID_ROWS
+    assert EXPECTED_RETAINED_SEASONAL_PROFILE_ROWS == (
+        5 * EXPECTED_RETAINED_GRID_ROWS
+    )
+    assert EXPECTED_RETAINED_VOL_REL_ROWS == 5 * EXPECTED_RETAINED_GRID_ROWS
+    assert EXPECTED_RETAINED_THRESHOLD_ROWS == 10 * 5 * FROZEN_RETAINED_SESSIONS
+    assert FROZEN_RETAINED_ASSIGNMENT_ROWS == 10 * EXPECTED_RETAINED_GRID_ROWS
+    # Ten arms, five phases, five corpus years and the fixed diagnostic
+    # inventories. Only the two threshold-series rows vary per session.
+    fixed_rows = (
+        10 * 5 * (4 + 3)
+        + 10 * 5
+        + 10 * 5 * (9 + 1)
+        + 9 * 5 * (4 * 4 + 3)
+        + 10 * 5 * 2
+        + 10 * 5
+        + 10 * 5 * 4 * 2
+        + 10 * 5
+        + 10 * 5 * 5 * 17
+    )
+    assert EXPECTED_RETAINED_STATE_VALIDITY_ROWS == (
+        2 * EXPECTED_RETAINED_THRESHOLD_ROWS + fixed_rows
+    )
+
+
 def test_the_four_excluded_sessions_are_the_contract_registry():
     text = CONTRACT.read_text(encoding="utf-8")
     for session in EXCLUDED:
@@ -243,10 +390,14 @@ def test_frozen_constants_are_literals_not_computed():
     for name in (
         "FROZEN_RETAINED_SESSIONS",
         "FROZEN_RETAINED_ASSIGNMENT_ROWS",
-        "FROZEN_RETAINED_SEASONAL_PROFILE_ROWS",
-        "FROZEN_RETAINED_THRESHOLD_ROWS",
         "FROZEN_RETAINED_UNIT_O_ROWS",
         "FROZEN_RELABELLED_ASSIGNMENT_ROWS",
+        "EXPECTED_RETAINED_GRID_ROWS",
+        "EXPECTED_RETAINED_ANCHOR_SCALE_ROWS",
+        "EXPECTED_RETAINED_SEASONAL_PROFILE_ROWS",
+        "EXPECTED_RETAINED_VOL_REL_ROWS",
+        "EXPECTED_RETAINED_THRESHOLD_ROWS",
+        "EXPECTED_RETAINED_STATE_VALIDITY_ROWS",
     ):
         match = re.search(rf"^{name} = (.+)$", source, re.MULTILINE)
         assert match, name

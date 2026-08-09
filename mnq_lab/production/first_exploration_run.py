@@ -7,6 +7,7 @@ resolves the one canonical exploration input and one derived-artifact root.
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 import gc
 import hashlib
@@ -103,19 +104,24 @@ OUTPUT_ROOT = (
 )
 STAGING_ROOT = OUTPUT_ROOT.with_name(f".{OUTPUT_ROOT.name}.staging")
 
-# Contract section 6: every figure is an exact production tripwire over RETAINED
-# rows, i.e. after the four D33 sessions are removed. These are transcribed from
-# the frozen contract and the Stage 7 preflight. They are NEVER derived from the
-# produced tables -- the v2 run that this guard exists to prevent validated its
-# output against row counts computed from that same output, so a population
-# defect could not be seen.
+# Contract section 6 literals over RETAINED rows, i.e. after the four D33
+# sessions are removed. They are NEVER derived from a produced artifact.
 FROZEN_RETAINED_SESSIONS = 1_005
 FROZEN_RETAINED_ASSIGNMENT_ROWS = 783_900
-FROZEN_RETAINED_SEASONAL_PROFILE_ROWS = 391_950
-FROZEN_RETAINED_THRESHOLD_ROWS = 50_250
 FROZEN_RETAINED_UNIT_O_ROWS = 470_340
-# Section 6: 35 retained sessions change data_quality_status, 780 rows each.
 FROZEN_RELABELLED_ASSIGNMENT_ROWS = 27_300
+
+# Mechanical consequences of the frozen session and assignment population.
+# These figures are integer literals so the producer cannot manufacture its own
+# expectations from its output. Their derivations are pinned independently in
+# tests: 78 anchors/session, five scale-source arms, ten assignment/threshold
+# arms, and five session phases.
+EXPECTED_RETAINED_GRID_ROWS = 78_390
+EXPECTED_RETAINED_ANCHOR_SCALE_ROWS = 391_950
+EXPECTED_RETAINED_SEASONAL_PROFILE_ROWS = 391_950
+EXPECTED_RETAINED_VOL_REL_ROWS = 391_950
+EXPECTED_RETAINED_THRESHOLD_ROWS = 50_250
+EXPECTED_RETAINED_STATE_VALIDITY_ROWS = 107_105
 
 _OUTCOME_PREREGISTRATION = REPO_ROOT / "docs" / "OUTCOME_LAYER_PREREGISTRATION.md"
 _PHASE8_PREREGISTRATION = REPO_ROOT / "docs" / "PHASE8_PREREGISTRATION.md"
@@ -200,6 +206,8 @@ GATE_CLASSIFICATION = (
 @dataclass(frozen=True)
 class Phase7Product:
     grid_rows: int
+    grid_session_ids: frozenset[int]
+    completion_session_ids: frozenset[int]
     anchor_scale_columns: Mapping[str, np.ndarray]
     pipeline: Phase7ConditionerPipeline
     state_validity: StateValidityPanel
@@ -750,6 +758,13 @@ def _build_phase7_product(
     }
     return Phase7Product(
         grid_rows=int(len(grid)),
+        grid_session_ids=frozenset(current_sessions),
+        completion_session_ids=frozenset(
+            int(value)
+            for value in np.unique(
+                completion_frame["session_id"].to_numpy(dtype=np.int32)
+            )
+        ),
         anchor_scale_columns=anchor_columns,
         pipeline=pipeline,
         state_validity=panel,
@@ -1160,61 +1175,204 @@ def _enforce_free_memory_preflight() -> int:
     return available
 
 
-def _enforce_frozen_phase7_population(
-    product: Phase7Product,
-    schedule_table: SessionScheduleTable,
+def _enforce_frozen_phase7_counts(
+    counts: Mapping[str, int],
+    *,
+    session_count: int,
+    relabelled_assignment_rows: int,
 ) -> None:
-    """Halt unless Phase 7 reproduces the frozen contract section 6 population.
-
-    Every expectation is a module literal transcribed from the frozen contract.
-    None is derived from ``product``. The v2 run this guard exists to prevent
-    compared its artifact against row counts computed from that same artifact,
-    so a population defect was structurally invisible.
-    """
-    excluded = frozenset(schedule_table.excluded_session_ids)
-    sessions: set[int] = set()
-    relabelled = 0
-    for table in product.pipeline.assignment_tables.values():
-        for row in table.rows:
-            sessions.add(int(row.session_id))
-            if row.data_quality_status != "ok":
-                relabelled += 1
-    survivors = sorted(excluded.intersection(sessions))
-    if survivors:
-        raise SpineError(
-            f"excluded sessions survived in Phase 7 assignments: {survivors}; "
-            "contract section 6 requires their rows to disappear entirely, not "
-            "to carry an exclusion label"
-        )
+    """Compare independently measured population counts with fixed literals."""
     checks = (
-        ("distinct retained sessions", len(sessions), FROZEN_RETAINED_SESSIONS),
+        ("declared grid rows", counts["declared_grid"], EXPECTED_RETAINED_GRID_ROWS),
         (
-            "assignment rows",
-            int(product.row_counts["assignments"]),
-            FROZEN_RETAINED_ASSIGNMENT_ROWS,
+            "anchor scale rows",
+            counts["anchor_scales"],
+            EXPECTED_RETAINED_ANCHOR_SCALE_ROWS,
         ),
         (
             "seasonal profile rows",
-            int(product.row_counts["seasonal_profiles"]),
-            FROZEN_RETAINED_SEASONAL_PROFILE_ROWS,
+            counts["seasonal_profiles"],
+            EXPECTED_RETAINED_SEASONAL_PROFILE_ROWS,
+        ),
+        ("vol-rel rows", counts["vol_rel"], EXPECTED_RETAINED_VOL_REL_ROWS),
+        ("threshold rows", counts["thresholds"], EXPECTED_RETAINED_THRESHOLD_ROWS),
+        (
+            "state-validity rows",
+            counts["state_validity"],
+            EXPECTED_RETAINED_STATE_VALIDITY_ROWS,
         ),
         (
-            "threshold rows",
-            int(product.row_counts["thresholds"]),
-            FROZEN_RETAINED_THRESHOLD_ROWS,
+            "assignment rows",
+            counts["assignments"],
+            FROZEN_RETAINED_ASSIGNMENT_ROWS,
         ),
+        ("distinct retained sessions", session_count, FROZEN_RETAINED_SESSIONS),
         (
             "relabelled assignment rows",
-            relabelled,
+            relabelled_assignment_rows,
             FROZEN_RELABELLED_ASSIGNMENT_ROWS,
         ),
     )
     for name, observed, expected in checks:
-        if observed != expected:
+        if int(observed) != expected:
             raise SpineError(
-                f"frozen contract section 6 tripwire: {name} is {observed:,}, "
+                f"frozen Phase 7 population tripwire: {name} is {int(observed):,}, "
                 f"expected exactly {expected:,}"
             )
+
+
+def _session_ids(rows: Any) -> frozenset[int]:
+    return frozenset(int(row.session_id) for row in rows if int(row.session_id) != 0)
+
+
+def _validate_completion_diagnostic_population(
+    diagnostic: Mapping[str, Any],
+    retained_sessions: frozenset[int],
+) -> None:
+    """Bind completion metadata to the same retained session population."""
+    rows = diagnostic.get("rows")
+    if not isinstance(rows, list):
+        raise SpineError("completion diagnostic rows are missing")
+    sessions_by_year: dict[int, list[int]] = {}
+    for session_id in retained_sessions:
+        sessions_by_year.setdefault(session_id // 10_000, []).append(session_id)
+    by_year = {
+        year: (len(values), min(values), max(values))
+        for year, values in sessions_by_year.items()
+    }
+    observed_pairs: set[tuple[int, int]] = set()
+    for row in rows:
+        if not isinstance(row, Mapping):
+            raise SpineError("completion diagnostic row is malformed")
+        year = int(row.get("year", -1))
+        horizon = int(row.get("horizon_minutes", -1))
+        pair = (year, horizon)
+        if pair in observed_pairs:
+            raise SpineError("completion diagnostic repeats a year/horizon row")
+        observed_pairs.add(pair)
+        expected = by_year.get(year)
+        if expected is None or (
+            int(row.get("source_session_count", -1)),
+            int(row.get("first_source_session", -1)),
+            int(row.get("last_source_session", -1)),
+        ) != expected:
+            raise SpineError(
+                "completion diagnostic describes a different retained-session population"
+            )
+    expected_pairs = {
+        (year, horizon) for year in by_year for horizon in (15, 30, 60)
+    }
+    if observed_pairs != expected_pairs:
+        raise SpineError("completion diagnostic year/horizon support is incomplete")
+
+
+def _validate_phase7_population_surfaces(
+    product: Phase7Product,
+    schedule_table: SessionScheduleTable,
+) -> tuple[dict[str, int], frozenset[int], int]:
+    """Measure and cross-bind every Phase 7 population surface.
+
+    The checks here are structural and independent of the corpus literals. They
+    prevent a correct assignment count from concealing excluded or extra rows
+    in an upstream scale table, a diagnostic table, or completion metadata.
+    """
+    excluded = frozenset(int(value) for value in schedule_table.excluded_session_ids)
+    anchor_session_values = np.asarray(product.anchor_scale_columns["session_id"])
+    anchor_sessions = frozenset(int(value) for value in np.unique(anchor_session_values))
+    seasonal_rows = tuple(
+        row for table in product.pipeline.seasonal_profiles.values() for row in table.rows
+    )
+    vol_rel_rows = tuple(
+        row for table in product.pipeline.vol_rel_tables.values() for row in table.rows
+    )
+    threshold_rows = tuple(
+        row for table in product.pipeline.threshold_tables.values() for row in table.rows
+    )
+    assignment_rows = tuple(
+        row for table in product.pipeline.assignment_tables.values() for row in table.rows
+    )
+    state_rows = tuple(product.state_validity.rows)
+    surfaces = {
+        "declared grid": frozenset(product.grid_session_ids),
+        "completion frame": frozenset(product.completion_session_ids),
+        "anchor scales": anchor_sessions,
+        "seasonal profiles": _session_ids(seasonal_rows),
+        "vol-rel tables": _session_ids(vol_rel_rows),
+        "threshold tables": _session_ids(threshold_rows),
+        "assignment tables": _session_ids(assignment_rows),
+        "state validity": _session_ids(state_rows),
+    }
+    assignment_sessions = surfaces["assignment tables"]
+    for name, session_ids in surfaces.items():
+        survivors = sorted(excluded.intersection(session_ids))
+        if survivors:
+            raise SpineError(
+                f"excluded sessions survived in Phase 7 {name}: {survivors}; "
+                "their rows must disappear entirely"
+            )
+    for name, session_ids in surfaces.items():
+        if session_ids != assignment_sessions:
+            raise SpineError(
+                f"Phase 7 {name} describes a different retained-session population"
+            )
+
+    expected_threshold_series = Counter(
+        (row.arm_id, row.session_id, row.session_phase, detail)
+        for row in threshold_rows
+        for detail in ("lower_threshold_series", "upper_threshold_series")
+    )
+    observed_threshold_series = Counter(
+        (row.arm_id, row.session_id, row.session_phase, row.detail)
+        for row in state_rows
+        if row.metric == "threshold_drift"
+        and row.detail in {"lower_threshold_series", "upper_threshold_series"}
+    )
+    if observed_threshold_series != expected_threshold_series:
+        raise SpineError(
+            "state-validity threshold series differs from retained threshold support"
+        )
+
+    _validate_completion_diagnostic_population(
+        product.completion_diagnostic, assignment_sessions
+    )
+    counts = {
+        "declared_grid": int(product.grid_rows),
+        "anchor_scales": int(anchor_session_values.size),
+        "seasonal_profiles": len(seasonal_rows),
+        "vol_rel": len(vol_rel_rows),
+        "thresholds": len(threshold_rows),
+        "assignments": len(assignment_rows),
+        "state_validity": len(state_rows),
+    }
+    for name in (
+        "declared_grid",
+        "anchor_scales",
+        "seasonal_profiles",
+        "thresholds",
+        "assignments",
+        "state_validity",
+    ):
+        if int(product.row_counts.get(name, -1)) != counts[name]:
+            raise SpineError(
+                f"Phase 7 {name} row count differs from the measured product"
+            )
+    relabelled = sum(row.data_quality_status != "ok" for row in assignment_rows)
+    return counts, assignment_sessions, relabelled
+
+
+def _enforce_frozen_phase7_population(
+    product: Phase7Product,
+    schedule_table: SessionScheduleTable,
+) -> None:
+    """Halt unless every Phase 7 surface has the retained v2 population."""
+    counts, sessions, relabelled = _validate_phase7_population_surfaces(
+        product, schedule_table
+    )
+    _enforce_frozen_phase7_counts(
+        counts,
+        session_count=len(sessions),
+        relabelled_assignment_rows=relabelled,
+    )
 
 
 def _enforce_frozen_unit_o_population(row_count: int) -> None:

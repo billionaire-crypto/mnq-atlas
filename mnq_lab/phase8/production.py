@@ -405,6 +405,105 @@ def _census_identity(
     return digest.hexdigest()
 
 
+def _ordinary_mask(arm: ArmFrame) -> np.ndarray:
+    return (arm.session_class == "regular") & (arm.data_quality == "ok")
+
+
+def _completed_mask(
+    valid: np.ndarray, common: np.ndarray, support_kind: str,
+) -> np.ndarray:
+    return valid if support_kind == "horizon_specific" else (valid & common)
+
+
+def _eligible_mask(completed: np.ndarray, arm: ArmFrame) -> np.ndarray:
+    return completed & arm.active
+
+
+def _calendar_years(session_ids: np.ndarray) -> np.ndarray:
+    return session_ids.astype(np.int64) // 10_000
+
+
+def _verify_slice_arm_keys(
+    sessions: np.ndarray, timestamps: np.ndarray, arm: ArmFrame,
+) -> None:
+    if not np.array_equal(sessions, arm.sessions) or not np.array_equal(
+        timestamps, arm.timestamps
+    ):
+        raise SpineError("Unit O and Phase 7 assignment keys differ")
+
+
+def _readonly(array: np.ndarray, *, dtype: Any | None = None) -> np.ndarray:
+    frozen = np.array(array, dtype=dtype, copy=True)
+    frozen.setflags(write=False)
+    return frozen
+
+
+class _ContrastInvariantCache:
+    """Process-local reuse of values invariant across declared contrast rows."""
+
+    def __init__(self) -> None:
+        self._quarters: dict[tuple[str, int], np.ndarray] = {}
+        self._ordinary: dict[str, np.ndarray] = {}
+        self._completed: dict[tuple[tuple[str, int], str], np.ndarray] = {}
+        self._eligible: dict[tuple[tuple[str, int], str, str], np.ndarray] = {}
+        self._calendar_years: dict[tuple[str, int], np.ndarray] = {}
+        self._verified: set[tuple[tuple[str, int], str]] = set()
+
+    def verify(
+        self, slice_key: tuple[str, int], sessions: np.ndarray,
+        timestamps: np.ndarray, arm: ArmFrame,
+    ) -> None:
+        key = (slice_key, arm.arm_id)
+        if key not in self._verified:
+            _verify_slice_arm_keys(sessions, timestamps, arm)
+            self._verified.add(key)
+
+    def quarters(
+        self, slice_key: tuple[str, int], sessions: np.ndarray,
+    ) -> np.ndarray:
+        if slice_key not in self._quarters:
+            self._quarters[slice_key] = _readonly(_year_quarter(sessions))
+        return self._quarters[slice_key]
+
+    def ordinary(self, arm: ArmFrame) -> np.ndarray:
+        if arm.arm_id not in self._ordinary:
+            self._ordinary[arm.arm_id] = _readonly(
+                _ordinary_mask(arm), dtype=np.bool_
+            )
+        return self._ordinary[arm.arm_id]
+
+    def completed(
+        self, slice_key: tuple[str, int], support_kind: str,
+        valid: np.ndarray, common: np.ndarray,
+    ) -> np.ndarray:
+        key = (slice_key, support_kind)
+        if key not in self._completed:
+            self._completed[key] = _readonly(
+                _completed_mask(valid, common, support_kind), dtype=np.bool_
+            )
+        return self._completed[key]
+
+    def eligible(
+        self, slice_key: tuple[str, int], support_kind: str,
+        arm: ArmFrame, completed: np.ndarray,
+    ) -> np.ndarray:
+        key = (slice_key, support_kind, arm.arm_id)
+        if key not in self._eligible:
+            self._eligible[key] = _readonly(
+                _eligible_mask(completed, arm), dtype=np.bool_
+            )
+        return self._eligible[key]
+
+    def calendar_years(
+        self, slice_key: tuple[str, int], sessions: np.ndarray,
+    ) -> np.ndarray:
+        if slice_key not in self._calendar_years:
+            self._calendar_years[slice_key] = _readonly(
+                _calendar_years(sessions), dtype=np.int64
+            )
+        return self._calendar_years[slice_key]
+
+
 def _contrast_partition(
     inputs: ProductionInputs,
     indexed_specs: tuple[tuple[int, ResultRowSpec], ...],
@@ -429,6 +528,7 @@ def _contrast_partition(
     diagnostic_cache: dict[tuple[Any, ...], tuple[Any, Any, Any]] = {}
     value_cache: dict[tuple[str, str, int], np.ndarray] = {}
     structural_eligibility_cache: dict[tuple[str, str, str, int], np.ndarray] = {}
+    invariants = _ContrastInvariantCache()
     active_cache_scope: tuple[Any, ...] | None = None
 
     for position, (index, spec) in enumerate(indexed_specs, start=1):
@@ -445,12 +545,15 @@ def _contrast_partition(
             slice_cache[slice_key] = _slice(inputs, *slice_key)
         unit_mask, sessions, timestamps, valid, common, _window_fits = slice_cache[slice_key]
         arm = inputs.arms[spec.arm_id]
-        if not np.array_equal(sessions, arm.sessions) or not np.array_equal(timestamps, arm.timestamps):
-            raise SpineError("Unit O and Phase 7 assignment keys differ")
-        completed = valid if spec.support_kind == "horizon_specific" else (valid & common)
-        eligible = completed & arm.active
-        ordinary = (arm.session_class == "regular") & (arm.data_quality == "ok")
-        quarters = _year_quarter(sessions)
+        invariants.verify(slice_key, sessions, timestamps, arm)
+        completed = invariants.completed(
+            slice_key, spec.support_kind, valid, common
+        )
+        eligible = invariants.eligible(
+            slice_key, spec.support_kind, arm, completed
+        )
+        ordinary = invariants.ordinary(arm)
+        quarters = invariants.quarters(slice_key, sessions)
         cache_key = (
             spec.arm_id, spec.path_estimand, spec.support_kind, spec.horizon_minutes,
             spec.contrast_name, spec.population_estimand, spec.contrast_weighting,
@@ -476,7 +579,7 @@ def _contrast_partition(
             masks = support_masks(arm.phases, arm.states, spec.target_cell, spec.contrast_name)
             completion = completion_diagnostics(
                 horizon_minutes=spec.horizon_minutes, session_ids=sessions,
-                calendar_years=sessions.astype(np.int64) // 10_000,
+                calendar_years=invariants.calendar_years(slice_key, sessions),
                 structurally_eligible=structurally_eligible, completed=completed,
                 target_mask=masks.target, target_weights=weights.target.weights,
                 baseline_mask=None if weights.baseline is None else masks.baseline,

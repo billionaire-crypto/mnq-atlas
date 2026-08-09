@@ -49,6 +49,51 @@ def _case(*, support_sessions: np.ndarray | None = None) -> tuple[ProductionInpu
     return inputs, arm
 
 
+def _cache_key_case() -> tuple[ProductionInputs, dict[str, ArmFrame]]:
+    sessions = np.asarray([20200102, 20200103], dtype=np.int32)
+    timestamps = np.asarray([1, 2], dtype=np.int64)
+    records = (
+        ("path-a", 15, (True, False)),
+        ("path-a", 60, (False, True)),
+        ("path-b", 15, (False, True)),
+        ("path-b", 60, (True, False)),
+    )
+    unit = {
+        "estimand": np.asarray([
+            path for path, _horizon, _fit in records for _ in sessions
+        ]),
+        "session_id": np.concatenate(tuple(sessions for _ in records)),
+        "ts_event_ns": np.concatenate(tuple(timestamps for _ in records)),
+        "horizon_minutes": np.asarray([
+            horizon for _path, horizon, _fit in records for _ in sessions
+        ], dtype=np.int16),
+        "window_fits_rth": np.asarray([
+            value for _path, _horizon, fit in records for value in fit
+        ], dtype=np.bool_),
+        "outcome_valid": np.ones(8, dtype=np.bool_),
+        "common_support": np.ones(8, dtype=np.bool_),
+    }
+
+    def arm(arm_id: str, active: tuple[bool, bool]) -> ArmFrame:
+        return ArmFrame(
+            arm_id=arm_id, sessions=sessions, timestamps=timestamps,
+            phases=np.asarray(["open", "open"]),
+            states=np.asarray(["state", "state"]),
+            active=np.asarray(active, dtype=np.bool_),
+            session_class=np.asarray(["regular", "regular"]),
+            data_quality=np.asarray(["ok", "ok"]),
+            holiday_adjacent=np.zeros(2, dtype=np.bool_),
+            category_code=np.zeros(2, dtype=np.int16),
+        )
+
+    arms = {"arm-a": arm("arm-a", (True, True)), "arm-b": arm("arm-b", (False, True))}
+    return ProductionInputs(
+        root=Path("."), unit=unit, arms=arms,
+        run_manifest={}, unit_manifest={}, phase7_manifest={},
+        input_manifest_sha256=(),
+    ), arms
+
+
 def test_horizon_specific_denominator_requires_named_window_to_fit():
     inputs, arm = _case()
     result = _structural_completion_eligibility(
@@ -91,16 +136,24 @@ def test_structural_denominator_rejects_unknown_support_kind():
         )
 
 
-def test_structural_denominator_cache_reuses_only_the_complete_identity(monkeypatch):
-    inputs, arm = _case()
+@pytest.mark.parametrize(
+    "mutation",
+    ("arm_id", "path_estimand", "support_kind", "horizon_minutes"),
+)
+def test_structural_denominator_cache_key_uses_every_component(
+    monkeypatch, mutation,
+):
+    inputs, arms = _cache_key_case()
     real = production_module._structural_completion_eligibility
-    calls: list[tuple[str, int]] = []
+    calls: list[tuple[str, str, str, int]] = []
 
-    def counted(*args, support_kind, horizon_minutes, **kwargs):
-        calls.append((support_kind, horizon_minutes))
+    def counted(
+        *args, arm, path_estimand, support_kind, horizon_minutes, **kwargs
+    ):
+        calls.append((arm.arm_id, path_estimand, support_kind, horizon_minutes))
         return real(
-            *args, support_kind=support_kind,
-            horizon_minutes=horizon_minutes, **kwargs,
+            *args, arm=arm, path_estimand=path_estimand,
+            support_kind=support_kind, horizon_minutes=horizon_minutes, **kwargs,
         )
 
     monkeypatch.setattr(
@@ -108,24 +161,48 @@ def test_structural_denominator_cache_reuses_only_the_complete_identity(monkeypa
     )
     slices: dict[tuple[str, int], tuple[np.ndarray, ...]] = {}
     eligibility: dict[tuple[str, str, str, int], np.ndarray] = {}
+    base = {
+        "arm": arms["arm-a"], "path_estimand": "path-a",
+        "support_kind": "horizon_specific", "horizon_minutes": 15,
+    }
     first = _cached_structural_completion_eligibility(
-        slices, eligibility, inputs, arm=arm, path_estimand="path",
-        support_kind="horizon_specific", horizon_minutes=15,
+        slices, eligibility, inputs, **base,
     )
     repeated = _cached_structural_completion_eligibility(
-        slices, eligibility, inputs, arm=arm, path_estimand="path",
-        support_kind="horizon_specific", horizon_minutes=15,
+        slices, eligibility, inputs, **base,
     )
-    changed_support = _cached_structural_completion_eligibility(
-        slices, eligibility, inputs, arm=arm, path_estimand="path",
-        support_kind="common_support", horizon_minutes=15,
+    changed = dict(base)
+    changed.update({
+        "arm_id": {"arm": arms["arm-b"]},
+        "path_estimand": {"path_estimand": "path-b"},
+        "support_kind": {"support_kind": "common_support"},
+        "horizon_minutes": {"horizon_minutes": 60},
+    }[mutation])
+    mutated = _cached_structural_completion_eligibility(
+        slices, eligibility, inputs, **changed,
     )
 
     assert repeated is first
     assert first.flags.writeable is False
-    assert calls == [("horizon_specific", 15), ("common_support", 15)]
+    assert mutated.flags.writeable is False
+    assert len(calls) == 2
+    assert calls[0] != calls[1]
     np.testing.assert_array_equal(first, [True, False])
-    np.testing.assert_array_equal(changed_support, [False, True])
-    # Negative control: omitting support_kind from the cache key returns the
-    # first mask here and is detected by the opposite expected mask above.
-    assert not np.array_equal(first, changed_support)
+    assert not np.array_equal(first, mutated)
+    # Negative control: a cache key missing the parameter under test aliases
+    # these two detectably different masks.
+    incomplete = tuple(
+        value for index, value in enumerate(calls[0])
+        if index != {
+            "arm_id": 0, "path_estimand": 1,
+            "support_kind": 2, "horizon_minutes": 3,
+        }[mutation]
+    )
+    assert incomplete == tuple(
+        value for index, value in enumerate(calls[1])
+        if index != {
+            "arm_id": 0, "path_estimand": 1,
+            "support_kind": 2, "horizon_minutes": 3,
+        }[mutation]
+    )
+    assert not np.array_equal(first, mutated)

@@ -78,8 +78,8 @@ def test_runner_operating_defaults_and_boundaries_are_explicit():
     config = RunnerOperatingConfig(
         stage1_workers=2, bootstrap_workers=3, effective_cpu_count=4
     )
-    assert config.aggregate_memory_ceiling_bytes == 16 * 1024**3
-    assert config.launch_minimum_available_bytes == 18 * 1024**3
+    assert config.aggregate_memory_ceiling_bytes == 192 * 1024**3
+    assert config.launch_minimum_available_bytes == 224 * 1024**3
     assert config.stage1_workers == 2
     assert config.bootstrap_workers == 3
     assert config.process_start_method in {"spawn", "fork"}

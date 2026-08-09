@@ -49,23 +49,26 @@ PHASE8_CHECKPOINT_ROOT = PHASE8_OUTPUT_ROOT.with_name(
 PHASE8_PROGRESS_LOG = PHASE8_OUTPUT_ROOT.with_name(
     PHASE8_OUTPUT_ROOT.name + ".progress.log"
 )
-# The rented Linux preflight measured about 7.85 GiB process-tree PSS while
-# eight Stage 1 workers were active. Keep a fixed, fail-closed ceiling with
-# about 2x measured headroom rather than disabling the boundary. The launch
-# check separately requires another 2 GiB beyond the process-tree ceiling.
-DEFAULT_AGGREGATE_MEMORY_CEILING_BYTES = 16 * 1024**3
-DEFAULT_LAUNCH_MINIMUM_AVAILABLE_BYTES = 18 * 1024**3
+# Attempt 002 durably recorded a 17.36 GB Stage 1 PSS peak before the fixed
+# 16 GiB stop. The pod preflight recorded 251.40 GB effectively available.
+# Keep a substantial fixed boundary below that measured capacity: 192 GiB for
+# the Phase 8 process tree, with launch requiring 224 GiB effectively free.
+# This preserves more than 40 GB of observed host headroom instead of setting
+# the gate equal to the cgroup/physical maximum.
+DEFAULT_AGGREGATE_MEMORY_CEILING_BYTES = 192 * 1024**3
+DEFAULT_LAUNCH_MINIMUM_AVAILABLE_BYTES = 224 * 1024**3
 AGGREGATE_MEMORY_CEILING_BASIS = {
-    "schema_version": "phase8-memory-ceiling-basis-v1",
+    "schema_version": "phase8-memory-ceiling-basis-v2",
     "failed_attempt_execution_receipt_sha256": (
-        "465d0a48045f6ca2713ede54291ba4c5b100e94425a018f03b0e1812a67f4094"
+        "8c89ad96b9f238016571686bae5a66706d2ee6be8bc1cbe2b127d3d4ec8bfc8b"
     ),
-    "observed_stage1_process_tree_pss_bytes": 7_845_995_520,
-    "observed_effective_available_bytes": 251_490_234_368,
+    "recorded_stage1_process_tree_pss_peak_bytes": 17_357_831_168,
+    "recorded_effective_available_bytes": 251_401_981_952,
     "rationale": (
-        "fixed 16 GiB process-tree PSS ceiling provides more than two times "
-        "the measured eight-worker Stage 1 footprint while retaining a "
-        "fail-closed emergency stop"
+        "fixed 192 GiB process-tree PSS ceiling remains more than 40 GB below "
+        "the pod capacity recorded by attempt 002, while a separate 224 GiB "
+        "launch minimum preserves pre-launch headroom and the fail-closed "
+        "emergency stop"
     ),
 }
 PHASE8_OUTPUT_VERSION = "phase8-session-aware-v2"

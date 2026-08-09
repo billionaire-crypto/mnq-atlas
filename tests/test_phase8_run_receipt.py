@@ -185,7 +185,10 @@ def test_success_receipt_records_complete_v2_output_and_unchanged_witness(tmp_pa
     child_exit = json.loads(
         (tmp_path / "evidence/child_exit.json").read_text(encoding="utf-8")
     )
-    assert child_exit["aggregate_memory_ceiling_bytes"] == 16 * 1024**3
+    assert (
+        child_exit["aggregate_memory_ceiling_bytes"]
+        == DEFAULT_AGGREGATE_MEMORY_CEILING_BYTES
+    )
     assert child_exit["aggregate_memory_ceiling_basis"] == dict(
         AGGREGATE_MEMORY_CEILING_BASIS
     )

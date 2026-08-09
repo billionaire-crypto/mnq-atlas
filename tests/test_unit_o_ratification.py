@@ -563,6 +563,102 @@ def test_audit_entry_refuses_casefold_identity_collision():
         ratification._validate_audit_entry(entry)
 
 
+V2_AUDIT_ENTRY = (
+    REPO_ROOT
+    / "mnq_lab/ledger/audit_entries"
+    / "2026-08-09-phase7-unit-o-session-aware-v2.json"
+)
+
+
+def _v2_audit_entry() -> dict:
+    entries = ratification.load_audit_entries(V2_AUDIT_ENTRY.parent)
+    return next(
+        entry
+        for entry in entries
+        if entry["entry_id"] == "2026-08-09-phase7-unit-o-session-aware-v2-audit"
+    )
+
+
+def test_v2_audit_entry_records_the_audited_commit_tree_and_closed_verdict():
+    entry = _v2_audit_entry()
+
+    assert entry["verdict"] == "CLOSED"
+    assert entry["unit"] == UNIT_NAME
+    assert entry["audited_commit"] == "cfe5223a2ae0f2d4a14b940479eb70288cd5c22a"
+    assert entry["audited_tree"] == (
+        "data/exploration/derived/phase7-unit-o-session-aware-v2"
+    )
+    # C7 refuses an entry whose auditor and producer are the same party.
+    assert (
+        entry["auditor_identity"].strip().casefold()
+        != entry["producer_identity"].strip().casefold()
+    )
+
+
+def test_v2_audit_entry_records_the_tree_digest_and_quarantine_limitation():
+    """The two facts the verdict must not lose: what was audited, and what was not."""
+    findings = "\n".join(entry for entry in _v2_audit_entry()["findings"])
+
+    assert (
+        "dc7b3f607d28d2f2a1ccad1cc04340f48b03623a7448c8516734aa3c95e40a87"
+        in findings
+    )
+    assert ".quarantine-failed-v2-e8542c1" in findings
+    assert "non-retroactive" in findings.casefold()
+    assert "prospective only" in findings
+
+
+def _mismatched_evidence(entry: dict) -> list[str]:
+    """Repository-resident evidence whose recorded hash is not the file's hash."""
+    bad = []
+    for relative, digest in entry["evidence_hashes"].items():
+        path = REPO_ROOT / relative
+        if not path.is_file():
+            continue  # external receipt evidence lives outside the repository
+        if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+            bad.append(relative)
+    return bad
+
+
+def test_v2_audit_entry_evidence_hashes_match_the_repository_bytes():
+    """Every in-repository evidence hash is re-read, not trusted."""
+    entry = _v2_audit_entry()
+    resident = [
+        relative
+        for relative in entry["evidence_hashes"]
+        if (REPO_ROOT / relative).is_file()
+    ]
+    assert len(resident) >= 10, "the repository evidence set collapsed to almost nothing"
+    assert _mismatched_evidence(entry) == []
+
+
+def test_negative_case_a_tampered_evidence_hash_is_detected():
+    """Proves the check above can fail: flip one digit and it must be caught."""
+    entry = copy.deepcopy(_v2_audit_entry())
+    relative = "docs/DISCREPANCIES.md"
+    original = entry["evidence_hashes"][relative]
+    entry["evidence_hashes"][relative] = (
+        "0" if original[0] != "0" else "1"
+    ) + original[1:]
+
+    assert _mismatched_evidence(entry) == [relative]
+    # Still schema-valid, so byte-level re-reading -- not schema validation --
+    # is what catches this class of defect.
+    ratification._validate_audit_entry(entry)
+
+
+def test_negative_case_the_v2_entry_must_be_canonical_json(tmp_path):
+    directory = tmp_path / "audit_entries"
+    directory.mkdir()
+    target = directory / V2_AUDIT_ENTRY.name
+    target.write_bytes(V2_AUDIT_ENTRY.read_bytes())
+    assert ratification.load_audit_entries(directory)
+
+    target.write_bytes(V2_AUDIT_ENTRY.read_bytes().replace(b"\n", b"", 1))
+    with pytest.raises(SpineError, match="canonical sorted UTF-8 JSON"):
+        ratification.load_audit_entries(directory)
+
+
 def test_claim_boundary_labels_c4_and_c7_as_attestations():
     assert "C4 is a retrospective attestation" in CLAIM_BOUNDARY
     assert "C2 visibility" in CLAIM_BOUNDARY
@@ -624,8 +720,11 @@ def test_repository_unit_o_audit_and_certificate_validate_exact_completed_tree()
         "2026-08-03-phase7-unit-o-first-run-v1.json"
     )
     entries = ratification.load_audit_entries(audit_path.parent)
+    # Exact list, not a membership check: an unexpected or missing verdict entry
+    # must fail here. The v2 entry is appended, never edited into the v1 one.
     assert [entry["entry_id"] for entry in entries] == [
-        "2026-08-02-unit-o-first-run-v1-audit"
+        "2026-08-02-unit-o-first-run-v1-audit",
+        "2026-08-09-phase7-unit-o-session-aware-v2-audit",
     ]
     result = evaluate_ratification_certificate(
         certificate_path, repo_root=REPO_ROOT

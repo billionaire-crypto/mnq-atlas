@@ -1,0 +1,42 @@
+{
+  "audited_commit": "cfe5223a2ae0f2d4a14b940479eb70288cd5c22a",
+  "audited_tree": "data/exploration/derived/phase7-unit-o-session-aware-v2",
+  "auditor_identity": "Claude independent audit session",
+  "date": "2026-08-09",
+  "entry_id": "2026-08-09-phase7-unit-o-session-aware-v2-audit",
+  "evidence_hashes": {
+    "C:/Users/kyawz/mnq_atlas_runs/phase7-unit-o-v2-final-6f1c506-attempt-2/child.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "C:/Users/kyawz/mnq_atlas_runs/phase7-unit-o-v2-final-6f1c506-attempt-2/child.stdout.log": "73789786a837e579581b650da2ceaf6ebf20dc12aad6d978055b59cc52bf3c73",
+    "C:/Users/kyawz/mnq_atlas_runs/phase7-unit-o-v2-final-6f1c506-attempt-2/child_exit.json": "0047823dc86cd980238555b7cb1a371de07022ac7b694b112e65d38b37ac9eee",
+    "C:/Users/kyawz/mnq_atlas_runs/phase7-unit-o-v2-final-6f1c506-attempt-2/execution_receipt.json": "0535cb62692bf7f813699454946c3c3fa6b3cff38e20dca78be70bc1f12ff029",
+    "C:/Users/kyawz/mnq_atlas_runs/phase7-unit-o-v2-final-6f1c506-attempt-2/post_run_protected_hashes.json": "0033c8da67918f4dfbcf87e3ffb834acf536375b8353818f5023b3a1a302b380",
+    "C:/Users/kyawz/mnq_atlas_runs/phase7-unit-o-v2-final-6f1c506-attempt-2/pre_run_protected_hashes.json": "0033c8da67918f4dfbcf87e3ffb834acf536375b8353818f5023b3a1a302b380",
+    "data/exploration/derived/.archive-phase7-unit-o-session-aware-v2-f51482a/phase7/manifest.json": "c03fde9700487efd32d95bf50ccc28f767df08f6c399227fcfb75ef7fecfc82b",
+    "data/exploration/derived/.archive-phase7-unit-o-session-aware-v2-f51482a/run_manifest.json": "10fa537f6d5a8b20311b63523f807b886487a3a0d58b54f04763bcfc89bbe404",
+    "data/exploration/derived/.archive-phase7-unit-o-session-aware-v2-f51482a/unit_o/manifest.json": "1c7894d457fcfa009271d8744a26868c8672828aba719f7468c4e71f33e17890",
+    "data/exploration/derived/phase7-unit-o-session-aware-v2/phase7/manifest.json": "02995c8040e270d1bb7e9520a0c51444c104e9e196b624c7ffb26e38c2250819",
+    "data/exploration/derived/phase7-unit-o-session-aware-v2/run_manifest.json": "456e3ea04532606042af9b505a6918f659c2ccffbbf1ceb66b8fde9dd809851d",
+    "data/exploration/derived/phase7-unit-o-session-aware-v2/unit_o/manifest.json": "21781d099c9a9562311c57d157f42447033772f77ac2fd62a595d5f66a6517ae",
+    "docs/DISCREPANCIES.md": "4cb91bc6d1144210176e8088d21e124489f1da28c1571cacc6d302a9b2dadc04",
+    "mnq_lab/ledger/run_completion_entries/2026-08-09-phase7-unit-o-session-aware-v2.json": "50ed45f793e73abfb999556d0993af26cefe649f751b0ceee928de9dbe73943d",
+    "mnq_lab/production/phase7_unit_o_run_receipt.py": "ecbc352ef13f4e81f53cb5c0f06eda7d7872bf9e5186bd2ad810cb744a42c07d",
+    "tests/test_phase7_run_receipt.py": "28ce46df6e7d02f6f48d5a974c7a4941fe60162947f4dbecf7963d4bfadc0967"
+  },
+  "findings": [
+    "Verdict CLOSED for the Phase 7 + Unit O session-aware v2 artifact produced at run commit 6f1c506b462b8c4e6df93a4ffcc1be04cbbba76f and closed out at audited commit cfe5223a2ae0f2d4a14b940479eb70288cd5c22a.",
+    "Audited tree digest under the ratification ledger canonical tree algorithm is dc7b3f607d28d2f2a1ccad1cc04340f48b03623a7448c8516734aa3c95e40a87, recomputed independently with mnq_lab.ledger.ratification._tree_sha256. The audited_tree field records the tree path because the schema and condition C7 compare it against the certificate tree path, not against a digest.",
+    "Population correctness verified from the stored arrays rather than from any manifest: declared grid 78,390, anchor scales 391,950, seasonal profiles 391,950, thresholds 50,250, assignments 783,900, state validity 107,105 and Unit O 470,340, with 1,005 retained sessions identical across all six session-bearing surfaces.",
+    "D33 exclusion realised as removal rather than relabelling: sessions 20200309, 20200312, 20200316 and 20200318 carry zero rows in every surface, and the label excluded_unresolved_official_interruption is absent from the artifact. Data-quality labels are exactly ok, scheduled_early_close, no_scheduled_rth and observed_unresolved_early_termination, with 27,300 relabelled rows.",
+    "Independent reproduction established: all 110 stored arrays and the completion diagnostic are bit-identical to the preserved f51482a archive, and the three manifests differ only in code_commit, environment_fingerprint, artifact_manifest_sha256, peak_memory_bytes and stage_seconds.",
+    "External execution evidence verified: wrapper and child exit codes both zero, output complete, staging absent, and the 647-record pre-run and post-run protected snapshots byte-identical, with the snapshot digest 4840f9ea0d8b23f35c19ad16163ea3499b2f4e2055ae04dc0a40a98657d0348b recomputed independently.",
+    "Governance closed as to record: D36 records the conversational authorization of the failed preflight attempt and of the separately authorized retry, states that it is post-run and not retro-dated, supersedes only the production-blocked language of D33 section 11, D34 and D35 for those two attempts, and leaves Phase 8, Phase 9, publication and self-ratification blocked.",
+    "LIMITATION, non-retroactive: the protected root data/exploration/derived/.quarantine-failed-v2-e8542c1 was added after the run. The completed run's snapshots contain exactly 647 records and provably exclude all 114 quarantine files, so no receipt evidence exists or can exist for that tree during the run window. Protection is prospective only, from the next wrapper invocation onward, at which point 762 files are witnessed.",
+    "Residual assurance for that window is reasoning, not measurement: the producer has no code path writing to the quarantine root, and the tree measured 114 files at digest e9f56607b4f156852166f62b6eb523c4646457f8114d9d96c7f3b355205d0074 in two independent post-run audits. Neither observation covers the run window itself.",
+    "No certificate was issued by this audit. Conditions C4 and C7 remain attestations rather than mechanical proofs, and Phase 8 and Phase 9 remain blocked."
+  ],
+  "ledger_format": "unit_audit_verdict_v1",
+  "producer_identity": "Codex implementation session",
+  "program_id": "mnq-atlas-001",
+  "unit": "Unit O",
+  "verdict": "CLOSED"
+}

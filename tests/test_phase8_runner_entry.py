@@ -36,6 +36,15 @@ def test_public_entry_accepts_operating_controls_but_no_data_paths():
     assert not ({"path", "root", "corpus", "tree", "input"} & set(parameters))
 
 
+def test_ratified_input_root_is_the_session_aware_v2_artifact():
+    relative = runner_module.RATIFIED_INPUT_ROOT.relative_to(
+        runner_module.REPO_ROOT
+    ).as_posix()
+    assert relative == "data/exploration/derived/phase7-unit-o-session-aware-v2"
+    # Negative control: Phase 8 must not silently consume the pre-D33 v1 tree.
+    assert "phase7-unit-o-first-run-v1" not in relative
+
+
 def test_input_manifest_is_not_opened_until_ratification_passes(monkeypatch):
     events = []
 

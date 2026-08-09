@@ -29,10 +29,15 @@ from mnq_lab.production.first_exploration_run import (
 AUDIT_LEDGER_DIR = Path(__file__).resolve().parent / "audit_entries"
 COMPLETION_LEDGER_DIR = Path(__file__).resolve().parent / "run_completion_entries"
 RATIFICATION_LEDGER_DIR = Path(__file__).resolve().parent / "ratification_entries"
+RATIFICATION_PROFILE_LEDGER_DIR = (
+    Path(__file__).resolve().parent / "ratification_profile_entries"
+)
 
 AUDIT_FORMAT = "unit_audit_verdict_v1"
 COMPLETION_FORMAT = "run_completion_record_v1"
 CERTIFICATE_FORMAT = "unit_o_ratification_certificate_v1"
+V2_CERTIFICATE_FORMAT = "unit_o_ratification_certificate_v2"
+RATIFICATION_PROFILE_FORMAT = "unit_o_ratification_profile_v1"
 PROGRAM_ID = "mnq-atlas-001"
 UNIT_NAME = "Unit O"
 NON_ADMISSIBLE_STAMP = "NON-ADMISSIBLE DIAGNOSTIC ARTIFACTS"
@@ -104,6 +109,15 @@ class RatificationResult:
     failures: tuple[str, ...]
     mechanically_checked: tuple[str, ...] = ("C1", "C2", "C3", "C5", "C6")
     attested_not_proven: tuple[str, ...] = ("C4", "C7")
+
+
+@dataclass(frozen=True)
+class _RatificationPins:
+    certificate_format: str
+    producing_code_path: str
+    producing_code_sha256: str
+    scientific_column_count: int
+    unit_o_artifact_schema_version: str | None
 
 
 def canonical_json_bytes(value: Any) -> bytes:
@@ -251,7 +265,11 @@ _PRODUCING_CODE_PATH = "mnq_lab/production/first_exploration_run.py"
 _COMMIT_RE = re.compile(r"[0-9a-f]{40}")
 
 
-def _producing_code_sha256_at_commit(repo: Path, run_commit: str) -> str:
+def _producing_code_sha256_at_commit(
+    repo: Path,
+    run_commit: str,
+    relative_path: str = _PRODUCING_CODE_PATH,
+) -> str:
     """SHA-256 of the producing code AS IT WAS at the certificate's run commit.
 
     D34. The certificate attests that an artifact was produced by code at
@@ -271,7 +289,7 @@ def _producing_code_sha256_at_commit(repo: Path, run_commit: str) -> str:
         raise SpineError("certificate run_commit is not a full hexadecimal commit id")
     try:
         completed = subprocess.run(
-            ["git", "-C", str(repo), "cat-file", "blob", f"{run_commit}:{_PRODUCING_CODE_PATH}"],
+            ["git", "-C", str(repo), "cat-file", "blob", f"{run_commit}:{relative_path}"],
             capture_output=True,
             check=False,
         )
@@ -296,7 +314,11 @@ def _d22_sha256(path: Path) -> str:
     return hashlib.sha256(raw[start:end]).hexdigest()
 
 
-def _scientific_columns(tree: Path) -> list[dict[str, str]]:
+def _scientific_columns(
+    tree: Path,
+    *,
+    expected_count: int = SCIENTIFIC_COLUMN_COUNT,
+) -> list[dict[str, str]]:
     phase7 = _load_canonical_json(tree / "phase7" / "manifest.json", "Phase 7 manifest")
     unit_o = _load_canonical_json(tree / "unit_o" / "manifest.json", "Unit O manifest")
     result: list[dict[str, str]] = []
@@ -339,9 +361,9 @@ def _scientific_columns(tree: Path) -> list[dict[str, str]]:
             raise SpineError(f"Unit O column hash differs for {column}")
         result.append({"relative_path": f"unit_o/{record['file']}", "column": f"unit_o.{column}", "sha256": actual})
 
-    if len(result) != SCIENTIFIC_COLUMN_COUNT:
+    if len(result) != expected_count:
         raise SpineError(
-            f"scientific column count is {len(result)}, expected {SCIENTIFIC_COLUMN_COUNT}"
+            f"scientific column count is {len(result)}, expected {expected_count}"
         )
     identities = [(item["relative_path"], item["column"]) for item in result]
     if len(identities) != len(set(identities)):
@@ -403,17 +425,196 @@ def load_audit_entries(directory: Path = AUDIT_LEDGER_DIR) -> list[dict[str, Any
     return entries
 
 
+def _manifest_scientific_column_count(tree: Path) -> tuple[int, str]:
+    """Count declared scientific columns without reading their values."""
+    phase7 = _load_canonical_json(
+        tree / "phase7" / "manifest.json", "Phase 7 manifest"
+    )
+    unit_o = _load_canonical_json(
+        tree / "unit_o" / "manifest.json", "Unit O manifest"
+    )
+    tables = phase7.get("tables")
+    if not isinstance(tables, dict) or not tables:
+        raise SpineError("Phase 7 manifest has no tables")
+    count = 0
+    for table_name, table in tables.items():
+        if not isinstance(table, dict):
+            raise SpineError(f"Phase 7 table {table_name!r} is malformed")
+        order = table.get("column_order")
+        columns = table.get("columns")
+        if not isinstance(order, list) or not isinstance(columns, dict) or set(order) != set(columns):
+            raise SpineError(f"Phase 7 table {table_name!r} columns are incomplete")
+        count += len(order)
+    order = unit_o.get("column_order")
+    columns = unit_o.get("columns")
+    if not isinstance(order, list) or not isinstance(columns, dict) or set(order) != set(columns):
+        raise SpineError("Unit O manifest columns are incomplete")
+    schema = unit_o.get("artifact_schema_version")
+    if not isinstance(schema, str) or not schema:
+        raise SpineError("Unit O artifact schema version is absent")
+    return count + len(order), schema
+
+
+def _validate_ratification_profile(
+    entry: Mapping[str, Any],
+    *,
+    repo_root: Path = REPO_ROOT,
+) -> _RatificationPins:
+    """Validate one immutable per-artifact pin record against its evidence."""
+    _require_exact_keys(
+        entry,
+        {
+            "audit_entry", "certificate_format", "ledger_format",
+            "producing_code", "profile_id", "program_id", "recorded_at_utc",
+            "run_commit", "scientific_columns", "scope", "tree_path", "unit",
+            "unit_o_artifact_schema_version",
+        },
+        "ratification profile",
+    )
+    if entry["ledger_format"] != RATIFICATION_PROFILE_FORMAT:
+        raise SpineError("ratification profile format differs")
+    if entry["certificate_format"] != V2_CERTIFICATE_FORMAT:
+        raise SpineError("ratification profile certificate format differs")
+    if entry["program_id"] != PROGRAM_ID or entry["unit"] != UNIT_NAME:
+        raise SpineError("ratification profile program or unit differs")
+    if not isinstance(entry["profile_id"], str) or not entry["profile_id"].strip():
+        raise SpineError("ratification profile id is empty")
+    if not isinstance(entry["scope"], str) or not entry["scope"].strip():
+        raise SpineError("ratification profile scope is empty")
+    _parse_timestamp(entry["recorded_at_utc"], "ratification profile recorded time")
+    run_commit = _require_commit(entry["run_commit"], "ratification profile run commit")
+
+    producer = _require_exact_keys(
+        entry["producing_code"], {"path", "sha256"},
+        "ratification profile producing code",
+    )
+    if producer["path"] != _PRODUCING_CODE_PATH:
+        raise SpineError("ratification profile producing code path differs")
+    producer_sha = _require_sha(
+        producer["sha256"], "ratification profile producing code hash"
+    )
+    repo = Path(repo_root).resolve(strict=True)
+    if _producing_code_sha256_at_commit(repo, run_commit, producer["path"]) != producer_sha:
+        raise SpineError("ratification profile producing code bytes differ")
+
+    scientific = _require_exact_keys(
+        entry["scientific_columns"], {"count", "protocol"},
+        "ratification profile scientific columns",
+    )
+    count = scientific["count"]
+    if type(count) is not int or count <= 0:
+        raise SpineError("ratification profile scientific column count is invalid")
+    if scientific["protocol"] != SCIENTIFIC_COLUMN_PROTOCOL:
+        raise SpineError("ratification profile scientific-column protocol differs")
+    tree = _resolve_repo_path(repo, entry["tree_path"], "ratification profile tree")
+    manifest_count, schema = _manifest_scientific_column_count(tree)
+    if manifest_count != count:
+        raise SpineError(
+            f"ratification profile scientific column count is {count}, "
+            f"artifact declares {manifest_count}"
+        )
+    if entry["unit_o_artifact_schema_version"] != schema:
+        raise SpineError("ratification profile Unit O artifact schema differs")
+
+    audit_ref = _require_exact_keys(
+        entry["audit_entry"], {"path", "sha256"},
+        "ratification profile audit reference",
+    )
+    audit_path = _resolve_repo_path(repo, audit_ref["path"], "ratification profile audit path")
+    if _sha256_file(audit_path) != _require_sha(
+        audit_ref["sha256"], "ratification profile audit hash"
+    ):
+        raise SpineError("ratification profile audit entry hash differs")
+    audit = _load_canonical_json(audit_path, "ratification profile audit entry")
+    _validate_audit_entry(audit)
+    if (
+        audit["verdict"] != "CLOSED"
+        or audit["unit"] != UNIT_NAME
+        or audit["audited_commit"] != run_commit
+        or audit["audited_tree"] != entry["tree_path"]
+    ):
+        raise SpineError("ratification profile audit scope is not CLOSED")
+    return _RatificationPins(
+        certificate_format=V2_CERTIFICATE_FORMAT,
+        producing_code_path=producer["path"],
+        producing_code_sha256=producer_sha,
+        scientific_column_count=count,
+        unit_o_artifact_schema_version=schema,
+    )
+
+
+def load_ratification_profiles(
+    directory: Path = RATIFICATION_PROFILE_LEDGER_DIR,
+    *,
+    repo_root: Path = REPO_ROOT,
+) -> list[dict[str, Any]]:
+    paths = sorted(Path(directory).glob("*.json"))
+    entries: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for path in paths:
+        entry = _load_canonical_json(path, "ratification profile")
+        _validate_ratification_profile(entry, repo_root=repo_root)
+        if entry["profile_id"] in seen:
+            raise SpineError(f"duplicate ratification profile id {entry['profile_id']!r}")
+        seen.add(entry["profile_id"])
+        entries.append(entry)
+    return entries
+
+
+def _certificate_pins(
+    certificate: Mapping[str, Any], repo: Path
+) -> _RatificationPins:
+    if certificate["ledger_format"] == CERTIFICATE_FORMAT:
+        return _RatificationPins(
+            certificate_format=CERTIFICATE_FORMAT,
+            producing_code_path=_PRODUCING_CODE_PATH,
+            producing_code_sha256=PRODUCING_CODE_SHA256,
+            scientific_column_count=SCIENTIFIC_COLUMN_COUNT,
+            unit_o_artifact_schema_version=None,
+        )
+    profile_ref = _require_exact_keys(
+        certificate["ratification_profile"], {"path", "sha256"},
+        "ratification profile reference",
+    )
+    expected_parent = "mnq_lab/ledger/ratification_profile_entries"
+    profile_relative = Path(profile_ref["path"])
+    if profile_relative.parent.as_posix() != expected_parent:
+        raise SpineError("ratification profile reference is outside its ledger")
+    profile_path = _resolve_repo_path(repo, profile_ref["path"], "ratification profile path")
+    if _sha256_file(profile_path) != _require_sha(
+        profile_ref["sha256"], "ratification profile reference hash"
+    ):
+        raise SpineError("ratification profile reference hash differs")
+    profile = _load_canonical_json(profile_path, "ratification profile")
+    pins = _validate_ratification_profile(profile, repo_root=repo)
+    if (
+        profile["certificate_format"] != certificate["ledger_format"]
+        or profile["run_commit"] != certificate["run_commit"]
+        or profile["tree_path"] != certificate.get("tree", {}).get("path")
+        or profile["scientific_columns"]["protocol"]
+        != certificate["scientific_column_protocol"]
+        or profile["audit_entry"] != certificate["audit_entry"]
+    ):
+        raise SpineError("ratification profile scope differs from certificate")
+    return pins
+
+
 def _certificate_skeleton(certificate: Mapping[str, Any]) -> None:
-    keys = {
+    common_keys = {
         "ledger_format", "certificate_id", "program_id", "unit", "decision_date",
         "tree", "scientific_column_protocol", "scientific_columns", "run_commit",
         "environment_fingerprint", "criteria", "run_completion_record",
         "pinned_inputs", "gate_evidence", "reproduction",
         "non_admissible_override", "audit_entry", "conditions", "claim_boundary",
     }
-    _require_exact_keys(certificate, keys, "ratification certificate")
-    if certificate["ledger_format"] != CERTIFICATE_FORMAT:
+    ledger_format = certificate.get("ledger_format")
+    if ledger_format == CERTIFICATE_FORMAT:
+        keys = common_keys
+    elif ledger_format == V2_CERTIFICATE_FORMAT:
+        keys = common_keys | {"ratification_profile"}
+    else:
         raise SpineError("ratification certificate format differs")
+    _require_exact_keys(certificate, keys, "ratification certificate")
     if certificate["program_id"] != PROGRAM_ID or certificate["unit"] != UNIT_NAME:
         raise SpineError("ratification certificate program or unit differs")
     if not isinstance(certificate["certificate_id"], str) or not certificate["certificate_id"]:
@@ -442,6 +643,7 @@ def evaluate_ratification_certificate(
     certificate = _load_canonical_json(Path(certificate_path), "ratification certificate")
     _certificate_skeleton(certificate)
     repo = Path(repo_root).resolve(strict=True)
+    pins = _certificate_pins(certificate, repo)
     failures: list[str] = []
 
     tree_record = _require_exact_keys(
@@ -456,7 +658,9 @@ def evaluate_ratification_certificate(
     run_manifest = _load_canonical_json(run_manifest_path, "run manifest")
     unit_manifest = _load_canonical_json(unit_manifest_path, "Unit O manifest")
     try:
-        actual_columns = _scientific_columns(tree)
+        actual_columns = _scientific_columns(
+            tree, expected_count=pins.scientific_column_count
+        )
     except SpineError:
         actual_columns = None
 
@@ -472,6 +676,12 @@ def evaluate_ratification_certificate(
             raise SpineError("Unit O source-store manifest hash differs")
         if unit_manifest.get("frozen_inputs") != PINNED_INPUTS:
             raise SpineError("Unit O frozen input bindings differ")
+        if (
+            pins.unit_o_artifact_schema_version is not None
+            and unit_manifest.get("artifact_schema_version")
+            != pins.unit_o_artifact_schema_version
+        ):
+            raise SpineError("Unit O artifact schema differs from its ratification profile")
     except SpineError:
         failures.append("C1")
 
@@ -540,9 +750,11 @@ def evaluate_ratification_certificate(
             {"producing_code_sha256", "gate_records", "thresholds", "tolerances", "fallback", "peak_memory_bytes", "all_gates_passed"},
             "gate evidence",
         )
-        if gates["producing_code_sha256"] != PRODUCING_CODE_SHA256:
+        if gates["producing_code_sha256"] != pins.producing_code_sha256:
             raise SpineError("producing code hash differs")
-        if _producing_code_sha256_at_commit(repo, certificate["run_commit"]) != PRODUCING_CODE_SHA256:
+        if _producing_code_sha256_at_commit(
+            repo, certificate["run_commit"], pins.producing_code_path
+        ) != pins.producing_code_sha256:
             raise SpineError("producing code bytes differ at the certificate's run commit")
         expected_gate_records = [dict(record, passed=True) for record in GATE_CLASSIFICATION]
         if gates["gate_records"] != expected_gate_records or gates["all_gates_passed"] is not True:
@@ -550,7 +762,7 @@ def evaluate_ratification_certificate(
         if gates["thresholds"] != {
             "free_memory_preflight_bytes": FREE_MEMORY_PREFLIGHT_BYTES,
             "peak_memory_ceiling_bytes": PEAK_MEMORY_CEILING_BYTES,
-            "scientific_column_count": SCIENTIFIC_COLUMN_COUNT,
+            "scientific_column_count": pins.scientific_column_count,
         }:
             raise SpineError("gate thresholds were relaxed or changed")
         if gates["tolerances"] != {}:
@@ -627,7 +839,9 @@ def evaluate_ratification_certificate(
             != _sha256_file(comparison_unit_manifest_path)
         ):
             raise SpineError("comparison run/Unit O manifest binding differs")
-        comparison_columns = _scientific_columns(comparison)
+        comparison_columns = _scientific_columns(
+            comparison, expected_count=pins.scientific_column_count
+        )
         if reproduction["scientific_columns"] != comparison_columns or comparison_columns != actual_columns:
             raise SpineError("scientific columns are not bit-identical")
     except SpineError:
@@ -721,9 +935,13 @@ __all__ = [
     "AUDIT_LEDGER_DIR",
     "COMPLETION_LEDGER_DIR",
     "RATIFICATION_LEDGER_DIR",
+    "RATIFICATION_PROFILE_LEDGER_DIR",
+    "RATIFICATION_PROFILE_FORMAT",
+    "V2_CERTIFICATE_FORMAT",
     "RatificationResult",
     "canonical_json_bytes",
     "evaluate_ratification_certificate",
     "load_audit_entries",
+    "load_ratification_profiles",
     "require_ratified_unit_o",
 ]

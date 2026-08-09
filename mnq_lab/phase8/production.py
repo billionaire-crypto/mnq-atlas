@@ -50,6 +50,7 @@ from mnq_lab.phase8.uncertainty import (
 )
 
 _INT32 = np.iinfo(np.int32)
+COMMON_SUPPORT_HORIZON_MINUTES = 60
 
 def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -346,6 +347,7 @@ def _slice(inputs: ProductionInputs, path_estimand: str, horizon: int) -> tuple[
         mask, sessions, timestamps,
         np.asarray(unit["outcome_valid"][mask], dtype=np.bool_),
         np.asarray(unit["common_support"][mask], dtype=np.bool_),
+        np.asarray(unit["window_fits_rth"][mask], dtype=np.bool_),
     )
 
 
@@ -442,11 +444,15 @@ def _contrast_partition(
         slice_key = (spec.path_estimand, spec.horizon_minutes)
         if slice_key not in slice_cache:
             slice_cache[slice_key] = _slice(inputs, *slice_key)
-        unit_mask, sessions, timestamps, valid, common = slice_cache[slice_key]
+        unit_mask, sessions, timestamps, valid, common, _window_fits = slice_cache[slice_key]
         arm = inputs.arms[spec.arm_id]
         if not np.array_equal(sessions, arm.sessions) or not np.array_equal(timestamps, arm.timestamps):
             raise SpineError("Unit O and Phase 7 assignment keys differ")
         completed = valid if spec.support_kind == "horizon_specific" else (valid & common)
+        structurally_eligible = _structural_completion_eligibility(
+            slice_cache, inputs, arm=arm, path_estimand=spec.path_estimand,
+            support_kind=spec.support_kind, horizon_minutes=spec.horizon_minutes,
+        )
         eligible = completed & arm.active
         ordinary = (arm.session_class == "regular") & (arm.data_quality == "ok")
         quarters = _year_quarter(sessions)
@@ -470,7 +476,7 @@ def _contrast_partition(
             completion = completion_diagnostics(
                 horizon_minutes=spec.horizon_minutes, session_ids=sessions,
                 calendar_years=sessions.astype(np.int64) // 10_000,
-                structurally_eligible=arm.active, completed=completed,
+                structurally_eligible=structurally_eligible, completed=completed,
                 target_mask=masks.target, target_weights=weights.target.weights,
                 baseline_mask=None if weights.baseline is None else masks.baseline,
                 baseline_weights=None if weights.baseline is None else weights.baseline.weights,
@@ -841,6 +847,49 @@ def _cached_slice(
     return cached
 
 
+def _structural_completion_eligibility(
+    cache: dict[tuple[str, int], tuple[np.ndarray, ...]],
+    inputs: ProductionInputs,
+    *,
+    arm: ArmFrame,
+    path_estimand: str,
+    support_kind: str,
+    horizon_minutes: int,
+) -> np.ndarray:
+    """Return D31/D32's structural completion denominator.
+
+    Unit O v2 stores ``window_fits_rth`` after resolving every anchor against
+    the explicit session schedule table. Horizon-specific rows use the named
+    horizon. Common-support rows deliberately use the aligned 60-minute row,
+    which is the contract's longest common window.
+    """
+    current = _cached_slice(cache, inputs, (path_estimand, horizon_minutes))
+    _, sessions, timestamps, _, _, named_window_fits = current
+    if not np.array_equal(sessions, arm.sessions) or not np.array_equal(
+        timestamps, arm.timestamps
+    ):
+        raise SpineError("Unit O and Phase 7 assignment keys differ")
+
+    if support_kind == "horizon_specific":
+        structural_fit = named_window_fits
+    elif support_kind == "common_support":
+        support = _cached_slice(
+            cache, inputs, (path_estimand, COMMON_SUPPORT_HORIZON_MINUTES)
+        )
+        _, support_sessions, support_timestamps, _, _, structural_fit = support
+        if not np.array_equal(sessions, support_sessions) or not np.array_equal(
+            timestamps, support_timestamps
+        ):
+            raise SpineError("60-minute structural-support keys differ from named horizon")
+    else:
+        raise SpineError(f"unknown support kind {support_kind!r}")
+
+    structural_fit = np.asarray(structural_fit, dtype=np.bool_)
+    if structural_fit.shape != arm.active.shape:
+        raise SpineError("structural-fit mask and Phase 7 activity shape differ")
+    return np.asarray(arm.active, dtype=np.bool_) & structural_fit
+
+
 def build_production_computation(inputs: ProductionInputs) -> ProductionComputation:
     """Compute all point inventories and construct only status-ok interval requests."""
     declared = declared_result_rows()
@@ -905,11 +954,14 @@ def build_production_computation(inputs: ProductionInputs) -> ProductionComputat
     _day_type_specs = tuple(declared_day_type_rows())
     day_progress = sink.phase(_progress.PHASE_DAY_TYPES, len(_day_type_specs))
     for _day_position, spec in enumerate(_day_type_specs, start=1):
-        unit_mask, sessions, timestamps, valid, common = _cached_slice(
+        unit_mask, sessions, timestamps, valid, common, _window_fits = _cached_slice(
             slice_cache, inputs, (spec.path_estimand, spec.horizon_minutes)
         )
-        del timestamps
         completed = valid if spec.support_kind == "horizon_specific" else (valid & common)
+        structurally_eligible = _structural_completion_eligibility(
+            slice_cache, inputs, arm=primary, path_estimand=spec.path_estimand,
+            support_kind=spec.support_kind, horizon_minutes=spec.horizon_minutes,
+        )
         day_types = np.full(sessions.size, "regular", dtype="<U21")
         day_types[primary.holiday_adjacent] = "holiday_adjacent"
         day_types[primary.session_class == "scheduled_early_close"] = "scheduled_early_close"
@@ -917,7 +969,7 @@ def build_production_computation(inputs: ProductionInputs) -> ProductionComputat
         result = evaluate_day_type_distribution(
             values=values, session_ids=sessions,
             calendar_years=sessions.astype(np.int64) // 10_000,
-            structurally_eligible=primary.active, completed=completed,
+            structurally_eligible=structurally_eligible, completed=completed,
             day_types=day_types, target_day_type=spec.day_type,
             horizon_minutes=spec.horizon_minutes, statistic=spec.statistic,
         )
@@ -954,11 +1006,14 @@ def build_production_computation(inputs: ProductionInputs) -> ProductionComputat
     _interaction_specs = tuple(declared_interaction_rows())
     interaction_progress = sink.phase(_progress.PHASE_INTERACTIONS, len(_interaction_specs))
     for _interaction_position, spec in enumerate(_interaction_specs, start=1):
-        unit_mask, sessions, timestamps, valid, common = _cached_slice(
+        unit_mask, sessions, timestamps, valid, common, _window_fits = _cached_slice(
             slice_cache, inputs, (spec.path_estimand, spec.horizon_minutes)
         )
-        del timestamps
         completed = valid if spec.support_kind == "horizon_specific" else (valid & common)
+        structurally_eligible = _structural_completion_eligibility(
+            slice_cache, inputs, arm=primary, path_estimand=spec.path_estimand,
+            support_kind=spec.support_kind, horizon_minutes=spec.horizon_minutes,
+        )
         values = np.asarray(inputs.unit[spec.outcome_name][unit_mask], dtype=np.int32)
         key = (
             spec.arm_id, spec.outcome_name, spec.path_estimand, spec.support_kind,
@@ -992,7 +1047,7 @@ def build_production_computation(inputs: ProductionInputs) -> ProductionComputat
             completion_passes[term.cell] = not completion_diagnostics(
                 horizon_minutes=spec.horizon_minutes, session_ids=sessions,
                 calendar_years=sessions.astype(np.int64) // 10_000,
-                structurally_eligible=primary.active, completed=completed,
+                structurally_eligible=structurally_eligible, completed=completed,
                 target_mask=(primary.phases == term.cell.phase) & (primary.states == term.cell.volatility_state),
                 target_weights=term.weights,
             ).insufficient_completion

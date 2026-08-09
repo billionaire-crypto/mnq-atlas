@@ -139,12 +139,15 @@ def _write_tree(
     dirty: bool = False,
     commit: str = RUN_COMMIT,
     environment_overrides: dict[str, object] | None = None,
+    scientific_count: int = SCIENTIFIC_COLUMN_COUNT,
+    unit_column_count: int = 25,
+    unit_schema: str = "unit-o-outcomes-v1",
 ) -> None:
     environment = _environment(dirty=dirty, commit=commit)
     if environment_overrides:
         environment.update(environment_overrides)
     phase_columns: dict[str, dict[str, object]] = {}
-    for index in range(SCIENTIFIC_COLUMN_COUNT - 25):
+    for index in range(scientific_count - unit_column_count):
         name = f"phase_col_{index:03d}"
         relative = f"table/{index:03d}_{name}.npy"
         path = root / "phase7" / relative
@@ -164,8 +167,8 @@ def _write_tree(
     _write_json(root / "phase7/manifest.json", phase_manifest)
 
     unit_columns: dict[str, dict[str, object]] = {}
-    for index in range(25):
-        absolute_index = SCIENTIFIC_COLUMN_COUNT - 25 + index
+    for index in range(unit_column_count):
+        absolute_index = scientific_count - unit_column_count + index
         name = f"unit_col_{index:03d}"
         filename = f"{index:02d}_{name}.npy"
         path = root / "unit_o" / filename
@@ -173,7 +176,7 @@ def _write_tree(
         path.write_bytes(f"scientific-{absolute_index:03d}".encode("ascii"))
         unit_columns[name] = {"file": filename, "sha256": _sha(path)}
     unit_manifest = {
-        "artifact_schema_version": "unit-o-outcomes-v1",
+        "artifact_schema_version": unit_schema,
         "code_commit": commit,
         "dirty_worktree": dirty,
         "environment_fingerprint": environment,
@@ -206,6 +209,10 @@ def _build_case(
     reproduction_commit: str | None = None,
     reproduction_environment_overrides: dict[str, object] | None = None,
     override_basis: str = "2026-08-02 user ruling and independently audited bounded override",
+    certificate_format: str = CERTIFICATE_FORMAT,
+    scientific_count: int = SCIENTIFIC_COLUMN_COUNT,
+    unit_column_count: int = 25,
+    unit_schema: str = "unit-o-outcomes-v1",
 ) -> tuple[Path, Path, Path]:
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -217,7 +224,11 @@ def _build_case(
         run_commit = synthetic_commit
     tree = repo / "artifacts" / tree_name
     replay = repo / "artifacts" / "replay"
-    _write_tree(tree, source_sha=source_sha, dirty=dirty, commit=run_commit)
+    _write_tree(
+        tree, source_sha=source_sha, dirty=dirty, commit=run_commit,
+        scientific_count=scientific_count, unit_column_count=unit_column_count,
+        unit_schema=unit_schema,
+    )
     replay_commit = run_commit if reproduction_commit is None else reproduction_commit
     _write_tree(
         replay,
@@ -225,12 +236,19 @@ def _build_case(
         dirty=dirty,
         commit=replay_commit,
         environment_overrides=reproduction_environment_overrides,
+        scientific_count=scientific_count,
+        unit_column_count=unit_column_count,
+        unit_schema=unit_schema,
     )
 
     tree_sha = ratification._tree_sha256(tree)
     replay_sha = ratification._tree_sha256(replay)
-    columns = ratification._scientific_columns(tree)
-    replay_columns = ratification._scientific_columns(replay)
+    columns = ratification._scientific_columns(
+        tree, expected_count=scientific_count
+    )
+    replay_columns = ratification._scientific_columns(
+        replay, expected_count=scientific_count
+    )
     tree_relative = tree.relative_to(repo).as_posix()
     environment = _environment(dirty=dirty, commit=run_commit)
     reproduction_environment = _environment(
@@ -270,8 +288,41 @@ def _build_case(
     _write_json(audit_path, audit)
     audit_ref = {"path": audit_path.relative_to(repo).as_posix(), "sha256": _sha(audit_path)}
 
+    ratification_profile_ref = None
+    if certificate_format == ratification.V2_CERTIFICATE_FORMAT:
+        profile = {
+            "audit_entry": audit_ref,
+            "certificate_format": ratification.V2_CERTIFICATE_FORMAT,
+            "ledger_format": ratification.RATIFICATION_PROFILE_FORMAT,
+            "producing_code": {
+                "path": "mnq_lab/production/first_exploration_run.py",
+                "sha256": PRODUCING_CODE_SHA256,
+            },
+            "profile_id": "synthetic-v2-profile",
+            "program_id": PROGRAM_ID,
+            "recorded_at_utc": "2026-08-03T04:00:00+00:00",
+            "run_commit": run_commit,
+            "scientific_columns": {
+                "count": scientific_count,
+                "protocol": SCIENTIFIC_COLUMN_PROTOCOL,
+            },
+            "scope": "Synthetic v2 ratification-profile coverage.",
+            "tree_path": tree_relative,
+            "unit": UNIT_NAME,
+            "unit_o_artifact_schema_version": unit_schema,
+        }
+        profile_path = (
+            repo
+            / "mnq_lab/ledger/ratification_profile_entries/synthetic-v2.json"
+        )
+        _write_json(profile_path, profile)
+        ratification_profile_ref = {
+            "path": profile_path.relative_to(repo).as_posix(),
+            "sha256": _sha(profile_path),
+        }
+
     certificate = {
-        "ledger_format": CERTIFICATE_FORMAT,
+        "ledger_format": certificate_format,
         "certificate_id": "synthetic-unit-o-certificate",
         "program_id": PROGRAM_ID,
         "unit": UNIT_NAME,
@@ -306,7 +357,7 @@ def _build_case(
             "thresholds": {
                 "free_memory_preflight_bytes": FREE_MEMORY_PREFLIGHT_BYTES,
                 "peak_memory_ceiling_bytes": PEAK_MEMORY_CEILING_BYTES,
-                "scientific_column_count": SCIENTIFIC_COLUMN_COUNT,
+                "scientific_column_count": scientific_count,
             },
             "tolerances": {},
             "fallback": {"allowed": False, "taken": False},
@@ -340,6 +391,8 @@ def _build_case(
         },
         "claim_boundary": CLAIM_BOUNDARY,
     }
+    if ratification_profile_ref is not None:
+        certificate["ratification_profile"] = ratification_profile_ref
     certificate_path = repo / "mnq_lab/ledger/ratification_entries/certificate.json"
     _write_json(certificate_path, certificate)
     return repo, tree, certificate_path
@@ -349,6 +402,50 @@ def _mutate_certificate(path: Path, mutation) -> None:
     certificate = copy.deepcopy(ratification._load_canonical_json(path, "test certificate"))
     mutation(certificate)
     _write_json(path, certificate)
+
+
+def test_repository_v2_ratification_profile_pins_distinct_artifact_facts():
+    profiles = ratification.load_ratification_profiles()
+    profile = next(
+        item for item in profiles
+        if item["tree_path"]
+        == "data/exploration/derived/phase7-unit-o-session-aware-v2"
+    )
+    assert profile["ledger_format"] == ratification.RATIFICATION_PROFILE_FORMAT
+    assert profile["certificate_format"] == ratification.V2_CERTIFICATE_FORMAT
+    assert profile["producing_code"]["sha256"] == (
+        "4aed08c7d8dfcf342fe18d0a1b07ac65ed09947dc3136a5a489c3e1fae8e7fa9"
+    )
+    assert profile["producing_code"]["sha256"] != PRODUCING_CODE_SHA256
+    assert profile["scientific_columns"] == {
+        "count": 110,
+        "protocol": SCIENTIFIC_COLUMN_PROTOCOL,
+    }
+    assert profile["unit_o_artifact_schema_version"] == "unit-o-outcomes-v2"
+
+
+def test_v2_profile_rejects_legacy_producer_pin():
+    profile_path = (
+        REPO_ROOT
+        / "mnq_lab/ledger/ratification_profile_entries/"
+        "2026-08-09-phase7-unit-o-session-aware-v2.json"
+    )
+    profile = ratification._load_canonical_json(profile_path, "test profile")
+    profile["producing_code"]["sha256"] = PRODUCING_CODE_SHA256
+    with pytest.raises(SpineError, match="producing code bytes differ"):
+        ratification._validate_ratification_profile(profile, repo_root=REPO_ROOT)
+
+
+def test_v2_profile_rejects_legacy_scientific_column_count():
+    profile_path = (
+        REPO_ROOT
+        / "mnq_lab/ledger/ratification_profile_entries/"
+        "2026-08-09-phase7-unit-o-session-aware-v2.json"
+    )
+    profile = ratification._load_canonical_json(profile_path, "test profile")
+    profile["scientific_columns"]["count"] = SCIENTIFIC_COLUMN_COUNT
+    with pytest.raises(SpineError, match="scientific column count"):
+        ratification._validate_ratification_profile(profile, repo_root=REPO_ROOT)
 
 
 def test_all_seven_conditions_accept_a_complete_synthetic_certificate(tmp_path):
@@ -362,6 +459,47 @@ def test_all_seven_conditions_accept_a_complete_synthetic_certificate(tmp_path):
         repo_root=repo,
         certificate_directory=certificate.parent,
     )["certificate_id"] == "synthetic-unit-o-certificate"
+
+
+def test_all_seven_conditions_accept_a_profiled_v2_certificate(tmp_path):
+    repo, tree, certificate = _build_case(
+        tmp_path,
+        certificate_format=ratification.V2_CERTIFICATE_FORMAT,
+        scientific_count=110,
+        unit_column_count=26,
+        unit_schema="unit-o-outcomes-v2",
+    )
+    document = ratification._load_canonical_json(certificate, "test certificate")
+    assert document["ratification_profile"]["path"].startswith(
+        "mnq_lab/ledger/ratification_profile_entries/"
+    )
+    result = evaluate_ratification_certificate(certificate, repo_root=repo)
+    assert result.passed and result.failures == ()
+    assert len(document["scientific_columns"]) == 110
+    assert require_ratified_unit_o(
+        tree,
+        repo_root=repo,
+        certificate_directory=certificate.parent,
+    )["ledger_format"] == ratification.V2_CERTIFICATE_FORMAT
+
+
+def test_v2_certificate_rejects_profile_with_legacy_count(tmp_path):
+    repo, _, certificate = _build_case(
+        tmp_path,
+        certificate_format=ratification.V2_CERTIFICATE_FORMAT,
+        scientific_count=110,
+        unit_column_count=26,
+        unit_schema="unit-o-outcomes-v2",
+    )
+    document = ratification._load_canonical_json(certificate, "test certificate")
+    profile_path = repo / document["ratification_profile"]["path"]
+    profile = ratification._load_canonical_json(profile_path, "test profile")
+    profile["scientific_columns"]["count"] = SCIENTIFIC_COLUMN_COUNT
+    _write_json(profile_path, profile)
+    document["ratification_profile"]["sha256"] = _sha(profile_path)
+    _write_json(certificate, document)
+    with pytest.raises(SpineError, match="scientific column count"):
+        evaluate_ratification_certificate(certificate, repo_root=repo)
 
 
 def test_c1_refuses_a_different_source_store_manifest_hash(tmp_path):

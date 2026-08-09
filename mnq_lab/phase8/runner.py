@@ -35,7 +35,7 @@ from mnq_lab.phase8.artifacts import (
 )
 
 RATIFIED_INPUT_ROOT = (
-    REPO_ROOT / "data/exploration/derived/phase7-unit-o-first-run-v1"
+    REPO_ROOT / "data/exploration/derived/phase7-unit-o-session-aware-v2"
 )
 PHASE8_OUTPUT_ROOT = REPO_ROOT / "data/exploration/derived/phase8-first-run-v1"
 # A real log file beside the output root. The first production attempt wrote

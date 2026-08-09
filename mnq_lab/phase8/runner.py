@@ -803,15 +803,22 @@ class AggregateMemoryGate:
         )
 
     def sampling_observation(self) -> dict[str, int | float]:
-        return {
-            "aggregate_memory_sample_interval_seconds": (
-                self.monitor_interval_seconds
-            ),
-            "aggregate_memory_sample_count": self.sample_count,
-            "aggregate_memory_sample_total_seconds": self.sample_total_seconds,
-            "aggregate_memory_sample_mean_seconds": self.sample_mean_seconds,
-            "aggregate_memory_sample_max_seconds": self.sample_max_seconds,
-        }
+        with self._sample_lock:
+            count = self._sample_count
+            total = self._sample_total_seconds
+            maximum = self._sample_max_seconds
+            return {
+                "aggregate_memory_sample_interval_seconds": (
+                    self._monitor_interval_seconds
+                ),
+                # This is an attempt count: failed measurements are timed too.
+                "aggregate_memory_sample_count": count,
+                "aggregate_memory_sample_total_seconds": total,
+                "aggregate_memory_sample_mean_seconds": (
+                    total / count if count else 0.0
+                ),
+                "aggregate_memory_sample_max_seconds": maximum,
+            }
 
     def preflight(self) -> int:
         available = int(self._available_sampler())
@@ -934,12 +941,15 @@ class AggregateMemoryGate:
         self._stop.set()
         monitor_did_not_stop = False
         if self._thread is not None:
-            self._thread.join(timeout=self.stop_join_timeout_seconds)
+            join_timeout = self.stop_join_timeout_seconds
+            self._thread.join(timeout=join_timeout)
+            if self._thread.is_alive():
+                # The final PSS walk can be slower than every earlier sample
+                # because Stage 1 is at peak footprint.  Permit one complete,
+                # equally bounded measurement window before failing closed.
+                self._thread.join(timeout=join_timeout)
             if self._thread.is_alive():
                 monitor_did_not_stop = True
-                self._failure = SpineError(
-                    "aggregate Phase 8 memory monitor did not stop"
-                )
             else:
                 self._thread = None
         if self._breach is not None:
@@ -947,7 +957,12 @@ class AggregateMemoryGate:
                 f"aggregate Phase 8 memory {self._breach} exceeded ceiling {self.ceiling_bytes}"
             )
         if monitor_did_not_stop:
-            raise SpineError("aggregate Phase 8 memory monitor did not stop")
+            timeout_failure = SpineError(
+                "aggregate Phase 8 memory monitor did not stop"
+            )
+            if self._failure is not None:
+                raise timeout_failure from self._failure
+            raise timeout_failure
         if self._failure is not None:
             raise SpineError("aggregate Phase 8 memory monitor failed closed") from self._failure
 

@@ -215,6 +215,41 @@ def test_memory_samples_are_serialized_across_threads():
     assert gate.peak_bytes == 100
 
 
+def test_memory_sampling_observation_waits_for_coherent_sample_snapshot():
+    entered = threading.Event()
+    release = threading.Event()
+
+    def sample():
+        entered.set()
+        assert release.wait(2)
+        return 100
+
+    gate = AggregateMemoryGate(
+        ceiling_bytes=500, launch_minimum_available_bytes=700,
+        aggregate_sampler=sample, available_sampler=lambda: 700,
+    )
+    sampler = threading.Thread(target=gate.sample)
+    sampler.start()
+    assert entered.wait(1)
+    observed = []
+    observation_done = threading.Event()
+
+    def observe():
+        observed.append(gate.sampling_observation())
+        observation_done.set()
+
+    observer = threading.Thread(target=observe)
+    observer.start()
+    time.sleep(0.05)
+    assert observation_done.is_set() is False
+    release.set()
+    assert observation_done.wait(1)
+    sampler.join(1)
+    observer.join(1)
+    assert observed[0]["aggregate_memory_sample_count"] == 1
+    assert observed[0]["aggregate_memory_sample_total_seconds"] > 0
+
+
 def test_memory_sample_durations_drive_evidence_and_stop_timeout(monkeypatch):
     clock = iter((10.0, 10.25, 20.0, 20.75))
     monkeypatch.setattr(runner_module.time, "monotonic", lambda: next(clock))
@@ -272,7 +307,7 @@ def test_memory_monitor_fails_closed_when_sampler_outlives_measured_timeout():
         calls += 1
         if calls > 1:
             entered.set()
-            assert release.wait(5)
+            assert release.wait(10)
         return 100
 
     gate = AggregateMemoryGate(
@@ -291,6 +326,50 @@ def test_memory_monitor_fails_closed_when_sampler_outlives_measured_timeout():
     deadline = time.monotonic() + 1.0
     while gate.monitor_running and time.monotonic() < deadline:
         time.sleep(0.01)
+    assert gate.monitor_running is False
+
+
+def test_memory_monitor_allows_one_bounded_join_retry_for_final_sample():
+    entered = threading.Event()
+    release = threading.Event()
+    calls = 0
+
+    def sample():
+        nonlocal calls
+        calls += 1
+        if calls > 1:
+            entered.set()
+            assert release.wait(5)
+        return 100
+
+    gate = AggregateMemoryGate(
+        ceiling_bytes=500, launch_minimum_available_bytes=700,
+        aggregate_sampler=sample, available_sampler=lambda: 700,
+        monitor_interval_seconds=0.01, hard_stop_grace_seconds=0.01,
+    )
+    gate.start()
+    assert entered.wait(1)
+    stopped = threading.Event()
+    failures = []
+
+    def stop_gate():
+        try:
+            gate.stop()
+        except Exception as exc:  # pragma: no cover - asserted below
+            failures.append(exc)
+        finally:
+            stopped.set()
+
+    stopper = threading.Thread(target=stop_gate)
+    stopper.start()
+    # The first bounded join is two seconds.  Releasing after it expires
+    # proves the second bounded window is active rather than a fixed timeout.
+    time.sleep(2.1)
+    assert stopped.is_set() is False
+    release.set()
+    assert stopped.wait(1)
+    stopper.join(1)
+    assert failures == []
     assert gate.monitor_running is False
 
 

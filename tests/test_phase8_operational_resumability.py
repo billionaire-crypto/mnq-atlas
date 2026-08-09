@@ -24,6 +24,7 @@ from mnq_lab.phase8.artifacts import CheckpointIdentity, CheckpointStore
 from mnq_lab.phase8 import uncertainty as uncertainty_module
 from mnq_lab.phase8.runner import (
     AggregateMemoryGate,
+    DEFAULT_AGGREGATE_MEMORY_SAMPLE_INTERVAL_SECONDS,
     InventoryChunk,
     MemoryMeasurement,
     RunnerOperatingConfig,
@@ -143,6 +144,33 @@ def test_memory_gate_fails_for_unavailable_metric_breach_and_growth():
         growing.sample()
     assert growing.peak_bytes == 600
     assert growing.metric == "pss" and growing.source == "synthetic"
+
+
+def test_default_pss_sampling_interval_avoids_continuous_page_table_walks():
+    samples = 0
+
+    def sample():
+        nonlocal samples
+        samples += 1
+        return MemoryMeasurement(100, "pss", "synthetic")
+
+    gate = AggregateMemoryGate(
+        ceiling_bytes=500,
+        launch_minimum_available_bytes=700,
+        aggregate_sampler=sample,
+        available_sampler=lambda: 700,
+    )
+    assert DEFAULT_AGGREGATE_MEMORY_SAMPLE_INTERVAL_SECONDS == 30.0
+    assert gate._monitor_interval_seconds == 30.0
+    gate.start()
+    try:
+        time.sleep(0.7)
+        assert samples == 1
+    finally:
+        gate.stop()
+    assert gate._thread is None
+    # Negative control: the former 0.5-second cadence would have sampled at
+    # least twice during the same witness window.
 
 
 def test_memory_monitor_interrupts_and_arms_hard_stop_on_breach():
@@ -510,6 +538,7 @@ def test_explicit_resume_validates_failed_prior_and_cross_binds_it(tmp_path):
         progress_log=resume_progress, **_resume_probes(),
     )
     assert record["mode"] == "resume"
+    assert record["aggregate_memory_sample_interval_seconds"] == 30.0
     assert len(record["prior_attempt"]["prior_receipt_sha256"]) == 64
     assert progress.read_text(encoding="utf-8") == "attempt one\n"
     assert not resume_progress.exists()

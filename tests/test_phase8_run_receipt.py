@@ -13,6 +13,7 @@ from mnq_lab import SpineError
 from mnq_lab.phase8.runner import (
     AGGREGATE_MEMORY_CEILING_BASIS,
     DEFAULT_AGGREGATE_MEMORY_CEILING_BYTES,
+    DEFAULT_AGGREGATE_MEMORY_SAMPLE_INTERVAL_SECONDS,
     MemoryMeasurement,
 )
 from mnq_lab.production.phase8_v2_run_receipt import (
@@ -78,6 +79,9 @@ def _passing_preflight() -> dict[str, object]:
         "aggregate_memory_observed_bytes": 1024,
         "aggregate_memory_ceiling_bytes": DEFAULT_AGGREGATE_MEMORY_CEILING_BYTES,
         "aggregate_memory_ceiling_basis": dict(AGGREGATE_MEMORY_CEILING_BASIS),
+        "aggregate_memory_sample_interval_seconds": (
+            DEFAULT_AGGREGATE_MEMORY_SAMPLE_INTERVAL_SECONDS
+        ),
         "input_manifest_sha256": {"run": "a" * 64, "unit_o": "b" * 64, "phase7": "c" * 64},
     }
 
@@ -191,6 +195,10 @@ def test_success_receipt_records_complete_v2_output_and_unchanged_witness(tmp_pa
     )
     assert child_exit["aggregate_memory_ceiling_basis"] == dict(
         AGGREGATE_MEMORY_CEILING_BASIS
+    )
+    assert (
+        child_exit["aggregate_memory_sample_interval_seconds"]
+        == 30.0
     )
     assert json.loads((tmp_path / "evidence/execution_receipt.json").read_text()) == receipt
 

@@ -428,6 +428,7 @@ def _contrast_partition(
     weight_cache: dict[tuple[Any, ...], Any] = {}
     diagnostic_cache: dict[tuple[Any, ...], tuple[Any, Any, Any]] = {}
     value_cache: dict[tuple[str, str, int], np.ndarray] = {}
+    structural_eligibility_cache: dict[tuple[str, str, str, int], np.ndarray] = {}
     active_cache_scope: tuple[Any, ...] | None = None
 
     for position, (index, spec) in enumerate(indexed_specs, start=1):
@@ -447,10 +448,6 @@ def _contrast_partition(
         if not np.array_equal(sessions, arm.sessions) or not np.array_equal(timestamps, arm.timestamps):
             raise SpineError("Unit O and Phase 7 assignment keys differ")
         completed = valid if spec.support_kind == "horizon_specific" else (valid & common)
-        structurally_eligible = _structural_completion_eligibility(
-            slice_cache, inputs, arm=arm, path_estimand=spec.path_estimand,
-            support_kind=spec.support_kind, horizon_minutes=spec.horizon_minutes,
-        )
         eligible = completed & arm.active
         ordinary = (arm.session_class == "regular") & (arm.data_quality == "ok")
         quarters = _year_quarter(sessions)
@@ -470,6 +467,12 @@ def _contrast_partition(
             )
         weights = weight_cache[cache_key]
         if cache_key not in diagnostic_cache:
+            structurally_eligible = _cached_structural_completion_eligibility(
+                slice_cache, structural_eligibility_cache, inputs,
+                arm=arm, path_estimand=spec.path_estimand,
+                support_kind=spec.support_kind,
+                horizon_minutes=spec.horizon_minutes,
+            )
             masks = support_masks(arm.phases, arm.states, spec.target_cell, spec.contrast_name)
             completion = completion_diagnostics(
                 horizon_minutes=spec.horizon_minutes, session_ids=sessions,
@@ -872,6 +875,36 @@ def _structural_completion_eligibility(
     return np.asarray(arm.active, dtype=np.bool_) & structural_fit
 
 
+def _cached_structural_completion_eligibility(
+    slice_cache: dict[tuple[str, int], tuple[np.ndarray, ...]],
+    eligibility_cache: dict[tuple[str, str, str, int], np.ndarray],
+    inputs: ProductionInputs,
+    *,
+    arm: ArmFrame,
+    path_estimand: str,
+    support_kind: str,
+    horizon_minutes: int,
+) -> np.ndarray:
+    """Reuse an identity-bound structural mask within one process.
+
+    Structural eligibility depends only on the arm, path, support contract,
+    and horizon.  Outcome, statistic, contrast, and population rows reuse the
+    same mask.  Keeping this cache process-local preserves fork isolation while
+    avoiding repeated full-array key comparisons and mask allocations.
+    """
+    key = (arm.arm_id, path_estimand, support_kind, horizon_minutes)
+    cached = eligibility_cache.get(key)
+    if cached is None:
+        cached = _structural_completion_eligibility(
+            slice_cache, inputs, arm=arm, path_estimand=path_estimand,
+            support_kind=support_kind, horizon_minutes=horizon_minutes,
+        )
+        cached = np.asarray(cached, dtype=np.bool_)
+        cached.setflags(write=False)
+        eligibility_cache[key] = cached
+    return cached
+
+
 def _partition_checkpoint_identity(
     partition: tuple[tuple[int, ResultRowSpec], ...],
 ) -> str:
@@ -961,6 +994,7 @@ def build_production_computation(
     weight_cache: dict[tuple[Any, ...], Any] = {}
     diagnostic_cache: dict[tuple[Any, ...], tuple[Any, Any, Any]] = {}
     value_cache: dict[tuple[str, str, int], np.ndarray] = {}
+    structural_eligibility_cache: dict[tuple[str, str, str, int], np.ndarray] = {}
     active_cache_scope: tuple[Any, ...] | None = None
 
     def add_census(
@@ -1061,8 +1095,9 @@ def build_production_computation(
             slice_cache, inputs, (spec.path_estimand, spec.horizon_minutes)
         )
         completed = valid if spec.support_kind == "horizon_specific" else (valid & common)
-        structurally_eligible = _structural_completion_eligibility(
-            slice_cache, inputs, arm=primary, path_estimand=spec.path_estimand,
+        structurally_eligible = _cached_structural_completion_eligibility(
+            slice_cache, structural_eligibility_cache, inputs,
+            arm=primary, path_estimand=spec.path_estimand,
             support_kind=spec.support_kind, horizon_minutes=spec.horizon_minutes,
         )
         day_types = np.full(sessions.size, "regular", dtype="<U21")
@@ -1113,8 +1148,9 @@ def build_production_computation(
             slice_cache, inputs, (spec.path_estimand, spec.horizon_minutes)
         )
         completed = valid if spec.support_kind == "horizon_specific" else (valid & common)
-        structurally_eligible = _structural_completion_eligibility(
-            slice_cache, inputs, arm=primary, path_estimand=spec.path_estimand,
+        structurally_eligible = _cached_structural_completion_eligibility(
+            slice_cache, structural_eligibility_cache, inputs,
+            arm=primary, path_estimand=spec.path_estimand,
             support_kind=spec.support_kind, horizon_minutes=spec.horizon_minutes,
         )
         values = np.asarray(inputs.unit[spec.outcome_name][unit_mask], dtype=np.int32)

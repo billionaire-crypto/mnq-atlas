@@ -20,6 +20,7 @@ from mnq_lab.ledger.ratification import require_ratified_unit_o
 from mnq_lab.phase8.runner import (
     AGGREGATE_MEMORY_CEILING_BASIS,
     DEFAULT_AGGREGATE_MEMORY_CEILING_BYTES,
+    DEFAULT_AGGREGATE_MEMORY_SAMPLE_INTERVAL_SECONDS,
     DEFAULT_LAUNCH_MINIMUM_AVAILABLE_BYTES,
     PHASE8_CHECKPOINT_ROOT,
     PHASE8_OUTPUT_ROOT,
@@ -667,6 +668,9 @@ def _preflight_phase8_run(
         "aggregate_memory_observed_bytes": aggregate.bytes,
         "aggregate_memory_ceiling_bytes": DEFAULT_AGGREGATE_MEMORY_CEILING_BYTES,
         "aggregate_memory_ceiling_basis": dict(AGGREGATE_MEMORY_CEILING_BASIS),
+        "aggregate_memory_sample_interval_seconds": (
+            DEFAULT_AGGREGATE_MEMORY_SAMPLE_INTERVAL_SECONDS
+        ),
         "free_disk_bytes": free_disk,
         "minimum_free_disk_bytes": MINIMUM_FREE_DISK_BYTES,
         "conflicting_processes": list(conflicts),
@@ -811,6 +815,9 @@ def _run_with_receipt(
         ),
         "aggregate_memory_ceiling_basis": preflight_record.get(
             "aggregate_memory_ceiling_basis"
+        ),
+        "aggregate_memory_sample_interval_seconds": preflight_record.get(
+            "aggregate_memory_sample_interval_seconds"
         ),
         "available_memory_bytes": preflight_record.get("available_memory_bytes"),
         "minimum_available_memory_bytes": preflight_record.get(

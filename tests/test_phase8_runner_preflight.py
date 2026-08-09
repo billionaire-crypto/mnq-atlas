@@ -13,7 +13,10 @@ from mnq_lab.phase8.preflight import (
     interval_eligible_records,
     thin_support_families,
 )
-from mnq_lab.phase8.runner import RunnerOperatingConfig
+from mnq_lab.phase8.runner import (
+    DEFAULT_AGGREGATE_MEMORY_SAMPLE_INTERVAL_SECONDS,
+    RunnerOperatingConfig,
+)
 
 
 def _key(family: str, cell: str) -> BootstrapTermKey:
@@ -80,6 +83,7 @@ def test_runner_operating_defaults_and_boundaries_are_explicit():
     )
     assert config.aggregate_memory_ceiling_bytes == 192 * 1024**3
     assert config.launch_minimum_available_bytes == 224 * 1024**3
+    assert DEFAULT_AGGREGATE_MEMORY_SAMPLE_INTERVAL_SECONDS == 30.0
     assert config.stage1_workers == 2
     assert config.bootstrap_workers == 3
     assert config.process_start_method in {"spawn", "fork"}

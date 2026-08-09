@@ -57,6 +57,12 @@ PHASE8_PROGRESS_LOG = PHASE8_OUTPUT_ROOT.with_name(
 # the gate equal to the cgroup/physical maximum.
 DEFAULT_AGGREGATE_MEMORY_CEILING_BYTES = 192 * 1024**3
 DEFAULT_LAUNCH_MINIMUM_AVAILABLE_BYTES = 224 * 1024**3
+# Linux PSS requires a page-table walk through every Phase 8 process.  At the
+# observed Stage 1 footprint, sampling it every 0.5 seconds became effectively
+# continuous and competed with the workers.  Thirty seconds bounds the delay
+# to the emergency stop while preserving at least 32 GiB between the fixed
+# process-tree ceiling and the fixed launch-capacity requirement.
+DEFAULT_AGGREGATE_MEMORY_SAMPLE_INTERVAL_SECONDS = 30.0
 AGGREGATE_MEMORY_CEILING_BASIS = {
     "schema_version": "phase8-memory-ceiling-basis-v2",
     "failed_attempt_execution_receipt_sha256": (
@@ -731,7 +737,9 @@ class AggregateMemoryGate:
         failure_interrupt: Callable[[SpineError], None] | None = None,
         failure_terminate: Callable[[SpineError], None] | None = None,
         failure_recorder: Callable[[int, int, int], None] | None = None,
-        monitor_interval_seconds: float = 0.5,
+        monitor_interval_seconds: float = (
+            DEFAULT_AGGREGATE_MEMORY_SAMPLE_INTERVAL_SECONDS
+        ),
         hard_stop_grace_seconds: float = 5.0,
     ) -> None:
         self.ceiling_bytes = int(ceiling_bytes)
@@ -844,6 +852,8 @@ class AggregateMemoryGate:
                 return
 
     def start(self) -> None:
+        if self._thread is not None and self._thread.is_alive():
+            raise SpineError("aggregate Phase 8 memory monitor is already running")
         self.sample()
         self._stop.clear()
         self._thread = threading.Thread(target=self._monitor, daemon=True)
@@ -852,7 +862,16 @@ class AggregateMemoryGate:
     def stop(self) -> None:
         self._stop.set()
         if self._thread is not None:
-            self._thread.join(timeout=2.0)
+            self._thread.join(timeout=max(
+                2.0,
+                self._monitor_interval_seconds + self._hard_stop_grace_seconds,
+            ))
+            if self._thread.is_alive():
+                self._failure = SpineError(
+                    "aggregate Phase 8 memory monitor did not stop"
+                )
+            else:
+                self._thread = None
         if self._breach is not None:
             raise SpineError(
                 f"aggregate Phase 8 memory {self._breach} exceeded ceiling {self.ceiling_bytes}"
@@ -1164,6 +1183,9 @@ def run_phase8(
         "process_start_method": config.process_start_method,
         "aggregate_memory_ceiling_bytes": config.aggregate_memory_ceiling_bytes,
         "aggregate_memory_ceiling_basis": dict(AGGREGATE_MEMORY_CEILING_BASIS),
+        "aggregate_memory_sample_interval_seconds": (
+            DEFAULT_AGGREGATE_MEMORY_SAMPLE_INTERVAL_SECONDS
+        ),
         "launch_minimum_available_bytes": config.launch_minimum_available_bytes,
         "aggregate_peak_memory_bytes": gate.peak_bytes,
         "aggregate_memory_metric": gate.metric,
@@ -1230,6 +1252,7 @@ if __name__ == "__main__":
 
 __all__ = [
     "AggregateMemoryGate", "InventoryChunk", "MemoryMeasurement", "RunnerOperatingConfig",
+    "DEFAULT_AGGREGATE_MEMORY_SAMPLE_INTERVAL_SECONDS",
     "probe_effective_cpu_capacity", "resolve_effective_cpu_capacity",
     "execute_checkpointed_chunks", "load_ratified_inputs",
     "require_absent_phase8_run_paths", "require_phase8_run_paths", "run_phase8",

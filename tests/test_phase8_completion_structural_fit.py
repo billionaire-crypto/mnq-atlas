@@ -8,9 +8,11 @@ import numpy as np
 import pytest
 
 from mnq_lab import SpineError
+from mnq_lab.phase8 import production as production_module
 from mnq_lab.phase8.production import (
     ArmFrame,
     ProductionInputs,
+    _cached_structural_completion_eligibility,
     _structural_completion_eligibility,
 )
 
@@ -87,3 +89,43 @@ def test_structural_denominator_rejects_unknown_support_kind():
             {}, inputs, arm=arm, path_estimand="path",
             support_kind="invented", horizon_minutes=15,
         )
+
+
+def test_structural_denominator_cache_reuses_only_the_complete_identity(monkeypatch):
+    inputs, arm = _case()
+    real = production_module._structural_completion_eligibility
+    calls: list[tuple[str, int]] = []
+
+    def counted(*args, support_kind, horizon_minutes, **kwargs):
+        calls.append((support_kind, horizon_minutes))
+        return real(
+            *args, support_kind=support_kind,
+            horizon_minutes=horizon_minutes, **kwargs,
+        )
+
+    monkeypatch.setattr(
+        production_module, "_structural_completion_eligibility", counted
+    )
+    slices: dict[tuple[str, int], tuple[np.ndarray, ...]] = {}
+    eligibility: dict[tuple[str, str, str, int], np.ndarray] = {}
+    first = _cached_structural_completion_eligibility(
+        slices, eligibility, inputs, arm=arm, path_estimand="path",
+        support_kind="horizon_specific", horizon_minutes=15,
+    )
+    repeated = _cached_structural_completion_eligibility(
+        slices, eligibility, inputs, arm=arm, path_estimand="path",
+        support_kind="horizon_specific", horizon_minutes=15,
+    )
+    changed_support = _cached_structural_completion_eligibility(
+        slices, eligibility, inputs, arm=arm, path_estimand="path",
+        support_kind="common_support", horizon_minutes=15,
+    )
+
+    assert repeated is first
+    assert first.flags.writeable is False
+    assert calls == [("horizon_specific", 15), ("common_support", 15)]
+    np.testing.assert_array_equal(first, [True, False])
+    np.testing.assert_array_equal(changed_support, [False, True])
+    # Negative control: omitting support_kind from the cache key returns the
+    # first mask here and is detected by the opposite expected mask above.
+    assert not np.array_equal(first, changed_support)

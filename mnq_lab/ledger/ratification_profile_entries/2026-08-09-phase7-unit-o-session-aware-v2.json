@@ -1,0 +1,24 @@
+{
+  "audit_entry": {
+    "path": "mnq_lab/ledger/audit_entries/2026-08-09-phase7-unit-o-session-aware-v2-run-commit.json",
+    "sha256": "a7e742379999ce3ed31c682555926360ff052262e40f52ab984049e40d953c6a"
+  },
+  "certificate_format": "unit_o_ratification_certificate_v2",
+  "ledger_format": "unit_o_ratification_profile_v1",
+  "producing_code": {
+    "path": "mnq_lab/production/first_exploration_run.py",
+    "sha256": "4aed08c7d8dfcf342fe18d0a1b07ac65ed09947dc3136a5a489c3e1fae8e7fa9"
+  },
+  "profile_id": "2026-08-09-phase7-unit-o-session-aware-v2-ratification-profile",
+  "program_id": "mnq-atlas-001",
+  "recorded_at_utc": "2026-08-09T04:29:39.749932Z",
+  "run_commit": "6f1c506b462b8c4e6df93a4ffcc1be04cbbba76f",
+  "scientific_columns": {
+    "count": 110,
+    "protocol": "npy-file-sha256-v1"
+  },
+  "scope": "Adds v2 pins only; the historical v1 constants and certificate remain unchanged.",
+  "tree_path": "data/exploration/derived/phase7-unit-o-session-aware-v2",
+  "unit": "Unit O",
+  "unit_o_artifact_schema_version": "unit-o-outcomes-v2"
+}

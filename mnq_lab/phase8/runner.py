@@ -49,12 +49,13 @@ PHASE8_CHECKPOINT_ROOT = PHASE8_OUTPUT_ROOT.with_name(
 PHASE8_PROGRESS_LOG = PHASE8_OUTPUT_ROOT.with_name(
     PHASE8_OUTPUT_ROOT.name + ".progress.log"
 )
-# Attempt 002 durably recorded a 17.36 GB Stage 1 PSS peak before the fixed
-# 16 GiB stop. The pod preflight recorded 251.40 GB effectively available.
-# Keep a substantial fixed boundary below that measured capacity: 192 GiB for
-# the Phase 8 process tree, with launch requiring 224 GiB effectively free.
-# This preserves more than 40 GB of observed host headroom instead of setting
-# the gate equal to the cgroup/physical maximum.
+# Attempt 003 stopped at its first 207.10 GB Stage 1 PSS crossing; that value
+# is not a plateau or peak.  The audited performance correction reduces the
+# sanctioned Stage 1 configuration from eight workers to six and removes the
+# dominant repeated session-array work.  Keep the 192 GiB process-tree
+# boundary unchanged as a fail-closed backstop, with launch still requiring
+# 224 GiB effectively free.  The complete prospective decision and limitations
+# are recorded in docs/PHASE8_V2_ATTEMPT_004_MEMORY_BASIS.md.
 DEFAULT_AGGREGATE_MEMORY_CEILING_BYTES = 192 * 1024**3
 DEFAULT_LAUNCH_MINIMUM_AVAILABLE_BYTES = 224 * 1024**3
 # Linux PSS requires a page-table walk through every Phase 8 process.  At the
@@ -64,17 +65,32 @@ DEFAULT_LAUNCH_MINIMUM_AVAILABLE_BYTES = 224 * 1024**3
 # process-tree ceiling and the fixed launch-capacity requirement.
 DEFAULT_AGGREGATE_MEMORY_SAMPLE_INTERVAL_SECONDS = 30.0
 AGGREGATE_MEMORY_CEILING_BASIS = {
-    "schema_version": "phase8-memory-ceiling-basis-v2",
+    "schema_version": "phase8-memory-ceiling-basis-v3",
     "failed_attempt_execution_receipt_sha256": (
-        "8c89ad96b9f238016571686bae5a66706d2ee6be8bc1cbe2b127d3d4ec8bfc8b"
+        "5216eba31f78c15fc46978dbc15ecef984344c5130e5e52d5b3bbdfd9879d97f"
     ),
-    "recorded_stage1_process_tree_pss_peak_bytes": 17_357_831_168,
-    "recorded_effective_available_bytes": 251_401_981_952,
+    "failed_attempt_run_commit": (
+        "c733890c86a49130c0acf06b36200adc394ffbe5"
+    ),
+    "failed_attempt_stage1_workers": 8,
+    "failed_attempt_bootstrap_workers": 64,
+    "recorded_stage1_process_tree_pss_at_stop_bytes": 207_103_779_840,
+    "recorded_stage1_memory_stop_sample_count": 3,
+    "recorded_stage1_memory_stop_was_plateau": False,
+    "structural_rows_per_slice": 78_390,
+    "prospective_stage1_workers": 6,
+    "prospective_bootstrap_workers": 32,
+    "synthetic_pss_probe_workers": 6,
+    "synthetic_pss_probe_private_bytes": 25_769_803_776,
+    "synthetic_pss_probe_measured_bytes": 25_867_137_024,
+    "synthetic_pss_probe_max_seconds": 0.015742299146950245,
     "rationale": (
-        "fixed 192 GiB process-tree PSS ceiling remains more than 40 GB below "
-        "the pod capacity recorded by attempt 002, while a separate 224 GiB "
-        "launch minimum preserves pre-launch headroom and the fail-closed "
-        "emergency stop"
+        "attempt 003 proved that the eight-worker pre-fix Stage 1 exceeded "
+        "the fixed boundary but did not establish a plateau; attempt 004 uses "
+        "the audited invariant-hoisting and cache-deduplication corrections "
+        "with six Stage 1 and 32 bootstrap workers, while the unchanged 192 "
+        "GiB PSS ceiling, 224 GiB launch minimum, durable stop evidence, and "
+        "bounded monitor shutdown remain fail-closed"
     ),
 }
 PHASE8_OUTPUT_VERSION = "phase8-session-aware-v2"

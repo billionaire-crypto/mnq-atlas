@@ -14,6 +14,7 @@ from mnq_lab.phase8.preflight import (
     thin_support_families,
 )
 from mnq_lab.phase8.runner import (
+    AGGREGATE_MEMORY_CEILING_BASIS,
     DEFAULT_AGGREGATE_MEMORY_SAMPLE_INTERVAL_SECONDS,
     RunnerOperatingConfig,
 )
@@ -87,6 +88,37 @@ def test_runner_operating_defaults_and_boundaries_are_explicit():
     assert config.stage1_workers == 2
     assert config.bootstrap_workers == 3
     assert config.process_start_method in {"spawn", "fork"}
+
+    assert AGGREGATE_MEMORY_CEILING_BASIS == {
+        "schema_version": "phase8-memory-ceiling-basis-v3",
+        "failed_attempt_execution_receipt_sha256": (
+            "5216eba31f78c15fc46978dbc15ecef984344c5130e5e52d5b3bbdfd9879d97f"
+        ),
+        "failed_attempt_run_commit": (
+            "c733890c86a49130c0acf06b36200adc394ffbe5"
+        ),
+        "failed_attempt_stage1_workers": 8,
+        "failed_attempt_bootstrap_workers": 64,
+        "recorded_stage1_process_tree_pss_at_stop_bytes": 207_103_779_840,
+        "recorded_stage1_memory_stop_sample_count": 3,
+        "recorded_stage1_memory_stop_was_plateau": False,
+        "structural_rows_per_slice": 78_390,
+        "prospective_stage1_workers": 6,
+        "prospective_bootstrap_workers": 32,
+        "synthetic_pss_probe_workers": 6,
+        "synthetic_pss_probe_private_bytes": 25_769_803_776,
+        "synthetic_pss_probe_measured_bytes": 25_867_137_024,
+        "synthetic_pss_probe_max_seconds": 0.015742299146950245,
+        "rationale": (
+            "attempt 003 proved that the eight-worker pre-fix Stage 1 "
+            "exceeded the fixed boundary but did not establish a plateau; "
+            "attempt 004 uses the audited invariant-hoisting and "
+            "cache-deduplication corrections with six Stage 1 and 32 "
+            "bootstrap workers, while the unchanged 192 GiB PSS ceiling, "
+            "224 GiB launch minimum, durable stop evidence, and bounded "
+            "monitor shutdown remain fail-closed"
+        ),
+    }
 
     with pytest.raises(SpineError, match="positive integer"):
         RunnerOperatingConfig(stage1_workers=0, bootstrap_workers=1, effective_cpu_count=2)

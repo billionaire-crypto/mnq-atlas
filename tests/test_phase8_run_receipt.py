@@ -22,6 +22,7 @@ from mnq_lab.production.phase8_v2_run_receipt import (
     PROTECTED_RELATIVE_PATHS,
     RECEIPT_SCHEMA_VERSION,
     _active_phase8_runner_processes,
+    _memory_stop_evidence,
     _preflight_phase8_run,
     _run_with_receipt,
 )
@@ -211,6 +212,61 @@ def test_failed_child_is_preserved_and_never_retried(tmp_path):
     assert receipt["child_exit_code"] == receipt["wrapper_exit_code"] == 7
     assert receipt["output_complete"] is False
     assert (tmp_path / "evidence/child_exit.json").is_file()
+
+
+def test_memory_stop_peak_is_copied_into_external_failure_evidence(tmp_path):
+    repo, _ = _repo(tmp_path)
+    output, staging, checkpoint, progress = _paths(repo)
+    ceiling = DEFAULT_AGGREGATE_MEMORY_CEILING_BYTES
+    script = (
+        "from pathlib import Path; "
+        f"Path({str(progress)!r}).write_text("
+        f"'2026-08-09T00:00:00+00:00 phase=memory_stop current_bytes={ceiling + 1} "
+        f"peak_bytes={ceiling + 4096} ceiling_bytes={ceiling}\\n', encoding='utf-8'); "
+        "raise SystemExit(143)"
+    )
+    receipt, exit_code = _run_with_receipt(
+        tmp_path / "evidence-memory-stop",
+        stage1_workers=2,
+        bootstrap_workers=3,
+        repo_root=repo,
+        command=(sys.executable, "-c", script),
+        protected_paths=("protected.txt",),
+        output_root=output,
+        staging_root=staging,
+        checkpoint_root=checkpoint,
+        progress_log=progress,
+        preflight=_passing_preflight,
+    )
+    expected = {
+        "schema_version": "phase8-memory-stop-evidence-v1",
+        "sample_count": 1,
+        "peak_bytes": ceiling + 4096,
+        "ceiling_bytes": ceiling,
+        "last_current_bytes": ceiling + 1,
+    }
+    assert exit_code == 143
+    assert receipt["memory_stop_evidence"] == expected
+    child_exit = json.loads(
+        (tmp_path / "evidence-memory-stop/child_exit.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert child_exit["memory_stop_evidence"] == expected
+
+
+def test_memory_stop_parser_rejects_malformed_or_inconsistent_evidence(tmp_path):
+    progress = tmp_path / "progress.log"
+    progress.write_text("phase=memory_stop peak_bytes=700\n", encoding="utf-8")
+    with pytest.raises(SpineError, match="malformed"):
+        _memory_stop_evidence(progress)
+    progress.write_text(
+        "phase=memory_stop current_bytes=600 peak_bytes=700 ceiling_bytes=500\n"
+        "phase=memory_stop current_bytes=610 peak_bytes=650 ceiling_bytes=500\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(SpineError, match="inconsistent"):
+        _memory_stop_evidence(progress)
 
 
 def test_preflight_failure_launches_no_child_and_consumes_no_receipt_root(tmp_path):

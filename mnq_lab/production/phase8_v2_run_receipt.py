@@ -52,6 +52,7 @@ RECEIPT_SCHEMA_VERSION = "phase8-session-aware-v2-external-execution-receipt-v2"
 SNAPSHOT_SCHEMA_VERSION = "phase8-v2-protected-pre-post-hashes-v1"
 PREFLIGHT_SCHEMA_VERSION = "phase8-session-aware-v2-rented-host-preflight-v2"
 CHECKPOINT_SNAPSHOT_SCHEMA_VERSION = "phase8-checkpoint-evidence-snapshot-v1"
+MEMORY_STOP_EVIDENCE_SCHEMA_VERSION = "phase8-memory-stop-evidence-v1"
 MINIMUM_AVAILABLE_MEMORY_BYTES = DEFAULT_LAUNCH_MINIMUM_AVAILABLE_BYTES
 MINIMUM_FREE_DISK_BYTES = 4 * 1024**3
 V2_INPUT_RELATIVE_PATH = "data/exploration/derived/phase7-unit-o-session-aware-v2"
@@ -290,6 +291,48 @@ def _checkpoint_activity(
             "availability and promotion are mechanically observed here; exact reuse is "
             "recorded by the child in the final output operating manifest"
         ),
+    }
+
+
+def _memory_stop_evidence(progress_log: Path) -> dict[str, Any] | None:
+    path = Path(progress_log)
+    if not path.is_file():
+        return None
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        raise SpineError("Phase 8 progress log is unreadable after child exit") from exc
+    pattern = re.compile(
+        r"(?:^|\s)phase=memory_stop current_bytes=(\d+) "
+        r"peak_bytes=(\d+) ceiling_bytes=(\d+)$"
+    )
+    samples: list[dict[str, int]] = []
+    for line in lines:
+        if "phase=memory_stop" not in line:
+            continue
+        match = pattern.search(line)
+        if match is None:
+            raise SpineError("Phase 8 memory-stop progress evidence is malformed")
+        current, peak, ceiling = (int(value) for value in match.groups())
+        if current <= 0 or peak < current or ceiling <= 0 or peak <= ceiling:
+            raise SpineError("Phase 8 memory-stop progress evidence is incoherent")
+        samples.append({
+            "current_bytes": current,
+            "peak_bytes": peak,
+            "ceiling_bytes": ceiling,
+        })
+    if not samples:
+        return None
+    ceilings = {sample["ceiling_bytes"] for sample in samples}
+    peaks = [sample["peak_bytes"] for sample in samples]
+    if len(ceilings) != 1 or peaks != sorted(peaks):
+        raise SpineError("Phase 8 memory-stop progress evidence is inconsistent")
+    return {
+        "schema_version": MEMORY_STOP_EVIDENCE_SCHEMA_VERSION,
+        "sample_count": len(samples),
+        "peak_bytes": max(peaks),
+        "ceiling_bytes": next(iter(ceilings)),
+        "last_current_bytes": samples[-1]["current_bytes"],
     }
 
 
@@ -726,6 +769,13 @@ def _run_with_receipt(
         os.fsync(stdout_handle.fileno()); os.fsync(stderr_handle.fileno())
     finished_at = _utc_now()
     elapsed = time.perf_counter() - started
+    memory_stop = _memory_stop_evidence(progress_log)
+    if (
+        memory_stop is not None
+        and memory_stop["ceiling_bytes"]
+        != preflight_record.get("aggregate_memory_ceiling_bytes")
+    ):
+        raise SpineError("Phase 8 memory-stop ceiling differs from preflight")
     stdout_record = {"path": stdout_path.name, "bytes": stdout_path.stat().st_size, "sha256": _sha256_file(stdout_path)}
     stderr_record = {"path": stderr_path.name, "bytes": stderr_path.stat().st_size, "sha256": _sha256_file(stderr_path)}
     checkpoint_identity = _checkpoint_identity_evidence(
@@ -766,6 +816,7 @@ def _run_with_receipt(
         "minimum_available_memory_bytes": preflight_record.get(
             "minimum_available_memory_bytes"
         ),
+        "memory_stop_evidence": memory_stop,
         "checkpoint_root": Path(checkpoint_root).resolve().as_posix(),
         "external_checkpoint_root": None if external_checkpoint_root is None else Path(external_checkpoint_root).resolve().as_posix(),
         "checkpoint_identity": checkpoint_identity,
@@ -851,6 +902,7 @@ def _run_with_receipt(
         "checkpoint_identity": checkpoint_identity,
         "checkpoint_activity": checkpoint_activity,
         "output_operating": output_operating,
+        "memory_stop_evidence": memory_stop,
         "phase8_executed": True, "phase9_executed": False,
         "outcome_values_inspected": False,
     }

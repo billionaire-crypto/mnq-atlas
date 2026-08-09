@@ -19,6 +19,7 @@ import platform
 import signal
 import sys
 import threading
+import time
 from typing import Any, Callable, Iterable, Mapping
 
 import numpy as np
@@ -726,6 +727,7 @@ class AggregateMemoryGate:
         available_sampler: Callable[[], int] = _available_memory_bytes,
         failure_interrupt: Callable[[SpineError], None] | None = None,
         failure_terminate: Callable[[SpineError], None] | None = None,
+        failure_recorder: Callable[[int, int, int], None] | None = None,
         monitor_interval_seconds: float = 0.5,
         hard_stop_grace_seconds: float = 5.0,
     ) -> None:
@@ -735,11 +737,13 @@ class AggregateMemoryGate:
         self._available_sampler = available_sampler
         self._failure_interrupt = failure_interrupt
         self._failure_terminate = failure_terminate
+        self._failure_recorder = failure_recorder
         self._monitor_interval_seconds = float(monitor_interval_seconds)
         self._hard_stop_grace_seconds = float(hard_stop_grace_seconds)
         if self._monitor_interval_seconds <= 0 or self._hard_stop_grace_seconds <= 0:
             raise SpineError("Phase 8 memory-monitor timings must be positive")
         self.peak_bytes = 0
+        self.current_bytes = 0
         self.metric: str | None = None
         self.source: str | None = None
         self._breach: int | None = None
@@ -775,9 +779,10 @@ class AggregateMemoryGate:
             current = sampled
             if self.metric is None:
                 self.metric, self.source = "injected_aggregate_bytes", "injected sampler"
+        self.current_bytes = current
         self.peak_bytes = max(self.peak_bytes, current)
         if current > self.ceiling_bytes:
-            self._breach = current
+            self._breach = max(self._breach or 0, current)
             raise SpineError(
                 f"aggregate Phase 8 memory {current} exceeded ceiling {self.ceiling_bytes}"
             )
@@ -789,6 +794,18 @@ class AggregateMemoryGate:
                 self.sample()
             except SpineError as exc:
                 self._failure = exc
+                if self._failure_recorder is not None and self._breach is not None:
+                    try:
+                        self._failure_recorder(
+                            self.current_bytes,
+                            self.peak_bytes,
+                            self.ceiling_bytes,
+                        )
+                    except Exception as record_exc:
+                        self._failure = SpineError(
+                            "aggregate Phase 8 memory failure record could not be written"
+                        )
+                        self._failure.__cause__ = record_exc
                 if self._failure_interrupt is not None:
                     try:
                         self._failure_interrupt(exc)
@@ -797,10 +814,29 @@ class AggregateMemoryGate:
                             "aggregate Phase 8 memory emergency interrupt failed"
                         )
                         self._failure.__cause__ = action_exc
-                if (
-                    self._failure_terminate is not None
-                    and not self._stop.wait(self._hard_stop_grace_seconds)
-                ):
+                deadline = time.monotonic() + self._hard_stop_grace_seconds
+                while not self._stop.is_set():
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    if self._stop.wait(min(self._monitor_interval_seconds, remaining)):
+                        break
+                    try:
+                        current = self.sample()
+                    except SpineError as followup:
+                        self._failure = followup
+                        current = self.current_bytes
+                    if self._failure_recorder is not None and self._breach is not None:
+                        try:
+                            self._failure_recorder(
+                                current, self.peak_bytes, self.ceiling_bytes
+                            )
+                        except Exception as record_exc:
+                            self._failure = SpineError(
+                                "aggregate Phase 8 memory failure record could not be written"
+                            )
+                            self._failure.__cause__ = record_exc
+                if self._failure_terminate is not None and not self._stop.is_set():
                     self._failure_terminate(exc)
                 return
 
@@ -929,11 +965,21 @@ def run_phase8(
     def terminate_for_memory_failure(_failure: SpineError) -> None:
         os.kill(os.getpid(), signal.SIGTERM)
 
+    def record_memory_failure(
+        current_bytes: int, peak_bytes: int, ceiling_bytes: int
+    ) -> None:
+        _progress.get_sink().memory_stop(
+            current_bytes=current_bytes,
+            peak_bytes=peak_bytes,
+            ceiling_bytes=ceiling_bytes,
+        )
+
     gate = AggregateMemoryGate(
         ceiling_bytes=config.aggregate_memory_ceiling_bytes,
         launch_minimum_available_bytes=config.launch_minimum_available_bytes,
         failure_interrupt=interrupt_for_memory_failure,
         failure_terminate=terminate_for_memory_failure,
+        failure_recorder=record_memory_failure,
     )
     gate.preflight()
     guarded = load_ratified_inputs()

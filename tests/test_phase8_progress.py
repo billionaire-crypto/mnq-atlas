@@ -245,6 +245,9 @@ def test_progress_lines_contain_no_scientific_result_fields():
     for name in sorted(progress.PHASE_NAMES):
         phase = sink.phase(name, 2)
         phase.advance(2)
+    sink.memory_stop(
+        current_bytes=1_100, peak_bytes=1_200, ceiling_bytes=1_000
+    )
     text = stream.getvalue()
     forbidden = (
         "tick", "quantile", "contrast_ticks", "interval", "session_id",
@@ -257,10 +260,26 @@ def test_progress_lines_contain_no_scientific_result_fields():
         "contrast_rows", "day_type_rows", "interaction_rows", "bootstrap_workers",
         "stage1_workers", "aggregate_memory_ceiling_bytes",
         "distinct_bootstrap_terms", "resume", "external_checkpoint",
+        "current_bytes", "peak_bytes", "ceiling_bytes",
     }
     for line in _lines(text):
         for key in re.findall(r"(\w+)=", line):
             assert key in allowed_keys, f"unexpected progress field {key!r}"
+
+
+def test_memory_stop_accepts_only_coherent_builtin_byte_counts():
+    stream = io.StringIO()
+    sink = progress.ProgressSink((stream,))
+    sink.memory_stop(current_bytes=600, peak_bytes=700, ceiling_bytes=500)
+    assert "phase=memory_stop current_bytes=600 peak_bytes=700 ceiling_bytes=500" in stream.getvalue()
+
+    for values in (
+        {"current_bytes": True, "peak_bytes": 700, "ceiling_bytes": 500},
+        {"current_bytes": 600, "peak_bytes": 599, "ceiling_bytes": 500},
+        {"current_bytes": 600, "peak_bytes": 700, "ceiling_bytes": 0},
+    ):
+        with pytest.raises(SpineError):
+            sink.memory_stop(**values)
 
 
 def test_distinct_term_count_is_pending_until_measured():

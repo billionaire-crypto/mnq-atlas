@@ -146,23 +146,32 @@ def test_memory_gate_fails_for_unavailable_metric_breach_and_growth():
 
 
 def test_memory_monitor_interrupts_and_arms_hard_stop_on_breach():
-    samples = iter((100, 600))
+    samples = iter((100, 600, 700, 800))
     interrupted = threading.Event()
     terminated = threading.Event()
+    recorded = []
     gate = AggregateMemoryGate(
         ceiling_bytes=500,
         launch_minimum_available_bytes=700,
-        aggregate_sampler=lambda: next(samples),
+        aggregate_sampler=lambda: next(samples, 800),
         available_sampler=lambda: 700,
         failure_interrupt=lambda _failure: interrupted.set(),
         failure_terminate=lambda _failure: terminated.set(),
+        failure_recorder=lambda current, peak, ceiling: recorded.append(
+            (current, peak, ceiling)
+        ),
         monitor_interval_seconds=0.01,
-        hard_stop_grace_seconds=0.02,
+        hard_stop_grace_seconds=0.06,
     )
 
     gate.start()
     assert interrupted.wait(1)
     assert terminated.wait(1)
+    assert recorded[0] == (600, 600, 500)
+    assert recorded[-1] == (800, 800, 500)
+    assert [peak for _current, peak, _ceiling in recorded] == sorted(
+        peak for _current, peak, _ceiling in recorded
+    )
     with pytest.raises(SpineError, match="exceeded ceiling"):
         gate.stop()
 
@@ -188,6 +197,36 @@ def test_memory_monitor_cancels_hard_stop_after_interrupt_unwinds():
         gate.stop()
     time.sleep(0.25)
     assert not terminated.is_set()
+
+
+def test_memory_monitor_does_not_invent_peak_evidence_for_metric_failure():
+    samples = iter((100, SpineError("unreadable")))
+    recorded = []
+    interrupted = threading.Event()
+
+    def sample():
+        value = next(samples, SpineError("unreadable"))
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    gate = AggregateMemoryGate(
+        ceiling_bytes=500,
+        launch_minimum_available_bytes=700,
+        aggregate_sampler=sample,
+        available_sampler=lambda: 700,
+        failure_interrupt=lambda _failure: interrupted.set(),
+        failure_recorder=lambda current, peak, ceiling: recorded.append(
+            (current, peak, ceiling)
+        ),
+        monitor_interval_seconds=0.01,
+        hard_stop_grace_seconds=0.2,
+    )
+    gate.start()
+    assert interrupted.wait(1)
+    with pytest.raises(SpineError, match="monitor failed closed"):
+        gate.stop()
+    assert recorded == []
 
 
 def test_linux_aggregate_memory_uses_pss_not_reclaimable_cgroup_file_cache(

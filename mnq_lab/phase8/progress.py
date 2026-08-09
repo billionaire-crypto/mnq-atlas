@@ -21,6 +21,8 @@ including via exception text, because no exception object is ever accepted.
 
 from __future__ import annotations
 
+import os
+import stat
 import sys
 import threading
 import time
@@ -239,13 +241,21 @@ class ProgressSink:
         with self._phases_lock:
             self._phases.discard(phase)
 
-    def _write(self, line: str) -> None:
+    def _write(self, line: str, *, durable: bool = False) -> None:
         with self._write_lock:
             if self._closed.is_set():
                 return
             for stream in self._streams:
                 stream.write(line + "\n")
                 stream.flush()
+                if durable:
+                    try:
+                        descriptor = stream.fileno()
+                        mode = os.fstat(descriptor).st_mode
+                    except (AttributeError, OSError, ValueError):
+                        continue
+                    if stat.S_ISREG(mode):
+                        os.fsync(descriptor)
 
     def close(self) -> None:
         """Stop every heartbeat before its streams are closed."""
@@ -313,6 +323,27 @@ class ProgressSink:
         self._write(
             f"{_timestamp()} phase=startup "
             f"distinct_bootstrap_terms={distinct_bootstrap_terms}"
+        )
+
+    def memory_stop(
+        self, *, current_bytes: int, peak_bytes: int, ceiling_bytes: int
+    ) -> None:
+        """Durably record operational memory facts before an emergency stop.
+
+        The API accepts built-in byte counts only. It deliberately accepts no
+        free text, exception, array, identifier, or scientific quantity.
+        """
+        current_bytes = _builtin_nonnegative_int(current_bytes, "current_bytes")
+        peak_bytes = _builtin_nonnegative_int(peak_bytes, "peak_bytes")
+        ceiling_bytes = _builtin_nonnegative_int(ceiling_bytes, "ceiling_bytes")
+        if current_bytes <= 0 or peak_bytes <= 0 or ceiling_bytes <= 0:
+            raise SpineError("Phase 8 memory-stop byte counts must be positive")
+        if peak_bytes < current_bytes:
+            raise SpineError("Phase 8 memory-stop peak cannot be below current bytes")
+        self._write(
+            f"{_timestamp()} phase=memory_stop current_bytes={current_bytes} "
+            f"peak_bytes={peak_bytes} ceiling_bytes={ceiling_bytes}",
+            durable=True,
         )
 
     def phase(self, name: str, total: int) -> _PhaseProgress:

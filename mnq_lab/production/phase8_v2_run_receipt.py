@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -103,7 +104,9 @@ def _phase8_snapshot(repo_root: Path, relative_paths: Iterable[str]) -> dict[str
 
 
 def _active_phase8_runner_processes() -> tuple[dict[str, Any], ...]:
-    marker = "mnq_lab.phase8.runner"
+    runner_pattern = re.compile(
+        r"(?:^|\s)-m\s+mnq_lab\.phase8\.runner(?:\s|$)", re.IGNORECASE
+    )
     if os.name == "nt":
         script = (
             "$selfPid=$PID; Get-CimInstance Win32_Process | "
@@ -131,11 +134,11 @@ def _active_phase8_runner_processes() -> tuple[dict[str, Any], ...]:
     found = []
     for line in completed.stdout.splitlines():
         stripped = line.strip()
-        if not stripped or marker not in stripped:
+        if not stripped:
             continue
         pid_text, command = stripped.split(maxsplit=1)
         pid = int(pid_text)
-        if pid != os.getpid():
+        if pid != os.getpid() and runner_pattern.search(command):
             found.append({"pid": pid, "command": command})
     return tuple(found)
 

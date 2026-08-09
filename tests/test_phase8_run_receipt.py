@@ -17,6 +17,7 @@ from mnq_lab.production.phase8_v2_run_receipt import (
     PRODUCTION_COMMAND,
     PROTECTED_RELATIVE_PATHS,
     RECEIPT_SCHEMA_VERSION,
+    _active_phase8_runner_processes,
     _preflight_phase8_run,
     _run_with_receipt,
 )
@@ -83,6 +84,39 @@ def _resource_probes() -> dict[str, object]:
             "run": "a" * 64, "unit_o": "b" * 64, "phase7": "c" * 64,
         },
     }
+
+
+def test_posix_process_probe_matches_only_module_launches(monkeypatch):
+    process_list = """\
+101 python -m mnq_lab.phase8.runner --stage1-workers 1
+102 /bin/sh -lc echo mnq_lab.phase8.runner while auditing
+103 python mnq_lab.phase8.runner
+104 python -m mnq_lab.phase8.runner_extra
+105 python -u -m mnq_lab.phase8.runner --resume
+106 python -m other.module mnq_lab.phase8.runner
+"""
+    completed = subprocess.CompletedProcess(
+        args=("ps",), returncode=0, stdout=process_list, stderr=""
+    )
+    monkeypatch.setattr("mnq_lab.production.phase8_v2_run_receipt.os.name", "posix")
+    monkeypatch.setattr(
+        "mnq_lab.production.phase8_v2_run_receipt.os.getpid", lambda: 999
+    )
+    monkeypatch.setattr(
+        "mnq_lab.production.phase8_v2_run_receipt.subprocess.run",
+        lambda *_args, **_kwargs: completed,
+    )
+
+    assert _active_phase8_runner_processes() == (
+        {
+            "pid": 101,
+            "command": "python -m mnq_lab.phase8.runner --stage1-workers 1",
+        },
+        {
+            "pid": 105,
+            "command": "python -u -m mnq_lab.phase8.runner --resume",
+        },
+    )
 
 
 def test_success_receipt_records_complete_v2_output_and_unchanged_witness(tmp_path):

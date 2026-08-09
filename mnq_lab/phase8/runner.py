@@ -678,23 +678,13 @@ def aggregate_memory_measurement() -> MemoryMeasurement:
             "process_tree_working_set_bytes", "Windows Toolhelp/GetProcessMemoryInfo",
         )
     if sys.platform.startswith("linux"):
-        locations = _linux_cgroup_locations()
-        if "v2" in locations:
-            path = locations["v2"] / "memory.current"
-            try:
-                raw = path.read_text(encoding="ascii").strip()
-                value = int(raw)
-            except (OSError, ValueError) as exc:
-                raise SpineError("Linux cgroup v2 memory.current is unreadable") from exc
-            return MemoryMeasurement(value, "cgroup_memory_current_bytes", path.as_posix())
-        memory_root = locations.get("memory")
-        if memory_root is not None:
-            path = memory_root / "memory.usage_in_bytes"
-            try:
-                value = int(path.read_text(encoding="ascii").strip())
-            except (OSError, ValueError) as exc:
-                raise SpineError("Linux cgroup v1 memory usage is unreadable") from exc
-            return MemoryMeasurement(value, "cgroup_memory_usage_bytes", path.as_posix())
+        # cgroup memory.current includes reclaimable file cache charged while
+        # hashing the governed input and witness trees.  That cache can exceed
+        # the fixed process-memory ceiling even when the complete process tree
+        # is nearly idle.  Enforce the 5.5 GiB aggregate ceiling against PSS,
+        # which accounts shared pages proportionally and excludes closed-file
+        # cache.  Cgroup current/limit remain fail-closed launch-capacity inputs
+        # in available_memory_observation().
         return MemoryMeasurement(
             _linux_process_tree_pss(os.getpid()),
             "process_tree_pss_bytes", "/proc/<pid>/smaps_rollup",

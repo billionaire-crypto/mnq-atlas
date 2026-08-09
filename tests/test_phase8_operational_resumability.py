@@ -18,6 +18,7 @@ import numpy as np
 import pytest
 
 from mnq_lab import SpineError
+from mnq_lab.phase8 import runner as runner_module
 from mnq_lab.phase8.artifacts import CheckpointIdentity, CheckpointStore
 from mnq_lab.phase8 import uncertainty as uncertainty_module
 from mnq_lab.phase8.runner import (
@@ -141,6 +142,43 @@ def test_memory_gate_fails_for_unavailable_metric_breach_and_growth():
         growing.sample()
     assert growing.peak_bytes == 600
     assert growing.metric == "pss" and growing.source == "synthetic"
+
+
+def test_linux_aggregate_memory_uses_pss_not_reclaimable_cgroup_file_cache(
+    tmp_path, monkeypatch,
+):
+    cgroup = tmp_path / "cgroup"
+    cgroup.mkdir()
+    (cgroup / "memory.current").write_text(str(7 * 1024**3), encoding="ascii")
+    monkeypatch.setattr(runner_module.os, "name", "posix")
+    monkeypatch.setattr(runner_module.sys, "platform", "linux")
+    monkeypatch.setattr(
+        runner_module, "_linux_cgroup_locations", lambda: {"v2": cgroup}
+    )
+    monkeypatch.setattr(
+        runner_module, "_linux_process_tree_pss", lambda _pid: 64 * 1024**2
+    )
+
+    measured = runner_module.aggregate_memory_measurement()
+
+    assert measured == MemoryMeasurement(
+        64 * 1024**2,
+        "process_tree_pss_bytes",
+        "/proc/<pid>/smaps_rollup",
+    )
+
+
+def test_linux_aggregate_memory_fails_closed_when_pss_is_unreadable(monkeypatch):
+    monkeypatch.setattr(runner_module.os, "name", "posix")
+    monkeypatch.setattr(runner_module.sys, "platform", "linux")
+    monkeypatch.setattr(
+        runner_module,
+        "_linux_process_tree_pss",
+        lambda _pid: (_ for _ in ()).throw(SpineError("PSS unreadable")),
+    )
+
+    with pytest.raises(SpineError, match="PSS unreadable"):
+        runner_module.aggregate_memory_measurement()
 
 
 def _fork_wait(event):

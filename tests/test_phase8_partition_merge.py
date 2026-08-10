@@ -80,16 +80,21 @@ def _snapshot(merged):
 
 
 def test_worker_deduplicates_support_sessions_before_retaining_partition():
-    sessions = np.asarray([9, 2, 9, 5, 2, 7, 5], dtype=np.int32)
-    weights = np.asarray([0.5, 0.5, 0.25, 0.0, 0.25, 0.0, 0.5])
+    sessions = np.asarray([
+        20240305, 20240102, 20240305, 20241118,
+        20240102, 20241231, 20240704,
+    ], dtype=np.int32)
+    weights = np.asarray([0.5, 0.5, 0.25, 0.5, 0.25, 0.0, -0.5])
 
     compact = production._stable_unique_support_sessions(sessions, weights)
     raw = tuple(sessions[weights > 0.0])
 
-    assert compact == (9, 2, 5)
+    assert compact == (20240305, 20240102, 20241118)
     assert len(compact) == 3
     assert len(raw) == 5
-    # Negative control: uniqueness without first-seen ordering changes evidence.
+    assert 20240704 not in compact
+    # Negative controls: unordered or sorted uniqueness changes evidence.
+    assert tuple(set(raw)) != compact
     assert tuple(sorted(set(raw))) != compact
 
 
@@ -114,6 +119,56 @@ def test_worker_deduplication_is_identical_to_parent_support_normalization():
         key=key, session_ids=tuple(sorted(set(sessions))), status="ok",
     )
     assert reordered_record != raw_record
+
+
+def test_contrast_partition_retains_unique_support_sessions_at_call_site(tmp_path):
+    spec = production.declared_result_rows()[0]
+    unique_sessions = np.asarray(
+        [20200101 + index for index in range(30)], dtype=np.int32,
+    )
+    sessions = np.repeat(unique_sessions, 2)
+    timestamps = np.arange(sessions.size, dtype=np.int64)
+    arm = production.ArmFrame(
+        arm_id=spec.arm_id,
+        sessions=sessions.copy(),
+        timestamps=timestamps.copy(),
+        phases=np.full(sessions.size, "open"),
+        states=np.full(sessions.size, "low"),
+        active=np.ones(sessions.size, dtype=np.bool_),
+        session_class=np.full(sessions.size, "regular"),
+        data_quality=np.full(sessions.size, "ok"),
+        holiday_adjacent=np.zeros(sessions.size, dtype=np.bool_),
+        category_code=np.zeros(sessions.size, dtype=np.int16),
+    )
+    inputs = production.ProductionInputs(
+        root=tmp_path,
+        unit={
+            "estimand": np.full(sessions.size, spec.path_estimand),
+            "session_id": sessions,
+            "ts_event_ns": timestamps,
+            "horizon_minutes": np.full(
+                sessions.size, spec.horizon_minutes, dtype=np.int16,
+            ),
+            "window_fits_rth": np.ones(sessions.size, dtype=np.bool_),
+            "common_support": np.ones(sessions.size, dtype=np.bool_),
+            "outcome_valid": np.ones(sessions.size, dtype=np.bool_),
+            spec.outcome_name: np.arange(sessions.size, dtype=np.int32),
+        },
+        arms={spec.arm_id: arm},
+        run_manifest={},
+        unit_manifest={},
+        phase7_manifest={},
+        input_manifest_sha256=(),
+    )
+
+    partition = production._contrast_partition(inputs, ((0, spec),), {})
+
+    census = partition.entries[0].census[0]
+    assert census.support_sessions == tuple(unique_sessions)
+    assert len(census.support_sessions) == 30
+    assert partition.entries[0].row["n_anchors"] == 60
+    # Negative control: reverting the production call site retains 60 values.
+    assert census.support_sessions != tuple(sessions)
 
 
 def test_central_merge_survives_partition_local_digest_collision(

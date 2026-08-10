@@ -34,7 +34,61 @@ def test_public_entry_accepts_operating_controls_but_no_data_paths():
     assert "bootstrap_workers" in parameters
     assert "aggregate_memory_ceiling_bytes" in parameters
     assert "launch_minimum_available_bytes" in parameters
+    assert "wrapper_launch_capacity_prevalidated" in parameters
     assert not ({"corpus", "tree", "input"} & set(parameters))
+
+
+@pytest.mark.parametrize(
+    ("wrapper_prevalidated", "expected_preflight_calls"),
+    ((False, 1), (True, 0)),
+)
+def test_wrapper_prevalidated_launch_capacity_is_not_rechecked(
+    tmp_path, monkeypatch, wrapper_prevalidated, expected_preflight_calls,
+):
+    events = []
+
+    class StopAfterCapacityCheck(Exception):
+        pass
+
+    monkeypatch.setattr(runner_module._progress, "is_configured", lambda: True)
+    monkeypatch.setattr(runner_module, "PHASE8_OUTPUT_ROOT", tmp_path / "output")
+    monkeypatch.setattr(runner_module, "PHASE8_STAGING_ROOT", tmp_path / "staging")
+    monkeypatch.setattr(
+        runner_module, "PHASE8_CHECKPOINT_ROOT", tmp_path / "checkpoint"
+    )
+    monkeypatch.setattr(
+        runner_module,
+        "probe_effective_cpu_capacity",
+        lambda: {"effective_cpu_count": 128},
+    )
+    monkeypatch.setattr(
+        runner_module.AggregateMemoryGate,
+        "preflight",
+        lambda _self: events.append("capacity"),
+    )
+
+    def stop_before_inputs():
+        events.append("inputs")
+        raise StopAfterCapacityCheck
+
+    monkeypatch.setattr(runner_module, "load_ratified_inputs", stop_before_inputs)
+    with pytest.raises(StopAfterCapacityCheck):
+        runner_module.run_phase8(
+            stage1_workers=6,
+            bootstrap_workers=32,
+            process_start_method="spawn",
+            wrapper_launch_capacity_prevalidated=wrapper_prevalidated,
+        )
+    assert events.count("capacity") == expected_preflight_calls
+    assert events[-1] == "inputs"
+
+    with pytest.raises(SpineError, match="must be a boolean"):
+        runner_module.run_phase8(
+            stage1_workers=6,
+            bootstrap_workers=32,
+            process_start_method="spawn",
+            wrapper_launch_capacity_prevalidated=1,
+        )
 
 
 def test_ratified_input_root_is_the_session_aware_v2_artifact():

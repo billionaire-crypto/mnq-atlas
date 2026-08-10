@@ -25,6 +25,7 @@ from mnq_lab.production.phase8_v2_run_receipt import (
     _active_phase8_runner_processes,
     _memory_stop_evidence,
     _preflight_phase8_run,
+    _production_child_command,
     _run_with_receipt,
 )
 
@@ -422,3 +423,30 @@ def test_public_wrapper_is_fixed_to_phase8_and_protects_its_v2_input():
     )
     assert "data/exploration/derived/phase8-session-aware-v2" not in PROTECTED_RELATIVE_PATHS
     assert all("locked_confirmation" not in path for path in PROTECTED_RELATIVE_PATHS)
+
+
+def test_production_child_records_wrapper_launch_capacity_validation(tmp_path):
+    command = _production_child_command(
+        PRODUCTION_COMMAND,
+        stage1_workers=6,
+        bootstrap_workers=32,
+        process_start_method="fork",
+        resume=False,
+        external_checkpoint_root=tmp_path / "external",
+        progress_log=tmp_path / "progress.log",
+    )
+    assert command.count("--wrapper-launch-capacity-prevalidated") == 1
+    assert command.index("--wrapper-launch-capacity-prevalidated") > command.index(
+        "--progress-log"
+    )
+
+    custom = (sys.executable, "-c", "raise SystemExit(0)")
+    assert _production_child_command(
+        custom,
+        stage1_workers=6,
+        bootstrap_workers=32,
+        process_start_method="fork",
+        resume=False,
+        external_checkpoint_root=None,
+        progress_log=tmp_path / "progress.log",
+    ) == custom

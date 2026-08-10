@@ -300,8 +300,12 @@ def test_default_sink_is_silent_so_importing_is_quiet(capsys):
     assert capsys.readouterr().out == ""
 
 
+@pytest.mark.parametrize(
+    ("extra_arguments", "wrapper_prevalidated"),
+    (((), False), (("--wrapper-launch-capacity-prevalidated",), True)),
+)
 def test_runner_main_configures_stdout_and_real_log_before_running(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, extra_arguments, wrapper_prevalidated,
 ):
     events = []
     log_path = tmp_path / "phase8-production.progress.log"
@@ -318,7 +322,10 @@ def test_runner_main_configures_stdout_and_real_log_before_running(
     monkeypatch.setattr(runner, "run_phase8", lambda **kwargs: events.append(("run", kwargs)))
     monkeypatch.setattr(sys.modules["__main__"], "__spec__", object())
 
-    runner.main(["--stage1-workers", "2", "--bootstrap-workers", "3", "--process-start-method", "spawn"])
+    runner.main([
+        "--stage1-workers", "2", "--bootstrap-workers", "3",
+        "--process-start-method", "spawn", *extra_arguments,
+    ])
 
     assert events == [
         ("configure", {"log_path": log_path, "stdout": True}),
@@ -329,6 +336,7 @@ def test_runner_main_configures_stdout_and_real_log_before_running(
             "external_checkpoint_root": None,
             "progress_log": log_path,
             "process_start_method": "spawn",
+            "wrapper_launch_capacity_prevalidated": wrapper_prevalidated,
         }),
         ("reset", {}),
     ]

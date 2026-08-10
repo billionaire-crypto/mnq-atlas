@@ -1060,6 +1060,7 @@ def run_phase8(
     aggregate_memory_ceiling_bytes: int = DEFAULT_AGGREGATE_MEMORY_CEILING_BYTES,
     launch_minimum_available_bytes: int = DEFAULT_LAUNCH_MINIMUM_AVAILABLE_BYTES,
     process_start_method: str | None = None,
+    wrapper_launch_capacity_prevalidated: bool = False,
 ) -> Mapping[str, Any]:
     """Run and checkpoint the complete Step 7 inventory from the fixed input."""
     if not _progress.is_configured():
@@ -1073,6 +1074,10 @@ def run_phase8(
     if not resume and PHASE8_CHECKPOINT_ROOT.exists():
         raise SpineError(
             f"Phase 8 fixed production path must be absent: {PHASE8_CHECKPOINT_ROOT}"
+        )
+    if not isinstance(wrapper_launch_capacity_prevalidated, bool):
+        raise SpineError(
+            "Phase 8 wrapper launch-capacity validation fact must be a boolean"
         )
     cpu_capacity = probe_effective_cpu_capacity()
     config = RunnerOperatingConfig(
@@ -1105,7 +1110,8 @@ def run_phase8(
         failure_terminate=terminate_for_memory_failure,
         failure_recorder=record_memory_failure,
     )
-    gate.preflight()
+    if not wrapper_launch_capacity_prevalidated:
+        gate.preflight()
     guarded = load_ratified_inputs()
     from dataclasses import asdict
     from mnq_lab.phase8.production import (
@@ -1287,6 +1293,9 @@ def run_phase8(
         "aggregate_memory_ceiling_basis": dict(AGGREGATE_MEMORY_CEILING_BASIS),
         **gate.sampling_observation(),
         "launch_minimum_available_bytes": config.launch_minimum_available_bytes,
+        "wrapper_launch_capacity_prevalidated": (
+            wrapper_launch_capacity_prevalidated
+        ),
         "aggregate_peak_memory_bytes": gate.peak_bytes,
         "aggregate_memory_metric": gate.metric,
         "aggregate_memory_source": gate.source,
@@ -1328,6 +1337,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     parser.add_argument("--bootstrap-workers", required=True, type=int)
     parser.add_argument("--process-start-method", choices=("spawn", "fork"), required=True)
     parser.add_argument("--external-checkpoint-root", type=Path)
+    parser.add_argument("--wrapper-launch-capacity-prevalidated", action="store_true")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--progress-log", type=Path, default=PHASE8_PROGRESS_LOG)
     arguments = parser.parse_args(None if argv is None else list(argv))
@@ -1341,6 +1351,9 @@ def main(argv: Iterable[str] | None = None) -> None:
             external_checkpoint_root=arguments.external_checkpoint_root,
             progress_log=arguments.progress_log,
             process_start_method=arguments.process_start_method,
+            wrapper_launch_capacity_prevalidated=(
+                arguments.wrapper_launch_capacity_prevalidated
+            ),
         )
     finally:
         _progress.reset()

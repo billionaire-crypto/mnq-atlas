@@ -696,6 +696,7 @@ def _production_child_command(
         "--bootstrap-workers", str(bootstrap_workers),
         "--process-start-method", process_start_method,
         "--progress-log", str(Path(progress_log).resolve()),
+        "--wrapper-launch-capacity-prevalidated",
     ]
     if external_checkpoint_root is not None:
         result.extend(("--external-checkpoint-root", str(Path(external_checkpoint_root).resolve())))

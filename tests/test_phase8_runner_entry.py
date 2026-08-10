@@ -160,9 +160,12 @@ def test_worker_count_and_explicit_start_method_reach_process_executor(monkeypat
     seen = {}
 
     class InlineExecutor:
-        def __init__(self, *, max_workers, mp_context):
+        def __init__(
+            self, *, max_workers, mp_context, initializer=None, initargs=()
+        ):
             seen["workers"] = max_workers
             seen["method"] = mp_context.get_start_method()
+            initializer(*initargs)
 
         def submit(self, function, *args):
             class Result:

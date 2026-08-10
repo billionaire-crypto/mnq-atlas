@@ -55,6 +55,7 @@ _INT64_INFO = np.iinfo(np.int64)
 # 4.37 GB before the complete production inventory was resident, leaving too
 # little margin under the frozen 6 GiB ceiling.
 _DEFAULT_TERM_WORKERS = max(1, min(8, os.cpu_count() or 1))
+_BOOTSTRAP_WORKER_STATE: dict[str, Any] = {}
 
 __all__ = [
     "BLOCK_LENGTHS",
@@ -814,6 +815,24 @@ def _evaluate_compiled_chunk(
     )
 
 
+def _initialize_bootstrap_worker(
+    plan_matrices: tuple[np.ndarray, ...],
+) -> None:
+    _BOOTSTRAP_WORKER_STATE.clear()
+    _BOOTSTRAP_WORKER_STATE["plan_matrices"] = plan_matrices
+
+
+def _evaluate_compiled_plan_task(
+    evaluations: tuple[_CompiledTermEvaluation, ...],
+    block_index: int,
+    block_length: int,
+) -> tuple[dict[Hashable, np.ndarray], ...]:
+    plan_matrices = _BOOTSTRAP_WORKER_STATE["plan_matrices"]
+    return _evaluate_compiled_chunk(
+        evaluations, plan_matrices[block_index], block_length
+    )
+
+
 def _group_digest(groups: np.ndarray) -> str:
     digest = hashlib.sha256()
     digest.update(str(groups.dtype).encode("ascii"))
@@ -958,16 +977,21 @@ def _joint_bootstrap_intervals_impl(
     context = multiprocessing.get_context(resolved_start_method)
     use_processes = groups.size > 4_096 and len(compiled) > 1
     process_executor = None
-    chunks: tuple[tuple[_CompiledTermEvaluation, ...], ...] = ()
+    ordered_evaluations: tuple[_CompiledTermEvaluation, ...] = ()
     if use_processes:
         active_workers = min(resolved_workers, len(compiled))
-        chunk_size = (len(compiled) + active_workers - 1) // active_workers
-        chunks = tuple(
-            compiled[start : start + chunk_size]
-            for start in range(0, len(compiled), chunk_size)
+        ordered_evaluations = tuple(
+            evaluation
+            for _position, evaluation in sorted(
+                enumerate(compiled),
+                key=lambda item: (-item[1].eligible_values.size, item[0]),
+            )
         )
         process_executor = ProcessPoolExecutor(
-            max_workers=len(chunks), mp_context=context
+            max_workers=active_workers,
+            mp_context=context,
+            initializer=_initialize_bootstrap_worker,
+            initargs=(plan_matrices,),
         )
 
     try:
@@ -984,12 +1008,12 @@ def _joint_bootstrap_intervals_impl(
             elif process_executor is not None:
                 futures = tuple(
                     process_executor.submit(
-                        _evaluate_compiled_chunk,
-                        chunk,
-                        plan_matrices[block_index],
+                        _evaluate_compiled_plan_task,
+                        (evaluation,),
+                        block_index,
                         block_length,
                     )
-                    for chunk in chunks
+                    for evaluation in ordered_evaluations
                 )
                 evaluated = tuple(
                     output

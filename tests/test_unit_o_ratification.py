@@ -766,10 +766,25 @@ def test_audit_entry_refuses_casefold_identity_collision():
         ratification._validate_audit_entry(entry)
 
 
-V2_AUDIT_ENTRY = (
+V2_PRIOR_AUDIT_ENTRY = (
     REPO_ROOT
     / "mnq_lab/ledger/audit_entries"
     / "2026-08-09-phase7-unit-o-session-aware-v2.json"
+)
+V2_AUDIT_ENTRY = (
+    REPO_ROOT
+    / "mnq_lab/ledger/audit_entries"
+    / "2026-08-10-phase7-unit-o-session-aware-v2-evidence-pin-amendment.json"
+)
+V2_PRIOR_RUN_COMMIT_AUDIT_ENTRY = (
+    REPO_ROOT
+    / "mnq_lab/ledger/audit_entries"
+    / "2026-08-09-phase7-unit-o-session-aware-v2-run-commit.json"
+)
+V2_RUN_COMMIT_AUDIT_ENTRY = (
+    REPO_ROOT
+    / "mnq_lab/ledger/audit_entries"
+    / "2026-08-10-phase7-unit-o-session-aware-v2-run-commit-evidence-pin-amendment.json"
 )
 
 
@@ -778,7 +793,8 @@ def _v2_audit_entry() -> dict:
     return next(
         entry
         for entry in entries
-        if entry["entry_id"] == "2026-08-09-phase7-unit-o-session-aware-v2-audit"
+        if entry["entry_id"]
+        == "2026-08-10-phase7-unit-o-session-aware-v2-evidence-pin-amendment"
     )
 
 
@@ -804,7 +820,7 @@ def _v2_run_commit_audit_entry() -> dict:
         entry
         for entry in entries
         if entry["entry_id"]
-        == "2026-08-09-phase7-unit-o-session-aware-v2-run-commit-audit"
+        == "2026-08-10-phase7-unit-o-session-aware-v2-run-commit-evidence-pin-amendment"
     )
 
 
@@ -825,7 +841,10 @@ def test_v2_run_commit_entry_carries_the_scope_c7_actually_compares():
         != entry["producer_identity"].strip().casefold()
     )
     # It binds the closeout entry it accompanies, so neither can be read alone.
-    prior = "mnq_lab/ledger/audit_entries/2026-08-09-phase7-unit-o-session-aware-v2.json"
+    prior = (
+        "mnq_lab/ledger/audit_entries/"
+        "2026-08-10-phase7-unit-o-session-aware-v2-evidence-pin-amendment.json"
+    )
     assert entry["evidence_hashes"][prior] == hashlib.sha256(
         (REPO_ROOT / prior).read_bytes()
     ).hexdigest()
@@ -895,6 +914,33 @@ def test_negative_case_a_tampered_evidence_hash_is_detected():
     # Still schema-valid, so byte-level re-reading -- not schema validation --
     # is what catches this class of defect.
     ratification._validate_audit_entry(entry)
+
+
+def test_v2_evidence_pin_amendments_bind_the_immutable_prior_entries():
+    closeout, run_commit = _v2_audit_entry(), _v2_run_commit_audit_entry()
+    prior_closeout = V2_PRIOR_AUDIT_ENTRY.relative_to(REPO_ROOT).as_posix()
+    prior_run = V2_PRIOR_RUN_COMMIT_AUDIT_ENTRY.relative_to(REPO_ROOT).as_posix()
+    amended_closeout = V2_AUDIT_ENTRY.relative_to(REPO_ROOT).as_posix()
+
+    assert closeout["evidence_hashes"][prior_closeout] == hashlib.sha256(
+        V2_PRIOR_AUDIT_ENTRY.read_bytes()
+    ).hexdigest()
+    assert run_commit["evidence_hashes"][prior_run] == hashlib.sha256(
+        V2_PRIOR_RUN_COMMIT_AUDIT_ENTRY.read_bytes()
+    ).hexdigest()
+    assert run_commit["evidence_hashes"][amended_closeout] == hashlib.sha256(
+        V2_AUDIT_ENTRY.read_bytes()
+    ).hexdigest()
+
+    # Negative witness: a schema-valid amendment with a corrupted prior-entry
+    # pin is detected by repository-byte re-reading.
+    altered = copy.deepcopy(closeout)
+    original = altered["evidence_hashes"][prior_closeout]
+    altered["evidence_hashes"][prior_closeout] = (
+        "0" if original[0] != "0" else "1"
+    ) + original[1:]
+    assert _mismatched_evidence(altered) == [prior_closeout]
+    ratification._validate_audit_entry(altered)
 
 
 def test_negative_case_the_v2_entry_must_be_canonical_json(tmp_path):
@@ -976,6 +1022,8 @@ def test_repository_unit_o_audit_and_certificate_validate_exact_completed_tree()
         "2026-08-02-unit-o-first-run-v1-audit",
         "2026-08-09-phase7-unit-o-session-aware-v2-run-commit-audit",
         "2026-08-09-phase7-unit-o-session-aware-v2-audit",
+        "2026-08-10-phase7-unit-o-session-aware-v2-evidence-pin-amendment",
+        "2026-08-10-phase7-unit-o-session-aware-v2-run-commit-evidence-pin-amendment",
     ]
     result = evaluate_ratification_certificate(
         certificate_path, repo_root=REPO_ROOT

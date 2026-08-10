@@ -1974,3 +1974,105 @@ and decide whether the remaining receipt-scope limitation is closed before any
 C1-C7 certificate may issue.
 
 **Status:** `OPEN; POST-RUN GOVERNANCE AND RECEIPT-SCOPE CLOSEOUT AUDIT PENDING`.
+
+---
+
+## D37. Phase 8 bootstrap runtime projection superseded by target-host measurements — `RESOLVED`
+
+**Superseded projection.** Commit
+`3d17937a1184f7477b3fa07ed7194bedad3bcd29` recorded about 5.0 hours for
+the Phase 8 bootstrap and about 37 minutes per chunk. Those figures used
+165 ns per eligible-row/bootstrap-draw, measured with synthetic data on a
+Windows review machine. They are superseded as target-host planning figures by
+the measurements and uncertainty assessment below. This entry does not amend
+or rewrite that commit.
+
+**M-1 target-host kernel measurement.** On the Linux pod, a synthetic
+single-core benchmark of
+`mnq_lab.core.weights.weighted_quantiles_prepared_batch_fast` produced a
+cross-cell median of **244.279 ns per eligible-row/bootstrap-draw**. The process
+was pinned to CPU 0; each of twelve cells used five repeats and the production
+batch sizes selected by the Phase 8 evaluation path. The complete measurement
+table is:
+
+| Eligible rows | Requested distinct | Realized distinct | Batch | Median ns/row-draw | Minimum | Maximum |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1,000 | 300 | 300 | 512 | 266.233 | 263.421 | 267.386 |
+| 1,000 | 1,000 | 1,000 | 512 | 255.235 | 248.142 | 310.723 |
+| 1,000 | 3,000 | 1,000 | 512 | 313.214 | 300.052 | 317.808 |
+| 5,000 | 300 | 300 | 512 | 229.916 | 194.675 | 324.380 |
+| 5,000 | 1,000 | 1,000 | 512 | 261.772 | 254.889 | 313.232 |
+| 5,000 | 3,000 | 3,000 | 512 | 191.597 | 188.660 | 192.456 |
+| 20,000 | 300 | 300 | 209 | 213.732 | 189.020 | 259.908 |
+| 20,000 | 1,000 | 1,000 | 209 | 188.461 | 183.080 | 269.931 |
+| 20,000 | 3,000 | 3,000 | 209 | 284.310 | 231.047 | 313.790 |
+| 78,390 | 300 | 300 | 53 | 233.324 | 198.611 | 333.315 |
+| 78,390 | 1,000 | 1,000 | 53 | 305.457 | 191.949 | 323.274 |
+| 78,390 | 3,000 | 3,000 | 53 | 232.824 | 185.988 | 239.594 |
+
+Using 244.279 ns gives a 126.31 core-hour balanced floor. With the unchanged
+eligible-row-weighted recomputation factor of 1.868 and 32 workers, the
+arithmetic projection is 7.37 hours, or 55.3 minutes per chunk across eight
+chunks.
+
+**Withdrawal of the claimed attempt-007 contradiction.** An earlier audit
+response claimed that M-1 conflicted with the attempt-007 observation. That
+claim is withdrawn as an auditor error. The straggler batch contained 670,574
+eligible rows across 19,996 draws, or approximately `1.3410e10` row-draws.
+Thus, 2,260 seconds implies 168.5 ns only if chunk 0 was complete, while it is
+consistent with 244.279 ns if chunk 0 was 69.0 percent complete. The completion
+fraction is unknown. `chunk_progress.advance` fires only after a complete chunk
+(`mnq_lab/phase8/runner.py:1024-1034`), so the progress record contains no finer
+completion evidence. The earlier estimate that chunk 0 was about 97 percent
+complete was circular: it assumed the 165 ns constant that it was then used to
+support.
+
+| Constant | Straggler needs | Implies chunk 0 was | Blocks elapsed |
+|---:|---:|:---|---:|
+| 165.0 ns | 2,212 s | complete | 4.09 |
+| 168.5 ns | 2,259 s | complete | 4.00 |
+| 200.0 ns | 2,682 s | 84.3 percent | 3.37 |
+| 244.3 ns | 3,275 s | 69.0 percent | 2.76 |
+| 281.0 ns | 3,768 s | 60.0 percent | 2.40 |
+
+**M-1 uncertainty.** The measurement carries wide error bars. It measured one
+pinned core rather than 32 workers under concurrent load, and CPU 0 absorbs
+device-interrupt and timer work on most Linux hosts. Across five repeats, two
+within-cell spreads reached 1.67x and 1.68x, while the same code's total spread
+on the review machine was 1.08x. The cross-cell median is therefore a planning
+centre for a wide band, not a precise target-host constant.
+
+**Reasoning, not measurement.** Both synthetic benchmarks used uniform random
+nonnegative weights. That input produces few singleton value groups and
+therefore suppresses the kernel's bulk singleton path at
+`mnq_lab/core/weights.py:481-484`. Real excursion ticks may exercise that path
+more often, so both synthetic benchmarks may overstate real cost. This cannot
+be checked without inspecting outcome magnitudes, which remains out of bounds.
+
+**Replacement planning basis.** Plan for about 7 hours, with a range of 5 to 8
+hours and a floor of about 5 hours. The kernel constant is the least certain
+input in the projection, so no point estimate is warranted. The first completed
+bootstrap chunk in the next authorized run will yield the true constant under
+true concurrent load at roughly the 40-to-65-minute mark, and that chunk's work
+will be retained regardless of the result. No further synthetic benchmark is
+warranted.
+
+**M-2 fork memory measurement.** Fork copy-on-write is **confirmed by
+measurement**. Across 32 workers, private memory ranged from 1.938 to 2.160 MiB
+per worker, compared with the 38.33 MiB per-worker prediction for spawn. Mean
+worker PSS was 3.803 MiB, and process-tree PSS was 136.650 MiB across 33
+processes. Parent PSS changed from 70.744 to 14.939 MiB because the shared pages
+were proportionally re-accounted across the process tree; the change does not
+represent freed memory. The 1.198 GiB plan-matrix budget remains correct for
+**spawn only** and is unmeasured. Under the measured fork behavior, the
+conservative peak projection improves from about 18.4 GiB to about 17.2 GiB
+against the unchanged 192 GiB ceiling.
+
+**Unaffected structural facts.** The eligible-row-weighted recomputation-factor
+change from 4.466 to 1.868 and the eight-chunk inventory are structural. They do
+not depend on either timing measurement and remain unchanged.
+
+**Scope and status.** This is a documentation-only supersession of runtime and
+memory planning statements. It changes no code, checkpoint identity, scientific
+rule or production artifact. It does not authorize production or declare
+readiness. **Status:** `RESOLVED`.

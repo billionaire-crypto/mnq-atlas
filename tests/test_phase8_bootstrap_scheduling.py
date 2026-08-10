@@ -26,6 +26,13 @@ def _ok():
     )
 
 
+@pytest.fixture(autouse=True)
+def _isolated_bootstrap_worker_state():
+    uncertainty_module._BOOTSTRAP_WORKER_STATE.clear()
+    yield
+    uncertainty_module._BOOTSTRAP_WORKER_STATE.clear()
+
+
 def _unequal_fixture():
     session_count = 8
     rows_per_session = 525
@@ -35,7 +42,7 @@ def _unequal_fixture():
     terms = []
     requests = []
     for position in range(40):
-        per_session = 5 + position
+        per_session = 15 if position in {10, 11, 12} else 5 + position
         mask = np.zeros(groups.size, dtype=np.bool_)
         for session_index in range(session_count):
             start = session_index * rows_per_session
@@ -322,6 +329,20 @@ def _assert_plan_not_in_task_payload(task_args, plan_matrices) -> None:
     )
 
 
+def _assert_largest_first(evaluations) -> None:
+    sizes = tuple(evaluation.eligible_values.size for evaluation in evaluations)
+    assert sizes == tuple(sorted(sizes, reverse=True))
+
+
+def _assert_tie_registration_order(evaluations, eligible_size) -> None:
+    tied_positions = tuple(
+        _evaluation_position(evaluation)
+        for evaluation in evaluations
+        if evaluation.eligible_values.size == eligible_size
+    )
+    assert tied_positions == tuple(sorted(tied_positions))
+
+
 def test_bounded_pool_and_plan_payload_have_old_construction_negatives(monkeypatch):
     monkeypatch.setattr(uncertainty_module, "DRAWS_PER_BLOCK_LENGTH", 17)
     _use_small_fixture_interval(monkeypatch)
@@ -351,12 +372,39 @@ def test_bounded_pool_and_plan_payload_have_old_construction_negatives(monkeypat
         for submissions in submissions_by_block.values()
     )
     for submissions in submissions_by_block.values():
+        submitted_evaluations = tuple(args[0][0] for _function, args in submissions)
+        _assert_largest_first(submitted_evaluations)
+        _assert_tie_registration_order(submitted_evaluations, 120)
         for function, args in submissions:
             assert function is uncertainty_module._evaluate_compiled_plan_task
             assert len(args[0]) == 1
             assert isinstance(args[1], int)
             assert isinstance(args[2], int)
             _assert_plan_not_in_task_payload(args, plan_bundle.matrices)
+
+    _session_labels, row_session_indices = (
+        uncertainty_module._ordered_session_structure(groups)
+    )
+    registration_order = uncertainty_module._compile_term_evaluations(
+        terms, row_session_indices
+    )
+    with pytest.raises(AssertionError):
+        _assert_largest_first(registration_order)
+
+    tied = tuple(
+        evaluation
+        for evaluation in registration_order
+        if evaluation.eligible_values.size == 120
+    )
+    assert tuple(map(_evaluation_position, tied)) == (10, 11, 12)
+    without_position_tiebreak = tuple(
+        sorted(
+            reversed(tied),
+            key=lambda evaluation: -evaluation.eligible_values.size,
+        )
+    )
+    with pytest.raises(AssertionError):
+        _assert_tie_registration_order(without_position_tiebreak, 120)
 
     old_chunk_size = (353 + 32 - 1) // 32
     old_task_count = len(tuple(range(0, 353, old_chunk_size)))
@@ -369,7 +417,48 @@ def test_bounded_pool_and_plan_payload_have_old_construction_negatives(monkeypat
         _assert_plan_not_in_task_payload(pre_fix_args, plan_bundle.matrices)
 
 
-def test_worker_initializer_failure_propagates_without_thread_fallback(monkeypatch):
+def test_missing_worker_state_fails_before_evaluation_and_present_state_succeeds(
+    monkeypatch,
+):
+    monkeypatch.setattr(uncertainty_module, "DRAWS_PER_BLOCK_LENGTH", 17)
+    groups = np.repeat(np.arange(2, dtype=np.int32), 2)
+    term = BootstrapQuantileTerm(
+        "state-term",
+        np.asarray([1, 2, 3, 4], dtype=np.int32),
+        np.ones(4, dtype=np.bool_),
+        np.full(4, 0.25),
+        "q50",
+    )
+    _session_labels, row_session_indices = (
+        uncertainty_module._ordered_session_structure(groups)
+    )
+    evaluation = uncertainty_module._compile_term_evaluations(
+        (term,), row_session_indices
+    )[0]
+    plans = uncertainty_module._prepare_joint_plan_matrices(groups, (term,))
+    calls = []
+    original = uncertainty_module._evaluate_compiled_chunk
+
+    def evaluation_spy(*args):
+        calls.append(args)
+        return original(*args)
+
+    monkeypatch.setattr(
+        uncertainty_module, "_evaluate_compiled_chunk", evaluation_spy
+    )
+    uncertainty_module._BOOTSTRAP_WORKER_STATE.clear()
+    with pytest.raises(KeyError, match="plan_matrices"):
+        uncertainty_module._evaluate_compiled_plan_task((evaluation,), 0, 1)
+    assert calls == []
+
+    uncertainty_module._initialize_bootstrap_worker(plans.matrices)
+    result = uncertainty_module._evaluate_compiled_plan_task((evaluation,), 0, 1)
+    assert len(calls) == 1
+    assert len(result) == 1
+    assert tuple(result[0]) == (term.term_id,)
+
+
+def test_broken_process_pool_from_future_result_propagates(monkeypatch):
     monkeypatch.setattr(uncertainty_module, "DRAWS_PER_BLOCK_LENGTH", 17)
     groups, terms, requests = _unequal_fixture()
     plan_bundle = uncertainty_module._prepare_joint_plan_matrices(groups)
@@ -378,7 +467,7 @@ def test_worker_initializer_failure_propagates_without_thread_fallback(monkeypat
         def result(self):
             raise BrokenProcessPool("synthetic initializer failure")
 
-    class FailedInitializerExecutor:
+    class FailedProcessExecutor:
         def __init__(self, **_kwargs):
             return None
 
@@ -388,14 +477,8 @@ def test_worker_initializer_failure_propagates_without_thread_fallback(monkeypat
         def shutdown(self, **_kwargs):
             return None
 
-    def forbidden_thread_pool(*_args, **_kwargs):
-        raise AssertionError("initializer failure must not fall back to threads")
-
     monkeypatch.setattr(
-        uncertainty_module, "ProcessPoolExecutor", FailedInitializerExecutor
-    )
-    monkeypatch.setattr(
-        uncertainty_module, "ThreadPoolExecutor", forbidden_thread_pool
+        uncertainty_module, "ProcessPoolExecutor", FailedProcessExecutor
     )
     with pytest.raises(BrokenProcessPool, match="initializer failure"):
         uncertainty_module._joint_bootstrap_intervals_impl(

@@ -177,13 +177,17 @@ def test_worker_count_and_explicit_start_method_reach_process_executor(monkeypat
             return None
 
     monkeypatch.setattr(uncertainty_module, "ProcessPoolExecutor", InlineExecutor)
-    joint_bootstrap_intervals(
-        groups,
-        tuple(terms),
-        tuple(requests),
-        worker_count=2,
-        process_start_method="spawn",
-    )
+    uncertainty_module._BOOTSTRAP_WORKER_STATE.clear()
+    try:
+        joint_bootstrap_intervals(
+            groups,
+            tuple(terms),
+            tuple(requests),
+            worker_count=2,
+            process_start_method="spawn",
+        )
+    finally:
+        uncertainty_module._BOOTSTRAP_WORKER_STATE.clear()
     assert seen == {"workers": 2, "method": "spawn"}
 
 

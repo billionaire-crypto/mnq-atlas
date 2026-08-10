@@ -1211,7 +1211,7 @@ def run_phase8(
         finally:
             gate.stop()
     request_tuple = computation.requests
-    request_chunk_size = 512
+    request_chunk_size = 4_096
     request_chunks = tuple(
         request_tuple[start : start + request_chunk_size]
         for start in range(0, len(request_tuple), request_chunk_size)

@@ -23,6 +23,7 @@ from mnq_lab.phase8.runner import (
 )
 from mnq_lab.phase8 import uncertainty as uncertainty_module
 from mnq_lab.phase8.diagnostics import status_decision
+from mnq_lab.phase8.production import interval_table_from_rows
 from mnq_lab.phase8.uncertainty import BootstrapIntervalRequest, BootstrapQuantileTerm
 
 
@@ -319,3 +320,170 @@ def test_small_synthetic_pipeline_reaches_all_four_canonical_tables(
     )
     assert manifest["tables"]["intervals"]["row_count"] == 1
     assert tuple(manifest["tables"]) == PHASE8_TABLE_ORDER
+
+
+def _assert_table_bytes_equal(left: Phase8Table, right: Phase8Table) -> None:
+    def signature(table):
+        return tuple(
+            (
+                name,
+                str(np.asarray(values).dtype),
+                tuple(np.asarray(values).shape),
+                np.ascontiguousarray(values).tobytes(),
+            )
+            for name, values in table.columns
+        )
+
+    assert signature(left) == signature(right)
+
+
+def test_interval_assembly_is_byte_identical_across_request_chunk_sizes(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(uncertainty_module, "DRAWS_PER_BLOCK_LENGTH", 17)
+    monkeypatch.setattr(
+        uncertainty_module,
+        "percentile_interval",
+        lambda replicates, _confidence: (
+            int(np.min(replicates)),
+            int(np.max(replicates)),
+        ),
+    )
+    groups = np.repeat(np.arange(4, dtype=np.int32), 3)
+    mask = np.ones(groups.size, dtype=np.bool_)
+    weights = np.full(groups.size, 1.0 / groups.size)
+    terms = tuple(
+        BootstrapQuantileTerm(
+            term_id,
+            np.arange(groups.size, dtype=np.int32) + offset,
+            mask,
+            weights,
+            "q50",
+        )
+        for term_id, offset in (("term-a", 0), ("term-b", 100), ("term-c", 200))
+    )
+    ok = status_decision(
+        degenerate_baseline=False,
+        insufficient_anchors=False,
+        insufficient_completion=False,
+        insufficient_overlap=False,
+    )
+    request_terms = (
+        ("term-a", None),
+        ("term-a", "term-b"),
+        ("term-b", None),
+        ("term-b", "term-c"),
+        ("term-c", None),
+        ("term-c", "term-a"),
+        ("term-a", None),
+        ("term-a", "term-b"),
+    )
+    requests = tuple(
+        BootstrapIntervalRequest(
+            f"shared-request-{index}", target, baseline, ok
+        )
+        for index, (target, baseline) in enumerate(request_terms)
+    )
+    plans = uncertainty_module._prepare_joint_plan_matrices(groups, terms)
+
+    def needed(request):
+        return {
+            term_id
+            for term_id in (request.target_term_id, request.baseline_term_id)
+            if term_id is not None
+        }
+
+    def assemble(chunk_size, root, *, reversed_chunk=None):
+        request_chunks = [
+            list(requests[start : start + chunk_size])
+            for start in range(0, len(requests), chunk_size)
+        ]
+        if reversed_chunk is not None:
+            request_chunks[reversed_chunk].reverse()
+        frozen_chunks = tuple(tuple(chunk) for chunk in request_chunks)
+        chunks = tuple(
+            InventoryChunk(
+                index,
+                tuple(
+                    f"{request.request_id}:{block_length}"
+                    for request in chunk_requests
+                    for block_length in uncertainty_module.BLOCK_LENGTHS
+                ),
+            )
+            for index, chunk_requests in enumerate(frozen_chunks)
+        )
+
+        def compute(chunk):
+            selected_requests = frozen_chunks[chunk.index]
+            selected_ids = set().union(
+                *(needed(request) for request in selected_requests)
+            )
+            selected_terms = tuple(
+                term for term in terms if term.term_id in selected_ids
+            )
+            result = uncertainty_module._joint_bootstrap_intervals_with_plan_matrices(
+                groups,
+                selected_terms,
+                selected_requests,
+                plans,
+                worker_count=2,
+                process_start_method="spawn",
+            )
+            rows = []
+            for request_result in result.requests:
+                for interval in request_result.intervals:
+                    rows.append(
+                        {
+                            "row_id": (
+                                f"{request_result.request_id}:"
+                                f"{interval.mean_block_sessions}"
+                            ),
+                            "point_row_id": request_result.request_id,
+                            "mean_block_sessions": interval.mean_block_sessions,
+                            "draws": interval.draws,
+                            "confidence_level": interval.confidence_level,
+                            "ci_lower_ticks": interval.ci_lower_ticks,
+                            "ci_upper_ticks": interval.ci_upper_ticks,
+                            "interval_valid": interval.interval_valid,
+                            "rng_root_entropy": json.dumps(
+                                interval.rng_root_entropy, separators=(",", ":")
+                            ),
+                            "rng_child_spawn_key": json.dumps(
+                                interval.rng_child_spawn_key,
+                                separators=(",", ":"),
+                            ),
+                            "historical_mixture_disclosure": (
+                                interval.historical_mixture_disclosure
+                            ),
+                            "conditioner_uncertainty_disclosure": (
+                                interval.conditioner_uncertainty_disclosure
+                            ),
+                            "weight_ess_disclosure": interval.weight_ess_disclosure,
+                        }
+                    )
+            return dict(interval_table_from_rows(rows).columns)
+
+        columns = execute_checkpointed_chunks(
+            chunks,
+            checkpoint=CheckpointStore(root, _identity()),
+            compute_chunk=compute,
+        )
+        return Phase8Table("intervals", tuple(columns.items()))
+
+    chunk_sizes = (1, 2, 3, 5)
+    for chunk_size in chunk_sizes:
+        for boundary in range(chunk_size, len(requests), chunk_size):
+            assert needed(requests[boundary - 1]) & needed(requests[boundary])
+
+    assembled = tuple(
+        assemble(chunk_size, tmp_path / f"chunks-{chunk_size}")
+        for chunk_size in chunk_sizes
+    )
+    for candidate in assembled[1:]:
+        _assert_table_bytes_equal(assembled[0], candidate)
+
+    reordered = assemble(
+        2, tmp_path / "chunks-reordered", reversed_chunk=1
+    )
+    with pytest.raises(AssertionError):
+        _assert_table_bytes_equal(assembled[0], reordered)

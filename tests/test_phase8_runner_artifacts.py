@@ -208,28 +208,55 @@ def test_memory_sample_duration_observation_is_persisted_in_manifest(tmp_path):
     assert recorded["aggregate_memory_sample_interval_seconds"] != 30.0
 
 
-def test_launch_preflight_fails_before_any_chunk_computation(tmp_path):
-    called = False
+def test_bootstrap_phase_reuses_launch_capacity_and_enforces_pss(tmp_path):
+    called = []
+    available = [700]
 
-    def compute(_chunk):
-        nonlocal called
-        called = True
-        return {"row_id": np.asarray(["must-not-run"])}
+    def compute(chunk):
+        called.append(chunk.index)
+        return {"row_id": np.asarray(chunk.row_ids)}
 
     gate = AggregateMemoryGate(
+        ceiling_bytes=1_000,
+        launch_minimum_available_bytes=700,
+        aggregate_sampler=lambda: 100,
+        available_sampler=lambda: available[-1],
+    )
+    assert gate.preflight() == 700
+    available.append(699)
+    result = execute_checkpointed_chunks(
+        (InventoryChunk(0, ("row",)),),
+        checkpoint=CheckpointStore(tmp_path / "phase", _identity()),
+        compute_chunk=compute,
+        memory_gate=gate,
+    )
+    assert tuple(result["row_id"]) == ("row",)
+    assert called == [0]
+
+    startup_gate = AggregateMemoryGate(
         ceiling_bytes=1_000,
         launch_minimum_available_bytes=700,
         aggregate_sampler=lambda: 100,
         available_sampler=lambda: 699,
     )
     with pytest.raises(SpineError, match="available memory preflight"):
+        startup_gate.preflight()
+
+    called.clear()
+    breach_gate = AggregateMemoryGate(
+        ceiling_bytes=1_000,
+        launch_minimum_available_bytes=700,
+        aggregate_sampler=lambda: 1_001,
+        available_sampler=lambda: 700,
+    )
+    with pytest.raises(SpineError, match="aggregate Phase 8 memory"):
         execute_checkpointed_chunks(
             (InventoryChunk(0, ("row",)),),
-            checkpoint=CheckpointStore(tmp_path / "preflight", _identity()),
+            checkpoint=CheckpointStore(tmp_path / "breach", _identity()),
             compute_chunk=compute,
-            memory_gate=gate,
+            memory_gate=breach_gate,
         )
-    assert called is False
+    assert called == []
 
 
 def test_small_synthetic_pipeline_reaches_all_four_canonical_tables(

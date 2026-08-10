@@ -1015,7 +1015,6 @@ def execute_checkpointed_chunks(
         raise SpineError("inventory chunks contain a duplicate declared row")
     checkpoint.validate_chunk_inventory(chunk.index for chunk in declared)
     if memory_gate is not None:
-        memory_gate.preflight()
         memory_gate.start()
     completed_now = 0
     chunk_progress = _progress.get_sink().phase(

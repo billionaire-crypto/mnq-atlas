@@ -295,30 +295,36 @@ def _phase9_input(size):
     )
 
 
-def _phase9_slice(source, stop):
-    return PrevalenceInput(
-        arm_id=source.arm_id[:stop],
-        session_id=source.session_id[:stop],
-        ts_event_ns=source.ts_event_ns[:stop],
-        tau_ns=source.tau_ns[:stop],
-        observation_bucket_ct=source.observation_bucket_ct[:stop],
-        session_phase=source.session_phase[:stop],
-        category_code=source.category_code[:stop],
-        assignment_status=source.assignment_status[:stop],
-        reset_reason=source.reset_reason[:stop],
-        state_anchor=source.state_anchor[:stop],
-        eligibility_columns=tuple(
-            (name, values[:stop]) for name, values in source.eligibility_columns
-        ),
-    )
-
-
 @pytest.fixture(scope="module")
 def phase9_builds():
     prefix_size = 4
     short = _phase9_input(prefix_size)
     long = _phase9_input(7)
     return prefix_size, short, long
+
+
+def _prefix_event_columns(table, cutoff_tau_ns):
+    mask = table.column("tau_ns") <= cutoff_tau_ns
+    assert np.count_nonzero(mask) > 0
+    return tuple((name, values[mask]) for name, values in table.columns)
+
+
+def _assert_prefix_event_columns_equal(short_columns, long_columns):
+    assert tuple(name for name, _ in short_columns) == tuple(
+        name for name, _ in long_columns
+    )
+    for (name, short_values), (_, long_values) in zip(
+        short_columns, long_columns
+    ):
+        np.testing.assert_array_equal(
+            short_values, long_values, strict=True, err_msg=name
+        )
+
+
+def _with_corpus_normalized_state_contribution(columns, denominator):
+    by_name = {name: values for name, values in columns}
+    contribution = by_name["state_occurrence"].astype(np.float64) / denominator
+    return (*columns, ("corpus_normalized_state_contribution", contribution))
 
 
 def test_prevalence_results_are_prefix_invariant(phase9_builds):
@@ -332,20 +338,24 @@ def test_prevalence_results_are_prefix_invariant(phase9_builds):
         short,
         declared_arm_ids=("prefix_arm",),
     )
-    rebuilt_prefix = measure_prevalence(
-        _phase9_slice(long, prefix_size),
+    extended_result = measure_prevalence(
+        long,
         declared_arm_ids=("prefix_arm",),
     )
-    for short_table, long_table in zip(
-        (short_result.summary, short_result.episode_lengths),
-        (rebuilt_prefix.summary, rebuilt_prefix.episode_lengths),
-    ):
-        assert short_table.name == long_table.name
-        for (short_name, short_values), (long_name, long_values) in zip(
-            short_table.columns, long_table.columns
-        ):
-            assert short_name == long_name
-            np.testing.assert_array_equal(short_values, long_values, strict=True)
+    assert short_result.events.row_count == prefix_size
+    assert extended_result.events.row_count == long.ts_event_ns.size
+    assert extended_result.events.row_count > short_result.events.row_count
+    assert not np.array_equal(
+        short_result.summary.column("state_anchors"),
+        extended_result.summary.column("state_anchors"),
+    )
+
+    cutoff = int(short.tau_ns[-1])
+    short_columns = _prefix_event_columns(short_result.events, cutoff)
+    extended_prefix_columns = _prefix_event_columns(extended_result.events, cutoff)
+    assert short_columns[0][1].size == prefix_size
+    assert extended_result.events.row_count - extended_prefix_columns[0][1].size > 0
+    _assert_prefix_event_columns_equal(short_columns, extended_prefix_columns)
 
 
 def test_negative_case_corpus_normalized_prevalence_breaks_prefix_invariance(
@@ -354,22 +364,34 @@ def test_negative_case_corpus_normalized_prevalence_breaks_prefix_invariance(
     prefix_size, short, long = phase9_builds
     assert short.state_anchor.any()
     assert long.state_anchor[prefix_size:].any()
-
-    numerator = np.count_nonzero(
-        short.state_anchor & (short.category_code == 0)
+    short_result = measure_prevalence(
+        short, declared_arm_ids=("prefix_arm",)
     )
-    short_value = numerator / np.count_nonzero(short.state_anchor)
-    leaky_rebuilt_value = numerator / np.count_nonzero(long.state_anchor)
-    assert short_value != leaky_rebuilt_value
+    extended_result = measure_prevalence(
+        long, declared_arm_ids=("prefix_arm",)
+    )
+    cutoff = int(short.tau_ns[-1])
+    short_columns = _prefix_event_columns(short_result.events, cutoff)
+    extended_prefix_columns = _prefix_event_columns(extended_result.events, cutoff)
+    short_denominator = int(short_result.summary.column("n_anchors")[0])
+    extended_denominator = int(extended_result.summary.column("n_anchors")[0])
+    assert short_denominator == prefix_size
+    assert extended_denominator == long.ts_event_ns.size
+    leaky_short = _with_corpus_normalized_state_contribution(
+        short_columns, short_denominator
+    )
+    leaky_extended_prefix = _with_corpus_normalized_state_contribution(
+        extended_prefix_columns, extended_denominator
+    )
     with pytest.raises(AssertionError):
-        np.testing.assert_equal(short_value, leaky_rebuilt_value)
+        _assert_prefix_event_columns_equal(leaky_short, leaky_extended_prefix)
 
 
 @pytest.mark.parametrize("target", DEFERRED_TARGETS)
 def test_deferred_prefix_invariance_targets(target):
     """Registered as unimplemented so §13 test 4 is not silently under-covered.
 
-    These are produced in phases 9 and 11. This is a visible placeholder, not a
-    passing check of the property.
+    This target is produced in Phase 11. It remains a visible placeholder, not
+    a passing check of the property.
     """
     pytest.xfail(f"{target} does not exist until a later phase (spec §15)")

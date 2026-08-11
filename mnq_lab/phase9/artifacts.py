@@ -13,15 +13,17 @@ from mnq_lab import SpineError
 from mnq_lab.constants import REPO_ROOT
 from mnq_lab.phase9.prevalence import (
     EPISODE_LENGTH_COLUMNS,
+    EVENT_COLUMNS,
     SUMMARY_COLUMNS,
     PrevalenceTable,
 )
 
-PHASE9_ARTIFACT_SCHEMA_VERSION = "phase9-prevalence-v1"
-PHASE9_TABLE_ORDER = ("summary", "episode_lengths")
+PHASE9_ARTIFACT_SCHEMA_VERSION = "phase9-prevalence-v2"
+PHASE9_TABLE_ORDER = ("summary", "episode_lengths", "events")
 PHASE9_TABLE_SCHEMAS = {
     "summary": SUMMARY_COLUMNS,
     "episode_lengths": EPISODE_LENGTH_COLUMNS,
+    "events": EVENT_COLUMNS,
 }
 
 __all__ = [
@@ -59,7 +61,7 @@ def write_phase9_artifacts(
     *,
     provenance: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Write exactly the two declared tables; this is not a corpus runner."""
+    """Write exactly the three declared tables; this is not a corpus runner."""
 
     destination = _assert_output_root(Path(root))
     table_values = tuple(tables)

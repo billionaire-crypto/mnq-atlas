@@ -31,9 +31,15 @@ Commit `9fa96a9e3f8337b6875d777c0aa162b7739d1f77` adds:
 - `n_anchors`, `n_sessions`, and reserved NaN `weight_ess` companions;
 - observation-time validation from the bar open plus 300 seconds, localized in
   `America/Chicago`;
-- immutable result table schemas; and
+- immutable summary, completed-episode, and causal per-row event schemas; and
 - deterministic `.npy` column stores validated and loaded read-only with
   `mmap_mode="r"`.
+
+The audit repair advances the artifact schema to `phase9-prevalence-v2` by
+adding the `events` table. Its prefix-attributable fields are state occurrence,
+episode start, episode length so far, and entry/exit transition on the row where
+the transition becomes observable. None depends on a later corpus denominator
+or the eventual end of an episode.
 
 There is no Phase 9 corpus runner. The implementation serializer rejects a
 repository `data/` destination and cannot overwrite an existing output root.
@@ -86,12 +92,13 @@ were not combined.
 
 ## 5. Test 14 witnesses and negative controls
 
-Every acceptance assertion has a deterministic named control that is expected
-to fail the positive assertion:
+Every acceptance requirement has a deterministic named control:
 
-- **A:** the positive fixture reports `(5, 5, 5)` state anchors. The named
-  horizon-dependent mutant substitutes eligible counts `(5, 4, 2)` and is
-  rejected with `state-anchor prevalence depends on outcome horizon`.
+- **A:** one state-support count is repeated across the three horizons by
+  construction, producing `(5, 5, 5)`. `measure_prevalence` has no
+  horizon-dependent state-count branch. The named literal `(5, 4, 2)` instead
+  proves the separate consistency guard rejects an externally inconsistent
+  vector; it is not described as a measured horizon comparison.
 - **B:** both estimands are non-increasing, with strict decreases in the
   fixture. The named increasing mutant `(2, 3, 3)` is rejected with
   `outcome eligibility increases with horizon`.
@@ -109,9 +116,10 @@ to fail the positive assertion:
   one length-two episode. Adding the Phase 7 phase-equality term splits it into
   two, and the assertion rejects the split result.
 
-The authorized suite executed all seven controls. Each control passed only
-because its expected `SpineError` or `AssertionError` was observed. No random
-in-window mutation was used.
+For C-G, the production result and named mutation now pass through the exact
+same `_assert_episode_count` oracle. The mutation must first produce its planted
+wrong count, and the shared positive oracle must then raise. A and B exercise
+their explicit `SpineError` guards. No random in-window mutation was used.
 
 The timestamp witness separately proves an 08:30 CT bar-open label produces an
 08:35 CT observation bucket and rejects 08:30 as the bucket.
@@ -124,7 +132,7 @@ The sole authorized suite invocation was run exactly as registered:
 python -m pytest tests --ignore=tests/test_bootstrap_acceptance.py -q
 ```
 
-Result:
+Initial implementation result:
 
 ```text
 1488 passed, 2 skipped, 1 xfailed in 357.48s (0:05:57)
@@ -136,16 +144,29 @@ one. The remaining xfail is `consumed_vintage_artifacts` for Phase 11.
 `tests/test_bootstrap_acceptance.py` was excluded by the command and was never
 collected, imported, or executed. No bare pytest command was run.
 
+After the independent audit returned `OPEN`, the audit-repair suite ran through
+the same authorized command and produced:
+
+```text
+1491 passed, 2 skipped, 1 xfailed in 357.76s (0:05:57)
+```
+
+The three additional passing cases are the direct repository `data/`,
+exploration-child, and locked-confirmation-child write-guard witnesses. The
+prefix positive and negative tests were replaced rather than duplicated, so
+their count did not inflate. The protected bootstrap acceptance module remained
+ignored and uncollected.
+
 ## 7. Implemented file identities
 
 | SHA-256 | File |
 |---|---|
-| `662020d59c91e9a4b9201457a3f8e95dbc54712ace2595de46d32d46d1e90b82` | `docs/PHASE9_PREREGISTRATION.md` |
-| `bfc3d118d05f80002abb4d45dab882a9745bdee5a8927e0d63793d1fc456d640` | `mnq_lab/phase9/__init__.py` |
-| `b173ed3a8ce7fbc5924ad908464986e942cba6628dd706887655bf60ec5102e5` | `mnq_lab/phase9/prevalence.py` |
-| `d9e2a0acb61a5daeb15f9716d7b6716db55ac07343cd3f3b212c18f7360005df` | `mnq_lab/phase9/artifacts.py` |
-| `508902e80171636bd22b4c4119ef857c162fd1a76f172d6d6d38ce033a4213d0` | `tests/test_prevalence_support.py` |
-| `79e344a9b0e9ffcb8ef2a4097e736f9d2652b7ee5f7f403930c7a1931e1487b9` | `tests/test_prefix_invariance.py` |
+| `531603cc32c249b5956f8217a558ff3a940323d0a54c04a9dfb887e1d57f999d` | `docs/PHASE9_PREREGISTRATION.md` |
+| `6dedf603027c0fe46a30cdb9b2acfdc2d505e6f163a7373671521d8969866ad7` | `mnq_lab/phase9/__init__.py` |
+| `996b539e05355493fa79be69f431b9d207ab62b3dde4bd69614023a4ec768215` | `mnq_lab/phase9/prevalence.py` |
+| `f9cad3527d14e19b15e34b97157460f3c4d58d2b86b1c3e66a52782094e08322` | `mnq_lab/phase9/artifacts.py` |
+| `7af0ba9759f6c0048d3324156c1c2c769c3fd3d3b51f271b850a91238933a01e` | `tests/test_prevalence_support.py` |
+| `f6cbae98a21eb78223be5705309b8813bf67bc51b962e79bb19ff121308ddac2` | `tests/test_prefix_invariance.py` |
 
 This closeout file is committed separately after those identities and is
 reported at its final hash in the producer handoff.
@@ -166,3 +187,31 @@ merged to main.
 
 This producer closeout does not audit or ratify the implementation. Independent
 audit remains required.
+
+## 9. Independent-audit response
+
+The `independent Claude Code audit session` returned `OPEN` at head
+`148f4dafa66e7985768061c4606d058fc8c31f77`. The producer accepted its five
+findings without converting them into a self-audit:
+
+- **F1 repaired:** the full seven-row extension now enters
+  `measure_prevalence`. Only afterward are causal event rows through the
+  four-row cutoff compared with the short build. The test proves the full
+  aggregate changed and that nonempty extension event rows remain. A
+  corpus-normalized contribution using the full-build denominator is passed
+  through the same equality oracle and rejected.
+- **F2 repaired:** C-G positive production counts and negative mutant counts
+  use the same episode-count assertion.
+- **F3 clarified:** state prevalence is invariant by construction; the
+  inconsistent-literal check is a separate guard, not a measured production
+  branch.
+- **F4 repaired:** three tests prove the serializer rejects direct `data/`,
+  exploration, and locked-confirmation destinations before path creation.
+- **F5 repaired:** the preregistration now records the exact authorization
+  question and answer while identifying the addition as post-audit context and
+  preserving the original pre-implementation commit identity.
+
+The integration residual identified by the auditor remains accurately open for
+any future production authorization: no production adapter or corpus run was
+added in this implementation-only repair. Independent re-audit must decide
+whether the repair closes Phase 9.

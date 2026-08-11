@@ -10,6 +10,7 @@ import pytest
 
 from mnq_lab import SpineError
 from mnq_lab.conditioners.status import AssignmentStatus, ResetReason
+from mnq_lab.constants import REPO_ROOT
 from mnq_lab.phase9 import (
     ELIGIBILITY_COLUMNS,
     ESTIMANDS,
@@ -80,7 +81,7 @@ def _episode_lengths(result, category_code: int) -> tuple[int, ...]:
 
 
 def _assert_episode_count(actual: int, expected: int, boundary: str) -> None:
-    assert actual == expected, f"{boundary} boundary joined two episodes"
+    assert actual == expected, f"{boundary} boundary episode count differs"
 
 
 def _mutant_episode_count(source: PrevalenceInput, omitted_term: str) -> int:
@@ -147,7 +148,7 @@ def _support_fixture() -> PrevalenceInput:
     return _source(rows, eligibility)
 
 
-def test_a_state_anchor_counts_are_identical_for_all_horizons():
+def test_a_state_anchor_counts_are_horizon_invariant_by_construction():
     source = _support_fixture()
     counts = state_anchor_counts_by_horizon(
         source.state_anchor, source.category_code == 0
@@ -207,7 +208,9 @@ def test_c_episode_resets_at_session_boundary():
     result = measure_prevalence(
         source, declared_arm_ids=(ARM,), declared_categories=CATEGORIES
     )
-    assert _summary_value(result, 0, "episodes") == 2
+    _assert_episode_count(
+        int(_summary_value(result, 0, "episodes")), 2, "session"
+    )
     assert _episode_lengths(result, 0) == (1, 1)
 
 
@@ -234,7 +237,7 @@ def test_d_episode_resets_at_missing_interval_gap():
     result = measure_prevalence(
         source, declared_arm_ids=(ARM,), declared_categories=CATEGORIES
     )
-    assert _summary_value(result, 0, "episodes") == 2
+    _assert_episode_count(int(_summary_value(result, 0, "episodes")), 2, "gap")
 
 
 def test_d_negative_missing_gap_term_joins_the_runs_and_is_rejected():
@@ -260,7 +263,7 @@ def test_e_episode_resets_at_contract_roll():
     result = measure_prevalence(
         source, declared_arm_ids=(ARM,), declared_categories=CATEGORIES
     )
-    assert _summary_value(result, 0, "episodes") == 2
+    _assert_episode_count(int(_summary_value(result, 0, "episodes")), 2, "roll")
 
 
 def test_e_negative_missing_roll_term_joins_the_runs_and_is_rejected():
@@ -291,7 +294,9 @@ def test_f_episode_resets_at_warmup():
     result = measure_prevalence(
         source, declared_arm_ids=(ARM,), declared_categories=CATEGORIES
     )
-    assert _summary_value(result, 0, "episodes") == 2
+    _assert_episode_count(
+        int(_summary_value(result, 0, "episodes")), 2, "warmup"
+    )
     assert _episode_lengths(result, 0) == (1, 1)
 
 
@@ -324,7 +329,7 @@ def test_g_episode_does_not_reset_at_session_phase_change():
     result = measure_prevalence(
         source, declared_arm_ids=(ARM,), declared_categories=CATEGORIES
     )
-    assert _summary_value(result, 0, "episodes") == 1
+    _assert_episode_count(int(_summary_value(result, 0, "episodes")), 1, "phase")
     assert _episode_lengths(result, 0) == (2,)
 
 
@@ -382,10 +387,10 @@ def test_phase9_npy_store_round_trips_as_read_only_memory_maps(tmp_path):
     root = tmp_path / "phase9"
     manifest = write_phase9_artifacts(
         root,
-        (result.summary, result.episode_lengths),
+        (result.summary, result.episode_lengths, result.events),
         provenance={"fixture": "test_prevalence_support"},
     )
-    assert manifest["table_order"] == ["summary", "episode_lengths"]
+    assert manifest["table_order"] == ["summary", "episode_lengths", "events"]
     payload = (root / "manifest.json").read_bytes()
     assert payload == (
         json.dumps(json.loads(payload), sort_keys=True, indent=2, ensure_ascii=True)
@@ -394,7 +399,9 @@ def test_phase9_npy_store_round_trips_as_read_only_memory_maps(tmp_path):
     loaded = load_phase9_artifacts(root)
     assert all(isinstance(values, np.memmap) for table in loaded for _, values in table.columns)
     assert all(not values.flags.writeable for table in loaded for _, values in table.columns)
-    for expected, actual in zip((result.summary, result.episode_lengths), loaded):
+    for expected, actual in zip(
+        (result.summary, result.episode_lengths, result.events), loaded
+    ):
         for (expected_name, expected_values), (actual_name, actual_values) in zip(
             expected.columns, actual.columns
         ):
@@ -411,9 +418,33 @@ def test_phase9_writer_refuses_overwrite(tmp_path):
     )
     root = tmp_path / "phase9"
     write_phase9_artifacts(
-        root, (result.summary, result.episode_lengths), provenance={}
+        root, (result.summary, result.episode_lengths, result.events), provenance={}
     )
     with pytest.raises(SpineError, match="must be absent"):
         write_phase9_artifacts(
-            root, (result.summary, result.episode_lengths), provenance={}
+            root,
+            (result.summary, result.episode_lengths, result.events),
+            provenance={},
         )
+
+
+@pytest.mark.parametrize(
+    "forbidden_root",
+    (
+        REPO_ROOT / "data" / "__phase9_forbidden_test__",
+        REPO_ROOT / "data" / "exploration" / "__phase9_forbidden_test__",
+        REPO_ROOT / "data" / "locked_confirmation" / "__phase9_forbidden_test__",
+    ),
+)
+def test_phase9_writer_refuses_every_repository_data_destination(forbidden_root):
+    assert not forbidden_root.exists()
+    result = measure_prevalence(
+        _support_fixture(), declared_arm_ids=(ARM,), declared_categories=CATEGORIES
+    )
+    with pytest.raises(SpineError, match="may not write under data"):
+        write_phase9_artifacts(
+            forbidden_root,
+            (result.summary, result.episode_lengths, result.events),
+            provenance={},
+        )
+    assert not forbidden_root.exists()

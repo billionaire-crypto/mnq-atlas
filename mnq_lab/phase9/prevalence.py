@@ -63,6 +63,79 @@ EPISODE_LENGTH_COLUMNS = (
     "episode_length",
     "status",
 )
+EVENT_COLUMNS = (
+    "arm_id",
+    "session_id",
+    "ts_event_ns",
+    "tau_ns",
+    "session_phase",
+    "category_code",
+    "assignment_status",
+    "reset_reason",
+    "state_anchor",
+    *ELIGIBILITY_COLUMNS,
+    "state_occurrence",
+    "episode_start",
+    "episode_length_so_far",
+    "entry_transition",
+    "entry_category_code",
+    "exit_transition",
+    "exit_category_code",
+)
+
+_TABLE_SCHEMAS = {
+    "summary": SUMMARY_COLUMNS,
+    "episode_lengths": EPISODE_LENGTH_COLUMNS,
+    "events": EVENT_COLUMNS,
+}
+_TABLE_INTEGER_COLUMNS = {
+    "summary": frozenset(
+        {
+            "category_code",
+            "state_anchors",
+            "n_anchors",
+            "n_sessions",
+            *ELIGIBILITY_COLUMNS,
+            "episodes",
+            "session_presence",
+            "entry_transitions",
+            "exit_transitions",
+        }
+    ),
+    "episode_lengths": frozenset(
+        {"category_code", "episode_ordinal", "episode_length"}
+    ),
+    "events": frozenset(
+        {
+            "session_id",
+            "ts_event_ns",
+            "tau_ns",
+            "category_code",
+            "episode_length_so_far",
+            "entry_category_code",
+            "exit_category_code",
+        }
+    ),
+}
+_TABLE_FLOAT_COLUMNS = {
+    "summary": frozenset({"weight_ess", "bar_occupancy"}),
+    "episode_lengths": frozenset(),
+    "events": frozenset(),
+}
+_TABLE_BOOL_COLUMNS = {
+    "summary": frozenset({"bar_occupancy_valid"}),
+    "episode_lengths": frozenset(),
+    "events": frozenset(
+        {
+            "state_anchor",
+            *ELIGIBILITY_COLUMNS,
+            "state_occurrence",
+            "episode_start",
+            "entry_transition",
+            "exit_transition",
+        }
+    ),
+}
 
 _ASSIGNMENT_VALUES = frozenset(status.value for status in AssignmentStatus)
 _RESET_VALUES = frozenset(reason.value for reason in ResetReason)
@@ -72,6 +145,7 @@ __all__ = [
     "DECLARED_CATEGORIES",
     "ELIGIBILITY_COLUMNS",
     "EPISODE_LENGTH_COLUMNS",
+    "EVENT_COLUMNS",
     "ESTIMANDS",
     "HORIZONS",
     "SUMMARY_COLUMNS",
@@ -108,15 +182,14 @@ class PrevalenceTable:
     columns: tuple[tuple[str, np.ndarray], ...]
 
     def __post_init__(self) -> None:
-        schemas = {
-            "summary": SUMMARY_COLUMNS,
-            "episode_lengths": EPISODE_LENGTH_COLUMNS,
-        }
-        if self.name not in schemas:
+        if self.name not in _TABLE_SCHEMAS:
             raise SpineError(f"undeclared Phase 9 output table: {self.name!r}")
         names = tuple(name for name, _ in self.columns)
-        if names != schemas[self.name]:
+        if names != _TABLE_SCHEMAS[self.name]:
             raise SpineError(f"Phase 9 {self.name} columns differ from the schema")
+        integer_columns = _TABLE_INTEGER_COLUMNS[self.name]
+        float_columns = _TABLE_FLOAT_COLUMNS[self.name]
+        bool_columns = _TABLE_BOOL_COLUMNS[self.name]
         sizes: set[int] = set()
         for name, raw in self.columns:
             values = np.asarray(raw)
@@ -125,40 +198,16 @@ class PrevalenceTable:
                     "Phase 9 columns must be one-dimensional non-object arrays"
                 )
             sizes.add(int(values.size))
-            if name in {
-                "category_code",
-                "state_anchors",
-                "n_anchors",
-                "n_sessions",
-                *ELIGIBILITY_COLUMNS,
-                "episodes",
-                "session_presence",
-                "entry_transitions",
-                "exit_transitions",
-                "episode_ordinal",
-                "episode_length",
-            } and values.dtype.kind not in {"i", "u"}:
+            if name in integer_columns and values.dtype.kind not in {"i", "u"}:
                 raise SpineError(f"Phase 9 integer column {name!r} has wrong dtype")
-            if name in {"weight_ess", "bar_occupancy"} and values.dtype.kind != "f":
+            if name in float_columns and values.dtype.kind != "f":
                 raise SpineError(f"Phase 9 float column {name!r} has wrong dtype")
-            if name == "bar_occupancy_valid" and values.dtype.kind != "b":
-                raise SpineError("Phase 9 bar_occupancy_valid must be bool")
-            if name not in {
-                "category_code",
-                "state_anchors",
-                "n_anchors",
-                "n_sessions",
-                *ELIGIBILITY_COLUMNS,
-                "episodes",
-                "session_presence",
-                "entry_transitions",
-                "exit_transitions",
-                "episode_ordinal",
-                "episode_length",
-                "weight_ess",
-                "bar_occupancy",
-                "bar_occupancy_valid",
-            } and values.dtype.kind != "U":
+            if name in bool_columns and values.dtype.kind != "b":
+                raise SpineError(f"Phase 9 bool column {name!r} has wrong dtype")
+            if (
+                name not in integer_columns | float_columns | bool_columns
+                and values.dtype.kind != "U"
+            ):
                 raise SpineError(f"Phase 9 label column {name!r} has wrong dtype")
         if len(sizes) != 1:
             raise SpineError("Phase 9 table columns must have equal row counts")
@@ -187,9 +236,14 @@ class PrevalenceTable:
 class PrevalenceResult:
     summary: PrevalenceTable
     episode_lengths: PrevalenceTable
+    events: PrevalenceTable
 
     def __post_init__(self) -> None:
-        if self.summary.name != "summary" or self.episode_lengths.name != "episode_lengths":
+        if (
+            self.summary.name != "summary"
+            or self.episode_lengths.name != "episode_lengths"
+            or self.events.name != "events"
+        ):
             raise SpineError("Phase 9 result tables are mislabelled")
 
 
@@ -394,7 +448,12 @@ def _validated_input(
 
 def _episode_measurements(
     columns: dict[str, np.ndarray], arm_mask: np.ndarray, category_codes: tuple[int, ...]
-) -> tuple[dict[int, tuple[int, ...]], dict[int, int], dict[int, int]]:
+) -> tuple[
+    dict[int, tuple[int, ...]],
+    dict[int, int],
+    dict[int, int],
+    list[dict[str, Any]],
+]:
     positions = np.flatnonzero(arm_mask)
     lengths: dict[int, list[int]] = {code: [] for code in category_codes}
     entries = {code: 0 for code in category_codes}
@@ -402,6 +461,7 @@ def _episode_measurements(
     active_code: int | None = None
     active_length = 0
     previous_position: int | None = None
+    event_records: list[dict[str, Any]] = []
 
     def close_active() -> None:
         nonlocal active_code, active_length
@@ -440,6 +500,11 @@ def _episode_measurements(
                 and not roll_reset
             )
 
+        episode_start = False
+        entry_transition = False
+        exit_transition = False
+        entry_category_code = -1
+        exit_category_code = -1
         if not defined:
             close_active()
         else:
@@ -447,9 +512,14 @@ def _episode_measurements(
             if edge and active_code == code:
                 active_length += 1
             else:
+                episode_start = True
                 if edge:
                     previous_code = int(columns["category_code"][previous_position])
                     if previous_code != code:
+                        entry_transition = True
+                        exit_transition = True
+                        entry_category_code = code
+                        exit_category_code = previous_code
                         if previous_code in exits:
                             exits[previous_code] += 1
                         if code in entries:
@@ -457,33 +527,43 @@ def _episode_measurements(
                 close_active()
                 active_code = code
                 active_length = 1
+        event_record: dict[str, Any] = {
+            "arm_id": str(columns["arm_id"][position]),
+            "session_id": int(columns["session_id"][position]),
+            "ts_event_ns": int(columns["ts_event_ns"][position]),
+            "tau_ns": int(columns["tau_ns"][position]),
+            "session_phase": str(columns["session_phase"][position]),
+            "category_code": int(columns["category_code"][position]),
+            "assignment_status": str(columns["assignment_status"][position]),
+            "reset_reason": str(columns["reset_reason"][position]),
+            "state_anchor": bool(columns["state_anchor"][position]),
+            "state_occurrence": defined,
+            "episode_start": episode_start,
+            "episode_length_so_far": active_length if defined else 0,
+            "entry_transition": entry_transition,
+            "entry_category_code": entry_category_code,
+            "exit_transition": exit_transition,
+            "exit_category_code": exit_category_code,
+        }
+        for name in ELIGIBILITY_COLUMNS:
+            event_record[name] = bool(columns[name][position])
+        event_records.append(event_record)
         previous_position = position
     close_active()
     return (
         {code: tuple(values) for code, values in lengths.items()},
         entries,
         exits,
+        event_records,
     )
 
 
 def _table_from_records(
     name: str, schema: tuple[str, ...], records: list[dict[str, Any]]
 ) -> PrevalenceTable:
-    integer_columns = {
-        "category_code",
-        "state_anchors",
-        "n_anchors",
-        "n_sessions",
-        *ELIGIBILITY_COLUMNS,
-        "episodes",
-        "session_presence",
-        "entry_transitions",
-        "exit_transitions",
-        "episode_ordinal",
-        "episode_length",
-    }
-    float_columns = {"weight_ess", "bar_occupancy"}
-    bool_columns = {"bar_occupancy_valid"}
+    integer_columns = _TABLE_INTEGER_COLUMNS[name]
+    float_columns = _TABLE_FLOAT_COLUMNS[name]
+    bool_columns = _TABLE_BOOL_COLUMNS[name]
     columns: list[tuple[str, np.ndarray]] = []
     for column in schema:
         raw = [record[column] for record in records]
@@ -512,6 +592,7 @@ def measure_prevalence(
     category_codes = tuple(code for code, _ in categories)
     summary_records: list[dict[str, Any]] = []
     length_records: list[dict[str, Any]] = []
+    event_records: list[dict[str, Any]] = []
 
     for arm in arms:
         arm_mask = columns["arm_id"] == arm
@@ -519,9 +600,10 @@ def measure_prevalence(
         state_mask = arm_mask & columns["state_anchor"]
         n_anchors = int(np.count_nonzero(state_mask))
         n_sessions = int(np.unique(columns["session_id"][state_mask]).size)
-        lengths, entries, exits = _episode_measurements(
+        lengths, entries, exits, arm_event_records = _episode_measurements(
             columns, arm_mask, category_codes
         )
+        event_records.extend(arm_event_records)
 
         for category_code, category_name in categories:
             category_mask = (
@@ -623,4 +705,5 @@ def measure_prevalence(
         episode_lengths=_table_from_records(
             "episode_lengths", EPISODE_LENGTH_COLUMNS, length_records
         ),
+        events=_table_from_records("events", EVENT_COLUMNS, event_records),
     )

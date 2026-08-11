@@ -16,6 +16,18 @@ written:
 
 > YES I AUTHORIZED. Also when u are done with any fixes, builds, implementations, u should always give me an audit prompt in indented block for claude code to share ur fixes, findings and audit questions. Then after the indented block, u should give me a short summary of what u did, what u are asking in simple easy to understand english. Applies for this whole session.
 
+**Post-audit contextual completion, added 2026-08-10 without retro-dating the
+original record:** the response above answered this exact producer question:
+
+> Do you authorize implementation-only Phase 9 work: creating `docs/PHASE9_PREREGISTRATION.md`, `mnq_lab/phase9/`, and related tests; running only the specified pytest suite; and making small commits on `phase-7b-outcome-layer`?
+>
+> This authorization explicitly excludes any production/corpus run, production artifact, and all writes to `data/`.
+
+Commit `f375c68cb27739ab5ded2018e8de144c86d62593` preserves the
+authorization record as it existed before implementation. This contextual
+addition closes audit finding F5; it does not change or broaden the original
+scope.
+
 This authorization is interpreted narrowly as **implementation only**. It
 authorizes creation of `mnq_lab/phase9/`, its tests, this preregistration, a
 Phase 9 implementation closeout, the one authorized test suite, and small
@@ -178,8 +190,12 @@ cannot disappear from either output table.
 
 ## 7. Artifact boundary and storage
 
-Phase 9 owns a separate immutable result-table abstraction and deterministic
-`.npy` column-store serializer. Loading uses `numpy.load(..., mmap_mode="r")`.
+Phase 9 owns separate immutable summary, episode-length, and causal per-row
+event tables plus a deterministic `.npy` column-store serializer. The event
+table records only contemporaneous or backward-looking attribution: state
+occurrence, episode start, episode length so far, and entry/exit transition on
+the row where the transition becomes observable. Loading uses
+`numpy.load(..., mmap_mode="r")`.
 No parquet dependency or fallback is permitted. The serializer may write only
 to a caller-supplied non-`data/` path and is not a corpus runner.
 
@@ -192,8 +208,10 @@ unspecial-cased. Production and execution code will not import `mnq_lab.phase9`.
 `tests/test_prevalence_support.py` implements frozen Test 14 with deterministic
 witnesses:
 
-- **A:** equal state-anchor counts at horizons 15, 30, and 60; negative control
-  uses outcome eligibility as prevalence and must be rejected.
+- **A:** state-anchor prevalence is invariant by construction: one count on the
+  supplied state support is represented at horizons 15, 30, and 60. A separate
+  guard rejects an externally supplied inconsistent horizon vector; the guard
+  is not described as a failable branch of `measure_prevalence`.
 - **B:** each estimand's eligible counts are non-increasing by horizon and at
   least one strictly falls; negative control supplies an increasing horizon
   count and must be rejected.
@@ -208,14 +226,23 @@ witnesses:
 - **G:** a session-phase change does not split a contiguous same-session run;
   negative control imports the Phase 7 phase term and over-segments it.
 
-Each negative control is named and wrapped by an assertion that proves the
-positive property would reject it. No random in-window mutation is used.
+Each C-G positive and negative fixture is routed through the same episode-count
+assertion. Each named mutation must first produce the planted wrong count, then
+that shared assertion must reject it. No random in-window mutation is used.
 
 `tests/test_prefix_invariance.py` removes only `prevalence_results` from the
-deferred list and adds a real short-build/extended-build test. It includes
-nonempty prefix and extension guards and a named corpus-normalized negative
-control that changes prior prevalence when future rows arrive.
+deferred list only when a full T+k input is passed to `measure_prevalence`.
+After measurement, causal event rows through T are compared with the T-only
+build. Whole-corpus summaries and completed episode distributions are not the
+oracle because they legitimately change with added rows. Nonempty prefix and
+extension guards prove the extended measurement occurred. A named
+corpus-normalized event contribution is passed through the same equality
+assertion and must be rejected when its T+k denominator changes prior rows.
 `consumed_vintage_artifacts` remains deferred and xfailed for Phase 11.
+
+The serializer guard receives explicit tests for a direct repository `data/`
+destination, an exploration child, and a locked-confirmation child. Each must
+raise before creating the requested path.
 
 ## 9. Validation and protected boundaries
 

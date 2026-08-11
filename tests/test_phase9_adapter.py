@@ -15,6 +15,7 @@ from mnq_lab.phase9 import (
     anchor_observation_keys,
     measure_prevalence,
 )
+from mnq_lab.phase9.adapter import _completion_frame_columns
 
 
 def _sources():
@@ -144,3 +145,20 @@ def test_exact_adapter_rejects_arm_block_order_change():
         adapt_prevalence_input(
             assignment, reset, completion, declared_arm_ids=arms
         )
+
+
+def test_completion_frame_bar_label_maps_to_ts_event_ns():
+    _, _, _, completion = _sources()
+    frame_columns = {
+        "session_id": completion["session_id"],
+        "anchor_label_ns": completion["ts_event_ns"],
+        "tau_ns": completion["tau_ns"],
+        "state_anchor": completion["state_anchor"],
+        **{name: completion[name] for name in ELIGIBILITY_COLUMNS},
+    }
+    frame = pd.DataFrame(frame_columns)
+    converted = _completion_frame_columns(frame)
+    np.testing.assert_array_equal(
+        converted["ts_event_ns"], frame_columns["anchor_label_ns"]
+    )
+    assert "anchor_label_ns" not in converted

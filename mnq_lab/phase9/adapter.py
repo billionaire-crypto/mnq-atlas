@@ -301,6 +301,31 @@ def _read_artifact_column(root: Path, record: Mapping[str, Any], name: str) -> n
     return values
 
 
+def _completion_frame_columns(frame: Any) -> dict[str, np.ndarray]:
+    required = (
+        "session_id",
+        "anchor_label_ns",
+        "tau_ns",
+        "state_anchor",
+        *ELIGIBILITY_COLUMNS,
+    )
+    missing = tuple(name for name in required if name not in frame.columns)
+    if missing:
+        raise SpineError(
+            f"Phase 9 completion frame is missing declared columns: {missing}"
+        )
+    return {
+        "session_id": frame["session_id"].to_numpy(dtype=np.int32),
+        "ts_event_ns": frame["anchor_label_ns"].to_numpy(dtype=np.int64),
+        "tau_ns": frame["tau_ns"].to_numpy(dtype=np.int64),
+        "state_anchor": frame["state_anchor"].to_numpy(dtype=np.bool_),
+        **{
+            name: frame[name].to_numpy(dtype=np.bool_)
+            for name in ELIGIBILITY_COLUMNS
+        },
+    }
+
+
 def load_exploration_prevalence_input(root: Path) -> CorpusAdapterResult:
     """Read the version-bound exploration artifacts without writing or matching loosely."""
 
@@ -389,16 +414,7 @@ def load_exploration_prevalence_input(root: Path) -> CorpusAdapterResult:
             excluded_sessions,
         )
         completion_frame = completion_frame.loc[keep].reset_index(drop=True)
-    completion = {
-        "session_id": completion_frame["session_id"].to_numpy(dtype=np.int32),
-        "ts_event_ns": completion_frame["ts_event_ns"].to_numpy(dtype=np.int64),
-        "tau_ns": completion_frame["tau_ns"].to_numpy(dtype=np.int64),
-        "state_anchor": completion_frame["state_anchor"].to_numpy(dtype=np.bool_),
-        **{
-            name: completion_frame[name].to_numpy(dtype=np.bool_)
-            for name in ELIGIBILITY_COLUMNS
-        },
-    }
+    completion = _completion_frame_columns(completion_frame)
     return adapt_prevalence_input(
         assignment,
         reset,

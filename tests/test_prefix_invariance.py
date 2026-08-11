@@ -27,6 +27,12 @@ from mnq_lab.spine.source import scan_source
 from tests.conftest import SourceBuilder, session_grid
 from mnq_lab.conditioners.scales.median import lower_median
 from mnq_lab.core.weights import weighted_quantile
+from mnq_lab.phase9 import (
+    ELIGIBILITY_COLUMNS,
+    PrevalenceInput,
+    anchor_observation_keys,
+    measure_prevalence,
+)
 from tests.phase7_pipeline_fixtures import synthetic_pipeline
 
 NEAR = "MNQM1"
@@ -148,7 +154,6 @@ def test_negative_case_a_lookahead_normaliser_breaks_invariance(builds):
 
 
 DEFERRED_TARGETS = [
-    "prevalence_results",
     "consumed_vintage_artifacts",
 ]
 
@@ -252,6 +257,112 @@ def test_conditioner_assignments_are_prefix_invariant(phase7_builds):
     assert backward_carry(short_table, len(short_table.rows)) != backward_carry(
         long_table, len(short_table.rows)
     )
+
+
+def _phase9_input(size):
+    local_labels = pd.date_range(
+        "2021-06-07 08:30",
+        periods=size,
+        freq="5min",
+        tz="America/Chicago",
+    )
+    labels = local_labels.tz_convert("UTC").to_numpy(dtype="datetime64[ns]").astype(
+        np.int64
+    )
+    tau, buckets, phases = anchor_observation_keys(labels)
+    state = np.ones(size, dtype=np.bool_)
+    eligibility = []
+    for name in ELIGIBILITY_COLUMNS:
+        if name.endswith("h15"):
+            values = state.copy()
+        elif name.endswith("h30"):
+            values = np.arange(size) < 5
+        else:
+            values = np.arange(size) < 2
+        eligibility.append((name, np.asarray(values, dtype=np.bool_)))
+    return PrevalenceInput(
+        arm_id=np.full(size, "prefix_arm", dtype="U32"),
+        session_id=np.full(size, 20210607, dtype=np.int32),
+        ts_event_ns=labels,
+        tau_ns=tau,
+        observation_bucket_ct=buckets,
+        session_phase=phases,
+        category_code=np.asarray([0, 0, 1, 1, 0, 2, 2][:size], dtype=np.int8),
+        assignment_status=np.full(size, "ok", dtype="U32"),
+        reset_reason=np.full(size, "none", dtype="U16"),
+        state_anchor=state,
+        eligibility_columns=tuple(eligibility),
+    )
+
+
+def _phase9_slice(source, stop):
+    return PrevalenceInput(
+        arm_id=source.arm_id[:stop],
+        session_id=source.session_id[:stop],
+        ts_event_ns=source.ts_event_ns[:stop],
+        tau_ns=source.tau_ns[:stop],
+        observation_bucket_ct=source.observation_bucket_ct[:stop],
+        session_phase=source.session_phase[:stop],
+        category_code=source.category_code[:stop],
+        assignment_status=source.assignment_status[:stop],
+        reset_reason=source.reset_reason[:stop],
+        state_anchor=source.state_anchor[:stop],
+        eligibility_columns=tuple(
+            (name, values[:stop]) for name, values in source.eligibility_columns
+        ),
+    )
+
+
+@pytest.fixture(scope="module")
+def phase9_builds():
+    prefix_size = 4
+    short = _phase9_input(prefix_size)
+    long = _phase9_input(7)
+    return prefix_size, short, long
+
+
+def test_prevalence_results_are_prefix_invariant(phase9_builds):
+    prefix_size, short, long = phase9_builds
+    assert prefix_size > 0 and short.ts_event_ns.size == prefix_size
+    assert long.ts_event_ns.size > prefix_size
+    assert long.ts_event_ns[prefix_size:].size > 0
+    np.testing.assert_array_equal(short.ts_event_ns, long.ts_event_ns[:prefix_size])
+
+    short_result = measure_prevalence(
+        short,
+        declared_arm_ids=("prefix_arm",),
+    )
+    rebuilt_prefix = measure_prevalence(
+        _phase9_slice(long, prefix_size),
+        declared_arm_ids=("prefix_arm",),
+    )
+    for short_table, long_table in zip(
+        (short_result.summary, short_result.episode_lengths),
+        (rebuilt_prefix.summary, rebuilt_prefix.episode_lengths),
+    ):
+        assert short_table.name == long_table.name
+        for (short_name, short_values), (long_name, long_values) in zip(
+            short_table.columns, long_table.columns
+        ):
+            assert short_name == long_name
+            np.testing.assert_array_equal(short_values, long_values, strict=True)
+
+
+def test_negative_case_corpus_normalized_prevalence_breaks_prefix_invariance(
+    phase9_builds,
+):
+    prefix_size, short, long = phase9_builds
+    assert short.state_anchor.any()
+    assert long.state_anchor[prefix_size:].any()
+
+    numerator = np.count_nonzero(
+        short.state_anchor & (short.category_code == 0)
+    )
+    short_value = numerator / np.count_nonzero(short.state_anchor)
+    leaky_rebuilt_value = numerator / np.count_nonzero(long.state_anchor)
+    assert short_value != leaky_rebuilt_value
+    with pytest.raises(AssertionError):
+        np.testing.assert_equal(short_value, leaky_rebuilt_value)
 
 
 @pytest.mark.parametrize("target", DEFERRED_TARGETS)

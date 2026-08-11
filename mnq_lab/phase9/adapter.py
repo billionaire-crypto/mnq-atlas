@@ -58,6 +58,8 @@ class JoinReconciliation:
     broadcast_rows: int
     reset_source_arm: str
     unused_reset_disagreement_count: int = 0
+    excluded_session_count: int = 0
+    excluded_completion_rows: int = 0
 
 
 @dataclass(frozen=True)
@@ -155,6 +157,8 @@ def adapt_prevalence_input(
     declared_arm_ids: tuple[str, ...] | None = None,
     reset_source_arm: str = RESET_SOURCE_ARM,
     unused_reset_disagreement_count: int = 0,
+    excluded_session_count: int = 0,
+    excluded_completion_rows: int = 0,
 ) -> CorpusAdapterResult:
     """Broadcast exact anchor columns across declared arm blocks, or fail closed."""
 
@@ -165,6 +169,12 @@ def adapt_prevalence_input(
     )
     if not arms or len(arms) != len(set(arms)):
         raise SpineError("Phase 9 adapter arm inventory is empty or duplicated")
+    for name, value in (
+        ("excluded_session_count", excluded_session_count),
+        ("excluded_completion_rows", excluded_completion_rows),
+    ):
+        if type(value) is not int or value < 0:
+            raise SpineError(f"Phase 9 {name} must be a nonnegative built-in int")
     assignment = _aligned(assignments, ASSIGNMENT_INPUT_COLUMNS, "assignment")
     reset = _aligned(
         reset_columns,
@@ -255,6 +265,8 @@ def adapt_prevalence_input(
             broadcast_rows=broadcast_rows,
             reset_source_arm=reset_source_arm,
             unused_reset_disagreement_count=int(unused_reset_disagreement_count),
+            excluded_session_count=excluded_session_count,
+            excluded_completion_rows=excluded_completion_rows,
         ),
     )
 
@@ -324,6 +336,21 @@ def _completion_frame_columns(frame: Any) -> dict[str, np.ndarray]:
             for name in ELIGIBILITY_COLUMNS
         },
     }
+
+
+def _exclude_completion_sessions(
+    frame: Any, excluded_session_ids: Any
+) -> tuple[Any, int, int]:
+    sessions = frame["session_id"].to_numpy(dtype=np.int32)
+    excluded = np.asarray(tuple(excluded_session_ids), dtype=np.int32)
+    if excluded.ndim != 1:
+        raise SpineError("Phase 9 excluded session identifiers must be one-dimensional")
+    if excluded.size == 0:
+        return frame, 0, 0
+    keep = ~np.isin(sessions, excluded)
+    excluded_rows = int(np.count_nonzero(~keep))
+    excluded_sessions = int(np.unique(sessions[~keep]).size)
+    return frame.loc[keep].reset_index(drop=True), excluded_sessions, excluded_rows
 
 
 def load_exploration_prevalence_input(root: Path) -> CorpusAdapterResult:
@@ -405,15 +432,14 @@ def load_exploration_prevalence_input(root: Path) -> CorpusAdapterResult:
         np.asarray(store.column("observed_1m_components")),
         np.asarray(store.column("expected_1m_components")),
     )
-    excluded_sessions = np.asarray(
-        load_session_schedule_table().excluded_session_ids, dtype=np.int32
+    (
+        completion_frame,
+        excluded_session_count,
+        excluded_completion_rows,
+    ) = _exclude_completion_sessions(
+        completion_frame,
+        load_session_schedule_table().excluded_session_ids,
     )
-    if excluded_sessions.size:
-        keep = ~np.isin(
-            completion_frame["session_id"].to_numpy(dtype=np.int32),
-            excluded_sessions,
-        )
-        completion_frame = completion_frame.loc[keep].reset_index(drop=True)
     completion = _completion_frame_columns(completion_frame)
     return adapt_prevalence_input(
         assignment,
@@ -421,4 +447,6 @@ def load_exploration_prevalence_input(root: Path) -> CorpusAdapterResult:
         completion,
         reset_source_arm=RESET_SOURCE_ARM,
         unused_reset_disagreement_count=unused_reset_disagreements,
+        excluded_session_count=excluded_session_count,
+        excluded_completion_rows=excluded_completion_rows,
     )

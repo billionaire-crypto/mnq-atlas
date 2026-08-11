@@ -302,3 +302,44 @@ snapshot, ledger entry, production run, or Phase 10 work was created. No
 selection, ranking, optimization, best-parameter search, expectancy, Sharpe,
 P&L, currency figure, strategy change, or access to the confirmation tier
 occurred.
+
+## 11. Reset-source inertness and exclusion transparency repair
+
+The independent audit initially questioned broadcasting the primary reset
+series into the `coverage_strict` arm, then withdrew that finding after measuring
+that the 52 differing rows were already undefined. The implementation session
+independently re-derived the result directly from the memory-mapped Phase 7
+artifact, without executing prevalence:
+
+```text
+exact reset-key rows                         78,390
+primary/coverage_strict reset disagreements     52
+primary reset at those rows                  none (52/52)
+coverage_strict reset at those rows          gap_reset (52/52)
+coverage_strict assignment_status            upstream_undefined (52/52)
+coverage_strict category_code                -1 (52/52)
+coverage_strict assignment_status == ok      0/52
+effective reset overrule                     0/52
+```
+
+This is structurally explained by
+`mnq_lab/conditioners/scales/returns.py`: strict coverage rejects an incomplete
+bar and passes `INSUFFICIENT_COMPONENTS` to `_missing_status`, which emits
+`GAP_RESET`. The invalid return propagates to an invalid relative-volatility row;
+`build_assignments` in `mnq_lab/conditioners/assignments.py` then emits
+`UPSTREAM_UNDEFINED` while leaving `category_code = -1`. Phase 9 defines an
+episode position only when `state_anchor` is true and `assignment_status == OK`,
+so all 52 rows close the episode before `reset_reason` can change the result.
+The primary reset binding remains unchanged.
+
+The audit's remaining low finding was that legitimate schedule exclusions were
+not visible in `JoinReconciliation`. The reconciliation now records both:
+
+- `excluded_session_count`: distinct completion-frame sessions actually removed;
+- `excluded_completion_rows`: completion rows removed before the exact join.
+
+`completion_rows` retains its post-exclusion meaning. A deterministic fixture
+removes one session containing two completion rows and requires the reconciliation
+to report `1` and `2`; a second fixture applies no exclusion and requires `0` and
+`0`. A named always-zero mutant is passed through the same assertion and is
+rejected, proving the nonzero witness is effective.

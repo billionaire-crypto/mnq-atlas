@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -15,7 +17,10 @@ from mnq_lab.phase9 import (
     anchor_observation_keys,
     measure_prevalence,
 )
-from mnq_lab.phase9.adapter import _completion_frame_columns
+from mnq_lab.phase9.adapter import (
+    _completion_frame_columns,
+    _exclude_completion_sessions,
+)
 
 
 def _sources():
@@ -75,6 +80,8 @@ def test_exact_adapter_broadcasts_anchor_sources_without_reordering():
     assert counts.completion_rows == 2
     assert counts.matched_anchor_rows == 2
     assert counts.broadcast_rows == 4
+    assert counts.excluded_session_count == 0
+    assert counts.excluded_completion_rows == 0
     np.testing.assert_array_equal(adapted.source.arm_id, assignment["arm_id"])
     np.testing.assert_array_equal(
         adapted.source.reset_reason,
@@ -162,3 +169,83 @@ def test_completion_frame_bar_label_maps_to_ts_event_ns():
         converted["ts_event_ns"], frame_columns["anchor_label_ns"]
     )
     assert "anchor_label_ns" not in converted
+
+
+def _completion_frame_fixture_with_prior_session():
+    _, _, _, completion = _sources()
+    prior_session = np.asarray([20210606, 20210606], dtype=np.int32)
+    prior_tau = completion["tau_ns"] - np.int64(86_400_000_000_000)
+    frame_columns = {
+        "session_id": np.concatenate((prior_session, completion["session_id"])),
+        "anchor_label_ns": np.concatenate(
+            (prior_tau - np.int64(300_000_000_000), completion["ts_event_ns"])
+        ),
+        "tau_ns": np.concatenate((prior_tau, completion["tau_ns"])),
+        "state_anchor": np.concatenate(
+            (np.ones(2, dtype=np.bool_), completion["state_anchor"])
+        ),
+        **{
+            name: np.concatenate((np.ones(2, dtype=np.bool_), completion[name]))
+            for name in ELIGIBILITY_COLUMNS
+        },
+    }
+    return pd.DataFrame(frame_columns)
+
+
+def _assert_exclusion_counts(reconciliation, expected_sessions, expected_rows):
+    assert reconciliation.excluded_session_count == expected_sessions
+    assert reconciliation.excluded_completion_rows == expected_rows
+
+
+def test_excluded_session_reconciliation_reports_nonzero_and_zero_counts():
+    arms, assignment, reset, _ = _sources()
+    frame = _completion_frame_fixture_with_prior_session()
+    filtered, session_count, row_count = _exclude_completion_sessions(
+        frame, (20210606,)
+    )
+    assert set(filtered["session_id"]) == {20210607}
+    adapted = adapt_prevalence_input(
+        assignment,
+        reset,
+        _completion_frame_columns(filtered),
+        declared_arm_ids=arms,
+        excluded_session_count=session_count,
+        excluded_completion_rows=row_count,
+    )
+    _assert_exclusion_counts(adapted.reconciliation, 1, 2)
+
+    unchanged, no_session_count, no_row_count = _exclude_completion_sessions(
+        filtered, ()
+    )
+    no_exclusions = adapt_prevalence_input(
+        assignment,
+        reset,
+        _completion_frame_columns(unchanged),
+        declared_arm_ids=arms,
+        excluded_session_count=no_session_count,
+        excluded_completion_rows=no_row_count,
+    )
+    _assert_exclusion_counts(no_exclusions.reconciliation, 0, 0)
+
+
+def test_excluded_session_counter_negative_always_zero_mutant_is_rejected():
+    arms, assignment, reset, _ = _sources()
+    frame = _completion_frame_fixture_with_prior_session()
+    filtered, session_count, row_count = _exclude_completion_sessions(
+        frame, (20210606,)
+    )
+    adapted = adapt_prevalence_input(
+        assignment,
+        reset,
+        _completion_frame_columns(filtered),
+        declared_arm_ids=arms,
+        excluded_session_count=session_count,
+        excluded_completion_rows=row_count,
+    )
+    always_zero = replace(
+        adapted.reconciliation,
+        excluded_session_count=0,
+        excluded_completion_rows=0,
+    )
+    with pytest.raises(AssertionError):
+        _assert_exclusion_counts(always_zero, 1, 2)

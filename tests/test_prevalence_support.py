@@ -12,10 +12,19 @@ from mnq_lab import SpineError
 from mnq_lab.conditioners.status import AssignmentStatus, ResetReason
 from mnq_lab.constants import REPO_ROOT
 from mnq_lab.phase9 import (
+    ARM_CODE_BY_LABEL,
+    ASSIGNMENT_STATUS_CODE_BY_LABEL,
+    DECLARED_ARM_IDS,
     ELIGIBILITY_COLUMNS,
+    EVENT_CODE_LABELS,
+    EVENT_COLUMNS,
     ESTIMANDS,
     HORIZONS,
+    PHASE9_ARTIFACT_SCHEMA_VERSION,
+    RESET_REASON_CODE_BY_LABEL,
+    SESSION_PHASE_CODE_BY_LABEL,
     PrevalenceInput,
+    PrevalenceTable,
     anchor_observation_keys,
     load_phase9_artifacts,
     measure_prevalence,
@@ -24,7 +33,8 @@ from mnq_lab.phase9 import (
     write_phase9_artifacts,
 )
 
-ARM = "fixture_arm"
+ARM = DECLARED_ARM_IDS[0]
+UNSUPPORTED_ARM = DECLARED_ARM_IDS[1]
 CATEGORIES = ((0, "low"), (1, "mid"), (2, "high"))
 
 
@@ -47,7 +57,7 @@ def _source(rows, eligibility=None) -> PrevalenceInput:
         for name in ELIGIBILITY_COLUMNS
     )
     return PrevalenceInput(
-        arm_id=np.full(len(rows), ARM, dtype="U32"),
+        arm_id=np.full(len(rows), ARM, dtype="U64"),
         session_id=np.asarray([row.get("session", 20210607) for row in rows], dtype=np.int32),
         ts_event_ns=labels,
         tau_ns=tau,
@@ -358,7 +368,7 @@ def test_observation_time_keying_uses_bar_close_not_bar_open():
 def test_every_declared_cell_and_required_support_companion_is_emitted():
     result = measure_prevalence(
         _source([{"label": "2021-06-07 08:30"}]),
-        declared_arm_ids=(ARM, "unsupported_arm"),
+        declared_arm_ids=(ARM, UNSUPPORTED_ARM),
         declared_categories=CATEGORIES,
     )
     assert result.summary.row_count == 6
@@ -370,7 +380,7 @@ def test_every_declared_cell_and_required_support_companion_is_emitted():
         "n_sessions",
         "weight_ess",
     )
-    unsupported = result.summary.column("arm_id") == "unsupported_arm"
+    unsupported = result.summary.column("arm_id") == UNSUPPORTED_ARM
     assert set(result.summary.column("status")[unsupported]) == {
         "unsupported_no_arm_rows"
     }
@@ -389,8 +399,18 @@ def test_phase9_npy_store_round_trips_as_read_only_memory_maps(tmp_path):
         root,
         (result.summary, result.episode_lengths, result.events),
         provenance={"fixture": "test_prevalence_support"},
+        persist_events=True,
     )
+    assert manifest["schema_version"] == PHASE9_ARTIFACT_SCHEMA_VERSION
     assert manifest["table_order"] == ["summary", "episode_lengths", "events"]
+    assert manifest["events_persisted"] is True
+    assert manifest["event_code_mappings"] == {
+        column: [
+            {"code": code, "label": label}
+            for code, label in enumerate(labels)
+        ]
+        for column, labels in EVENT_CODE_LABELS.items()
+    }
     payload = (root / "manifest.json").read_bytes()
     assert payload == (
         json.dumps(json.loads(payload), sort_keys=True, indent=2, ensure_ascii=True)
@@ -410,6 +430,88 @@ def test_phase9_npy_store_round_trips_as_read_only_memory_maps(tmp_path):
                 np.testing.assert_array_equal(expected_values, actual_values, strict=True)
             else:
                 np.testing.assert_array_equal(expected_values, actual_values, strict=True)
+
+
+def test_event_codes_follow_declared_vocabularies_and_exact_narrow_dtypes():
+    result = measure_prevalence(
+        _support_fixture(), declared_arm_ids=(ARM,), declared_categories=CATEGORIES
+    )
+    events = result.events
+    assert events is not None
+    assert events.column("arm_code").dtype == np.dtype("int8")
+    assert events.column("session_phase_code").dtype == np.dtype("int8")
+    assert events.column("assignment_status_code").dtype == np.dtype("int8")
+    assert events.column("reset_reason_code").dtype == np.dtype("int8")
+    assert set(events.column("arm_code")) == {ARM_CODE_BY_LABEL[ARM]}
+    for source_name, code_name, mapping in (
+        ("session_phase", "session_phase_code", SESSION_PHASE_CODE_BY_LABEL),
+        ("assignment_status", "assignment_status_code", ASSIGNMENT_STATUS_CODE_BY_LABEL),
+        ("reset_reason", "reset_reason_code", RESET_REASON_CODE_BY_LABEL),
+    ):
+        source_values = getattr(_support_fixture(), source_name)
+        expected = np.asarray([mapping[str(value)] for value in source_values], dtype=np.int8)
+        np.testing.assert_array_equal(events.column(code_name), expected, strict=True)
+    assert sum(values.nbytes for _, values in events.columns) / events.row_count < 100
+
+
+def test_event_closed_schema_rejects_wide_or_wrong_code_dtype():
+    result = measure_prevalence(
+        _support_fixture(), declared_arm_ids=(ARM,), declared_categories=CATEGORIES
+    )
+    assert result.events is not None
+    columns = list(result.events.columns)
+    position = EVENT_COLUMNS.index("arm_code")
+    columns[position] = ("arm_code", columns[position][1].astype(np.int64))
+    with pytest.raises(SpineError, match="events column 'arm_code' dtype"):
+        PrevalenceTable("events", tuple(columns))
+
+
+def test_events_are_computed_and_persisted_by_separate_explicit_controls(tmp_path):
+    source = _support_fixture()
+    with_events = measure_prevalence(
+        source, declared_arm_ids=(ARM,), declared_categories=CATEGORIES
+    )
+    without_events = measure_prevalence(
+        source,
+        declared_arm_ids=(ARM,),
+        declared_categories=CATEGORIES,
+        compute_events=False,
+    )
+    assert with_events.events is not None
+    assert without_events.events is None
+    for expected, actual in (
+        (with_events.summary, without_events.summary),
+        (with_events.episode_lengths, without_events.episode_lengths),
+    ):
+        for (_, expected_values), (_, actual_values) in zip(expected.columns, actual.columns):
+            np.testing.assert_array_equal(expected_values, actual_values, strict=True)
+
+    root = tmp_path / "compact"
+    manifest = write_phase9_artifacts(
+        root,
+        (with_events.summary, with_events.episode_lengths, with_events.events),
+        provenance={},
+    )
+    assert manifest["events_persisted"] is False
+    assert manifest["table_order"] == ["summary", "episode_lengths"]
+    assert not (root / "events").exists()
+    assert len(load_phase9_artifacts(root)) == 2
+
+
+def test_explicit_event_persistence_requires_event_table(tmp_path):
+    result = measure_prevalence(
+        _support_fixture(),
+        declared_arm_ids=(ARM,),
+        declared_categories=CATEGORIES,
+        compute_events=False,
+    )
+    with pytest.raises(SpineError, match="declared order"):
+        write_phase9_artifacts(
+            tmp_path / "missing-events",
+            (result.summary, result.episode_lengths),
+            provenance={},
+            persist_events=True,
+        )
 
 
 def test_phase9_writer_refuses_overwrite(tmp_path):

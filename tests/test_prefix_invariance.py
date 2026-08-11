@@ -28,6 +28,8 @@ from tests.conftest import SourceBuilder, session_grid
 from mnq_lab.conditioners.scales.median import lower_median
 from mnq_lab.core.weights import weighted_quantile
 from mnq_lab.phase9 import (
+    ARM_CODE_BY_LABEL,
+    DECLARED_ARM_IDS,
     ELIGIBILITY_COLUMNS,
     PrevalenceInput,
     anchor_observation_keys,
@@ -281,7 +283,7 @@ def _phase9_input(size):
             values = np.arange(size) < 2
         eligibility.append((name, np.asarray(values, dtype=np.bool_)))
     return PrevalenceInput(
-        arm_id=np.full(size, "prefix_arm", dtype="U32"),
+        arm_id=np.full(size, DECLARED_ARM_IDS[0], dtype="U64"),
         session_id=np.full(size, 20210607, dtype=np.int32),
         ts_event_ns=labels,
         tau_ns=tau,
@@ -336,11 +338,11 @@ def test_prevalence_results_are_prefix_invariant(phase9_builds):
 
     short_result = measure_prevalence(
         short,
-        declared_arm_ids=("prefix_arm",),
+        declared_arm_ids=(DECLARED_ARM_IDS[0],),
     )
     extended_result = measure_prevalence(
         long,
-        declared_arm_ids=("prefix_arm",),
+        declared_arm_ids=(DECLARED_ARM_IDS[0],),
     )
     assert short_result.events.row_count == prefix_size
     assert extended_result.events.row_count == long.ts_event_ns.size
@@ -365,10 +367,10 @@ def test_negative_case_corpus_normalized_prevalence_breaks_prefix_invariance(
     assert short.state_anchor.any()
     assert long.state_anchor[prefix_size:].any()
     short_result = measure_prevalence(
-        short, declared_arm_ids=("prefix_arm",)
+        short, declared_arm_ids=(DECLARED_ARM_IDS[0],)
     )
     extended_result = measure_prevalence(
-        long, declared_arm_ids=("prefix_arm",)
+        long, declared_arm_ids=(DECLARED_ARM_IDS[0],)
     )
     cutoff = int(short.tau_ns[-1])
     short_columns = _prefix_event_columns(short_result.events, cutoff)
@@ -385,6 +387,44 @@ def test_negative_case_corpus_normalized_prevalence_breaks_prefix_invariance(
     )
     with pytest.raises(AssertionError):
         _assert_prefix_event_columns_equal(leaky_short, leaky_extended_prefix)
+
+
+def test_declared_arm_codes_are_prefix_stable_and_observed_data_codes_are_not():
+    primary = DECLARED_ARM_IDS[0]
+    later_observed_arm = DECLARED_ARM_IDS[1]
+    short_labels = np.asarray([primary, primary], dtype="U64")
+    extended_labels = np.asarray(
+        [primary, primary, later_observed_arm], dtype="U64"
+    )
+    declared_short = np.asarray(
+        [ARM_CODE_BY_LABEL[str(value)] for value in short_labels], dtype=np.int8
+    )
+    declared_extended = np.asarray(
+        [ARM_CODE_BY_LABEL[str(value)] for value in extended_labels], dtype=np.int8
+    )
+    _assert_prefix_event_columns_equal(
+        (("arm_code", declared_short),),
+        (("arm_code", declared_extended[: short_labels.size]),),
+    )
+
+    def observed_mapping(values):
+        labels = tuple(sorted(set(values.tolist())))
+        return {label: code for code, label in enumerate(labels)}
+
+    short_map = observed_mapping(short_labels)
+    extended_map = observed_mapping(extended_labels)
+    assert short_map[primary] != extended_map[primary]
+    data_derived_short = np.asarray(
+        [short_map[str(value)] for value in short_labels], dtype=np.int8
+    )
+    data_derived_extended = np.asarray(
+        [extended_map[str(value)] for value in extended_labels], dtype=np.int8
+    )
+    with pytest.raises(AssertionError):
+        _assert_prefix_event_columns_equal(
+            (("arm_code", data_derived_short),),
+            (("arm_code", data_derived_extended[: short_labels.size]),),
+        )
 
 
 @pytest.mark.parametrize("target", DEFERRED_TARGETS)

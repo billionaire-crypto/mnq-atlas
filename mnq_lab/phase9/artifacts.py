@@ -13,13 +13,15 @@ from mnq_lab import SpineError
 from mnq_lab.constants import REPO_ROOT
 from mnq_lab.phase9.prevalence import (
     EPISODE_LENGTH_COLUMNS,
+    EVENT_CODE_LABELS,
     EVENT_COLUMNS,
     SUMMARY_COLUMNS,
     PrevalenceTable,
 )
 
-PHASE9_ARTIFACT_SCHEMA_VERSION = "phase9-prevalence-v2"
+PHASE9_ARTIFACT_SCHEMA_VERSION = "phase9-prevalence-v3"
 PHASE9_TABLE_ORDER = ("summary", "episode_lengths", "events")
+PHASE9_REQUIRED_TABLE_ORDER = ("summary", "episode_lengths")
 PHASE9_TABLE_SCHEMAS = {
     "summary": SUMMARY_COLUMNS,
     "episode_lengths": EPISODE_LENGTH_COLUMNS,
@@ -29,6 +31,7 @@ PHASE9_TABLE_SCHEMAS = {
 __all__ = [
     "PHASE9_ARTIFACT_SCHEMA_VERSION",
     "PHASE9_TABLE_ORDER",
+    "PHASE9_REQUIRED_TABLE_ORDER",
     "PHASE9_TABLE_SCHEMAS",
     "load_phase9_artifacts",
     "write_phase9_artifacts",
@@ -43,6 +46,16 @@ def _canonical_json_bytes(value: Any) -> bytes:
 
 def _sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _event_code_manifest() -> dict[str, list[dict[str, Any]]]:
+    return {
+        column: [
+            {"code": code, "label": label}
+            for code, label in enumerate(labels)
+        ]
+        for column, labels in EVENT_CODE_LABELS.items()
+    }
 
 
 def _assert_output_root(root: Path) -> Path:
@@ -60,19 +73,29 @@ def write_phase9_artifacts(
     tables: Iterable[PrevalenceTable],
     *,
     provenance: Mapping[str, Any],
+    persist_events: bool = False,
 ) -> dict[str, Any]:
-    """Write exactly the three declared tables; this is not a corpus runner."""
+    """Write compact tables by default; event persistence requires opt-in."""
 
+    if type(persist_events) is not bool:
+        raise SpineError("persist_events must be a built-in bool")
     destination = _assert_output_root(Path(root))
     table_values = tuple(tables)
-    if tuple(table.name for table in table_values) != PHASE9_TABLE_ORDER:
+    supplied_order = tuple(table.name for table in table_values)
+    valid_order = (
+        supplied_order == PHASE9_TABLE_ORDER
+        if persist_events
+        else supplied_order in (PHASE9_REQUIRED_TABLE_ORDER, PHASE9_TABLE_ORDER)
+    )
+    if not valid_order:
         raise SpineError("Phase 9 tables differ from the declared order")
     if any(not isinstance(table, PrevalenceTable) for table in table_values):
         raise SpineError("Phase 9 writer received an invalid table")
+    selected_tables = table_values if persist_events else table_values[:2]
 
     destination.mkdir(parents=True, exist_ok=False)
     table_manifest: dict[str, Any] = {}
-    for table in table_values:
+    for table in selected_tables:
         table_root = destination / table.name
         table_root.mkdir()
         column_manifest: dict[str, Any] = {}
@@ -95,7 +118,10 @@ def write_phase9_artifacts(
         }
     manifest = {
         "schema_version": PHASE9_ARTIFACT_SCHEMA_VERSION,
-        "table_order": list(PHASE9_TABLE_ORDER),
+        "declared_table_order": list(PHASE9_TABLE_ORDER),
+        "table_order": [table.name for table in selected_tables],
+        "events_persisted": persist_events,
+        "event_code_mappings": _event_code_manifest(),
         "tables": table_manifest,
         "provenance": dict(provenance),
     }
@@ -118,17 +144,25 @@ def load_phase9_artifacts(root: Path) -> tuple[PrevalenceTable, ...]:
         raise SpineError("Phase 9 artifact manifest is not canonical")
     if manifest.get("schema_version") != PHASE9_ARTIFACT_SCHEMA_VERSION:
         raise SpineError("Phase 9 artifact schema version differs")
-    if tuple(manifest.get("table_order", ())) != PHASE9_TABLE_ORDER:
+    if tuple(manifest.get("declared_table_order", ())) != PHASE9_TABLE_ORDER:
+        raise SpineError("Phase 9 artifact declared table order differs")
+    events_persisted = manifest.get("events_persisted")
+    if type(events_persisted) is not bool:
+        raise SpineError("Phase 9 events persistence declaration is invalid")
+    expected_order = PHASE9_TABLE_ORDER if events_persisted else PHASE9_REQUIRED_TABLE_ORDER
+    if tuple(manifest.get("table_order", ())) != expected_order:
         raise SpineError("Phase 9 artifact table order differs")
-    if set(manifest.get("tables", {})) != set(PHASE9_TABLE_ORDER):
+    if manifest.get("event_code_mappings") != _event_code_manifest():
+        raise SpineError("Phase 9 event code mappings differ from declared vocabularies")
+    if set(manifest.get("tables", {})) != set(expected_order):
         raise SpineError("Phase 9 artifact table inventory differs")
 
-    expected_root_entries = {"manifest.json", *PHASE9_TABLE_ORDER}
+    expected_root_entries = {"manifest.json", *expected_order}
     if {path.name for path in source.iterdir()} != expected_root_entries:
         raise SpineError("Phase 9 artifact root contains an unexpected entry")
 
     output: list[PrevalenceTable] = []
-    for table_name in PHASE9_TABLE_ORDER:
+    for table_name in expected_order:
         record = manifest["tables"][table_name]
         schema = PHASE9_TABLE_SCHEMAS[table_name]
         if tuple(record.get("column_order", ())) != schema:

@@ -48,6 +48,10 @@ PRODUCER = "Corpus Producer"
 VISIBLE_AFTER = "2026-08-03T03:00:00+00:00"
 VISIBLE_BEFORE = "2026-08-02T18:00:00-07:00"
 
+# path -> entry_id of the ledger entry that documents the withdrawal.
+# Empty. Adding a key here is a deliberate, reviewable act.
+WITHDRAWN_EVIDENCE: dict[str, str] = {}
+
 
 def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -771,30 +775,41 @@ V2_PRIOR_AUDIT_ENTRY = (
     / "mnq_lab/ledger/audit_entries"
     / "2026-08-09-phase7-unit-o-session-aware-v2.json"
 )
-V2_AUDIT_ENTRY = (
+V2_AMENDED_AUDIT_ENTRY = (
     REPO_ROOT
     / "mnq_lab/ledger/audit_entries"
     / "2026-08-10-phase7-unit-o-session-aware-v2-evidence-pin-amendment.json"
+)
+V2_AUDIT_ENTRY = (
+    REPO_ROOT
+    / "mnq_lab/ledger/audit_entries"
+    / "2026-08-11-phase7-unit-o-session-aware-v2-evidence-pin-restoration.json"
 )
 V2_PRIOR_RUN_COMMIT_AUDIT_ENTRY = (
     REPO_ROOT
     / "mnq_lab/ledger/audit_entries"
     / "2026-08-09-phase7-unit-o-session-aware-v2-run-commit.json"
 )
-V2_RUN_COMMIT_AUDIT_ENTRY = (
+V2_AMENDED_RUN_COMMIT_AUDIT_ENTRY = (
     REPO_ROOT
     / "mnq_lab/ledger/audit_entries"
     / "2026-08-10-phase7-unit-o-session-aware-v2-run-commit-evidence-pin-amendment.json"
 )
+V2_RUN_COMMIT_AUDIT_ENTRY = (
+    REPO_ROOT
+    / "mnq_lab/ledger/audit_entries"
+    / "2026-08-11-phase7-unit-o-session-aware-v2-run-commit-evidence-pin-restoration.json"
+)
+
+
+def _v2_entry(entry_id: str) -> dict:
+    entries = ratification.load_audit_entries(V2_AUDIT_ENTRY.parent)
+    return next(entry for entry in entries if entry["entry_id"] == entry_id)
 
 
 def _v2_audit_entry() -> dict:
-    entries = ratification.load_audit_entries(V2_AUDIT_ENTRY.parent)
-    return next(
-        entry
-        for entry in entries
-        if entry["entry_id"]
-        == "2026-08-10-phase7-unit-o-session-aware-v2-evidence-pin-amendment"
+    return _v2_entry(
+        "2026-08-11-phase7-unit-o-session-aware-v2-evidence-pin-restoration"
     )
 
 
@@ -815,12 +830,8 @@ def test_v2_audit_entry_records_the_audited_commit_tree_and_closed_verdict():
 
 
 def _v2_run_commit_audit_entry() -> dict:
-    entries = ratification.load_audit_entries(V2_AUDIT_ENTRY.parent)
-    return next(
-        entry
-        for entry in entries
-        if entry["entry_id"]
-        == "2026-08-10-phase7-unit-o-session-aware-v2-run-commit-evidence-pin-amendment"
+    return _v2_entry(
+        "2026-08-11-phase7-unit-o-session-aware-v2-run-commit-evidence-pin-restoration"
     )
 
 
@@ -843,7 +854,7 @@ def test_v2_run_commit_entry_carries_the_scope_c7_actually_compares():
     # It binds the closeout entry it accompanies, so neither can be read alone.
     prior = (
         "mnq_lab/ledger/audit_entries/"
-        "2026-08-10-phase7-unit-o-session-aware-v2-evidence-pin-amendment.json"
+        "2026-08-11-phase7-unit-o-session-aware-v2-evidence-pin-restoration.json"
     )
     assert entry["evidence_hashes"][prior] == hashlib.sha256(
         (REPO_ROOT / prior).read_bytes()
@@ -889,15 +900,19 @@ def _mismatched_evidence(entry: dict) -> list[str]:
     return bad
 
 
+def _assert_evidence_superset(effective: dict, prior: dict) -> None:
+    effective_paths = set(effective["evidence_hashes"])
+    required_paths = set(prior["evidence_hashes"]) - set(WITHDRAWN_EVIDENCE)
+    missing = sorted(required_paths - effective_paths)
+    assert effective_paths >= required_paths, (
+        "evidence withdrawn without an explicit WITHDRAWN_EVIDENCE record: "
+        + ", ".join(missing)
+    )
+
+
 def test_v2_audit_entry_evidence_hashes_match_the_repository_bytes():
     """Every in-repository evidence hash is re-read, not trusted."""
     entry = _v2_audit_entry()
-    resident = [
-        relative
-        for relative in entry["evidence_hashes"]
-        if (REPO_ROOT / relative).is_file()
-    ]
-    assert len(resident) >= 10, "the repository evidence set collapsed to almost nothing"
     assert _mismatched_evidence(entry) == []
 
 
@@ -916,31 +931,97 @@ def test_negative_case_a_tampered_evidence_hash_is_detected():
     ratification._validate_audit_entry(entry)
 
 
-def test_v2_evidence_pin_amendments_bind_the_immutable_prior_entries():
+def test_v2_evidence_pin_restorations_bind_the_immutable_prior_entries():
     closeout, run_commit = _v2_audit_entry(), _v2_run_commit_audit_entry()
+    amended_closeout = _v2_entry(
+        "2026-08-10-phase7-unit-o-session-aware-v2-evidence-pin-amendment"
+    )
+    amended_run = _v2_entry(
+        "2026-08-10-phase7-unit-o-session-aware-v2-run-commit-evidence-pin-amendment"
+    )
     prior_closeout = V2_PRIOR_AUDIT_ENTRY.relative_to(REPO_ROOT).as_posix()
     prior_run = V2_PRIOR_RUN_COMMIT_AUDIT_ENTRY.relative_to(REPO_ROOT).as_posix()
-    amended_closeout = V2_AUDIT_ENTRY.relative_to(REPO_ROOT).as_posix()
+    amended_closeout_path = V2_AMENDED_AUDIT_ENTRY.relative_to(REPO_ROOT).as_posix()
+    amended_run_path = V2_AMENDED_RUN_COMMIT_AUDIT_ENTRY.relative_to(
+        REPO_ROOT
+    ).as_posix()
+    restored_closeout_path = V2_AUDIT_ENTRY.relative_to(REPO_ROOT).as_posix()
 
-    assert closeout["evidence_hashes"][prior_closeout] == hashlib.sha256(
+    assert amended_closeout["evidence_hashes"][prior_closeout] == hashlib.sha256(
         V2_PRIOR_AUDIT_ENTRY.read_bytes()
     ).hexdigest()
-    assert run_commit["evidence_hashes"][prior_run] == hashlib.sha256(
+    assert amended_run["evidence_hashes"][prior_run] == hashlib.sha256(
         V2_PRIOR_RUN_COMMIT_AUDIT_ENTRY.read_bytes()
     ).hexdigest()
-    assert run_commit["evidence_hashes"][amended_closeout] == hashlib.sha256(
+    assert amended_run["evidence_hashes"][amended_closeout_path] == hashlib.sha256(
+        V2_AMENDED_AUDIT_ENTRY.read_bytes()
+    ).hexdigest()
+    assert closeout["evidence_hashes"][amended_closeout_path] == hashlib.sha256(
+        V2_AMENDED_AUDIT_ENTRY.read_bytes()
+    ).hexdigest()
+    assert run_commit["evidence_hashes"][amended_run_path] == hashlib.sha256(
+        V2_AMENDED_RUN_COMMIT_AUDIT_ENTRY.read_bytes()
+    ).hexdigest()
+    assert run_commit["evidence_hashes"][restored_closeout_path] == hashlib.sha256(
         V2_AUDIT_ENTRY.read_bytes()
     ).hexdigest()
 
-    # Negative witness: a schema-valid amendment with a corrupted prior-entry
+    # Negative witness: a schema-valid restoration with a corrupted prior-entry
     # pin is detected by repository-byte re-reading.
     altered = copy.deepcopy(closeout)
-    original = altered["evidence_hashes"][prior_closeout]
-    altered["evidence_hashes"][prior_closeout] = (
+    original = altered["evidence_hashes"][amended_closeout_path]
+    altered["evidence_hashes"][amended_closeout_path] = (
         "0" if original[0] != "0" else "1"
     ) + original[1:]
-    assert _mismatched_evidence(altered) == [prior_closeout]
+    assert _mismatched_evidence(altered) == [amended_closeout_path]
     ratification._validate_audit_entry(altered)
+
+
+def test_v2_restorations_prevent_undocumented_evidence_withdrawal():
+    prior_closeout = _v2_entry(
+        "2026-08-09-phase7-unit-o-session-aware-v2-audit"
+    )
+    prior_run = _v2_entry(
+        "2026-08-09-phase7-unit-o-session-aware-v2-run-commit-audit"
+    )
+    amended_closeout = _v2_entry(
+        "2026-08-10-phase7-unit-o-session-aware-v2-evidence-pin-amendment"
+    )
+    amended_run = _v2_entry(
+        "2026-08-10-phase7-unit-o-session-aware-v2-run-commit-evidence-pin-amendment"
+    )
+    restored_closeout = _v2_audit_entry()
+    restored_run = _v2_run_commit_audit_entry()
+
+    # Historical negative controls: this guard catches the undisclosed shrinkage
+    # in both 2026-08-10 entries. The run-commit entry also replaced its direct
+    # closeout pin with a transitive binding through the closeout amendment.
+    with pytest.raises(AssertionError, match="child.stderr.log"):
+        _assert_evidence_superset(amended_closeout, prior_closeout)
+    with pytest.raises(AssertionError, match="child.stderr.log"):
+        _assert_evidence_superset(amended_run, prior_run)
+
+    # Current effective entries may add pins, but may not drop any immediate
+    # predecessor pin without an explicit record in WITHDRAWN_EVIDENCE.
+    _assert_evidence_superset(restored_closeout, amended_closeout)
+    _assert_evidence_superset(restored_run, amended_run)
+    _assert_evidence_superset(restored_closeout, prior_closeout)
+
+    assert len(restored_closeout["evidence_hashes"]) == 18
+    assert len(restored_run["evidence_hashes"]) == 20
+
+    # Negative witness: deleting one restored receipt pin remains schema-valid,
+    # and only the evidence-set rule identifies and names the withdrawal.
+    altered = copy.deepcopy(restored_closeout)
+    dropped = (
+        "C:/Users/kyawz/mnq_atlas_runs/phase7-unit-o-v2-final-"
+        "6f1c506-attempt-2/child.stdout.log"
+    )
+    del altered["evidence_hashes"][dropped]
+    ratification._validate_audit_entry(altered)
+    with pytest.raises(AssertionError) as exc_info:
+        _assert_evidence_superset(altered, prior_closeout)
+    assert dropped in str(exc_info.value)
 
 
 def test_negative_case_the_v2_entry_must_be_canonical_json(tmp_path):
@@ -1024,6 +1105,8 @@ def test_repository_unit_o_audit_and_certificate_validate_exact_completed_tree()
         "2026-08-09-phase7-unit-o-session-aware-v2-audit",
         "2026-08-10-phase7-unit-o-session-aware-v2-evidence-pin-amendment",
         "2026-08-10-phase7-unit-o-session-aware-v2-run-commit-evidence-pin-amendment",
+        "2026-08-11-phase7-unit-o-session-aware-v2-evidence-pin-restoration",
+        "2026-08-11-phase7-unit-o-session-aware-v2-run-commit-evidence-pin-restoration",
     ]
     result = evaluate_ratification_certificate(
         certificate_path, repo_root=REPO_ROOT

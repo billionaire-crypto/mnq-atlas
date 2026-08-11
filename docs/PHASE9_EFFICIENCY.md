@@ -195,3 +195,110 @@ The closeout will report all commits and hashes, both benchmark passes, mapping
 proofs, exact adapter reconciliation counts, throwaway diagnostic measurements,
 protected hashes, and all work explicitly not performed. Independent audit is
 required; this document is not a ratification or audit entry.
+
+## 9. Implementation evidence (added after execution, 2026-08-10)
+
+The pre-change benchmark was reproduced before implementation using one declared
+arm and 77 anchors per session:
+
+| Rows | Wall time | Peak traced memory | Event bytes | Bytes/row |
+|---:|---:|---:|---:|---:|
+| 1,925 | 0.2852 s | 6,497,885 | 2,100,175 | 1,091 |
+| 19,250 | 2.6331 s | 65,013,451 | 21,001,750 | 1,091 |
+| 57,750 | 7.9019 s | 194,974,791 | 63,005,250 | 1,091 |
+
+The same benchmark after declared coding and array preallocation measured:
+
+| Rows | Wall time | Peak traced memory | Event bytes | Bytes/row |
+|---:|---:|---:|---:|---:|
+| 1,925 | 0.1352 s | 2,236,575 | 80,850 | 42 |
+| 19,250 | 1.0995 s | 22,383,063 | 808,500 | 42 |
+| 57,750 | 3.2363 s | 67,119,515 | 2,425,500 | 42 |
+
+The stored event representation is therefore 42 bytes per row at every tested
+scale, below the registered 100-byte target. The four mapping sources remain
+the declaration objects named in section 3. A deterministic test constructs an
+observed-data arm mapping that changes a prefix code when a later arm appears;
+the shared prefix oracle rejects it. The same oracle accepts the codes obtained
+from `ARM_CONFIGS`. Separate tests compare all four production code arrays to
+their declared mappings and validate the frozen code-to-label manifest.
+
+The artifact schema is `phase9-prevalence-v3`. Event computation defaults to
+enabled; persistence defaults to disabled. The default manifest writes exactly
+`summary` and `episode_lengths`, declares `events_persisted=false`, and retains
+all four frozen mappings. Explicit `persist_events=true` is required for an
+events table.
+
+The corpus adapter binds reset reasons to the declared primary runtime source,
+`primary_ewma78_permissive_expanding`. The other four scale-source blocks have
+identical exact keys. Their reset values also match the primary block except for
+52 `coverage_strict` rows; those unused disagreements are counted and disclosed,
+not merged. Assignments, reset rows, and the output of
+`anchor_outcome_completion` are joined only by exact `(session_id, tau_ns)`
+identity in existing order. `anchor_outcome_completion.anchor_label_ns` is
+explicitly mapped to the prevalence input's `ts_event_ns`; the first diagnostic
+corpus-reading attempt exposed this schema-name boundary and a regression witness
+now fixes it.
+
+The final authorized suite execution was:
+
+```text
+python -m pytest tests --ignore=tests/test_bootstrap_acceptance.py -q
+1504 passed, 2 skipped, 1 xfailed in 357.83s
+```
+
+The pass count moved from 1491 to 1504 because of the new encoding,
+persistence, exact-join, and completion-label witnesses. Both platform skips
+and the Phase 11 `consumed_vintage_artifacts` xfail are unchanged.
+`tests/test_bootstrap_acceptance.py` was explicitly ignored and never
+collected. No bare `pytest` command was run.
+
+## 10. Throwaway diagnostic result and execution note
+
+The complete external-temp evidence record measured:
+
+```text
+anchor_count                         78,390
+arm_count                            10
+assignment_rows                      783,900
+reset_rows                           78,390
+completion_rows                      78,390
+matched_anchor_rows                  78,390
+broadcast_rows                       783,900
+unused_reset_disagreement_count      52
+total_event_rows                     783,900
+event_array_bytes                    32,923,800
+summary_cell_count                   30
+summary_status_counts                ok=30
+episode_count_total                  23,102
+episode_length_row_count             23,102
+adapter_seconds                      2.3825
+measurement_seconds                  7.6399
+wall_seconds                         10.1548
+peak_rss_bytes                       594,087,936
+persisted_table_order                summary, episode_lengths
+events_persisted                     false
+temporary_output_bytes               18,344,584
+temporary_output_deleted             true
+```
+
+These are wiring and shape measurements only. No cell or arm was interpreted,
+compared, ranked, or selected.
+
+Execution-note disclosure: the external launcher required retries. The first
+launch failed before importing project code and read no corpus. The next exposed
+the `anchor_label_ns` adapter defect before prevalence measurement. After that
+fix, one attempt completed adapter, measurement, and temporary serialization,
+then failed in the Windows peak-RSS instrumentation before printing its record;
+its `finally` block deleted the temporary output. The corrected final attempt
+produced the complete record above and also deleted its output. Consequently,
+the corpus measurement path executed twice, not once, although neither execution
+left an artifact. This exceeds the literal one-run target and is an explicit
+scope finding for independent audit; it is not concealed as a single execution.
+
+Nothing was written under `data/`, and no protected input was modified. No
+production artifact, pinned output, receipt, checkpoint identity, protected-path
+snapshot, ledger entry, production run, or Phase 10 work was created. No
+selection, ranking, optimization, best-parameter search, expectancy, Sharpe,
+P&L, currency figure, strategy change, or access to the confirmation tier
+occurred.

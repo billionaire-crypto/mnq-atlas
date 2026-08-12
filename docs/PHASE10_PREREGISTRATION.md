@@ -244,16 +244,17 @@ observed surface and every replication. Every invalid cell breaks adjacency.
 1. **Session-block bootstrap inside every mapping.** This is the honest bootstrap
    studentization: the scale would be recomputed for the observed mapping and each of
    4,999 null mappings. At the existing minimum 999 draws this requires
-   `5,000 x 999 = 4,995,000` bootstrap surface evaluations, or 74,925,000 cell
-   contrast evaluations for the 15-cell surface. Phase 8 v2 measured 29,086.906
+   `5,000 x 999 = 4,995,000` bootstrap surface evaluations, or 149,850,000 labeled
+   cell-interpretation evaluations for the two frozen 15-cell weighting planes.
+   Phase 8 v2 measured 29,086.906
    seconds for 574,805,016 request-draw evaluations on a 32-worker, 252-GiB host.
-   A simple throughput ratio projects about 3,791 seconds (63 minutes) on that much
+   A simple throughput ratio projects about 7,583 seconds (126 minutes) on that much
    larger host before nested-plan and local-machine overhead. It would be the dominant
    Phase 10 cost and is rejected on cost grounds; it is not rejected because of any
    observed surface value.
 
 2. **One observed-data bootstrap scale reused everywhere.** This needs only 999
-   bootstrap surfaces, or 14,985 cell contrast evaluations. It is much cheaper, but
+   bootstrap surfaces, or 29,970 labeled cell-interpretation evaluations. It is much cheaper, but
    the observed pairing would determine the scale used to judge all null pairings.
    That asymmetry can make the observed association influence its own normalization,
    so this alternative is rejected on statistical grounds.
@@ -263,10 +264,10 @@ observed surface and every replication. Every invalid cell breaks adjacency.
    to be applied again under every mapping. No such rule is frozen. It is rejected on
    statistical-specification grounds.
 
-4. **Shared null-ensemble dispersion (chosen).** The 4,999 by 15 raw-contrast matrix
-   is already required by the formal null. Its signed-int64 storage is 599,880 bytes;
-   a 74,985-byte validity matrix accompanies it. Computing 15 sample dispersions is
-   linear in those 74,985 values and adds no resampling pass. It standardizes cells by
+4. **Shared null-ensemble dispersion (chosen).** The 4,999 by 2 by 15 raw-contrast
+   tensor is already required by the formal null. Its signed-int64 storage is
+   1,199,760 bytes; a 149,970-byte validity tensor accompanies it. Computing 30 sample
+   dispersions is linear in those 149,970 values and adds no resampling pass. It standardizes cells by
    the variability induced by the retained null, avoids observed-surface normalization,
    and is the only considered alternative that adds neither an unfrozen estimator nor
    a nested bootstrap.
@@ -278,12 +279,23 @@ The primary surface is exactly downward excursion, 30 minutes, q90,
 phase-volatility lattice. No connected region spans another outcome, horizon,
 quantile, contrast, or estimand.
 
+Section 8 and the Phase 8 preregistration require both labeled interpretations inside
+the named contrast: `equal_phase_contrast` and `natural_prevalence_contrast`. Phase 10
+retains them as two declared 5 by 3 weighting planes in that one named surface. Each
+cell is standardized within its own weighting plane. A connected region never crosses
+from one weighting plane to the other. The single formal statistic is the maximum of
+all declared signed-region candidates across both planes. This preserves both frozen
+interpretations without choosing one after results and produces one joint formal
+p-value, not two p-values and not a smallest p-value comparison.
+
 Positive regions are maximal rook-connected valid cells with `z > 1.0`. Negative
 regions are maximal rook-connected valid cells with `z < -1.0`. Opposite signs are
 never merged. Missing or invalid cells break adjacency. For a region, yearly stability
-is the fraction of yearly blocks whose mean raw signed contrast retains the region's
-sign. The statistic is the larger of the declared positive- and negative-region
-scores. If no region exists, that side contributes zero.
+is the fraction of all declared yearly blocks whose mean raw signed contrast retains
+the region's sign. A yearly block contributes no sign retention if any region cell is
+invalid in that block; the denominator remains all declared yearly blocks. The
+statistic is the larger of the declared positive- and negative-region scores across
+both weighting planes. If no region exists, that side contributes zero.
 
 The final run uses exactly 4,999 replications and no early stopping. Its p-value is
 exactly `(1 + count(T_null >= T_observed)) / (B + 1)`; ties count. No smallest value

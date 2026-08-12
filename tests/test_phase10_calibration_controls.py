@@ -164,6 +164,14 @@ def test_replication_streams_are_exact_fresh_index_coordinates():
     _assert_stream_contract(calibration_replication_streams)
 
 
+def test_replication_index_and_outer_corpus_guards_fail_closed():
+    for invalid in (True, np.int64(0), -1, CALIBRATION_REPLICATIONS):
+        with pytest.raises(SpineError, match="built-in integer in \[0, 300\)"):
+            calibration_replication_streams(invalid)
+    with pytest.raises(SpineError, match="requires a FormalCorpus"):
+        generate_calibration_outer_control(object(), 0)
+
+
 @pytest.mark.parametrize(
     "mutant",
     (

@@ -151,3 +151,45 @@ Its terminal summary was:
 Relative to the verified baseline, passes increased by 30. Both Windows-gated skips
 remain, and `consumed_vintage_artifacts` remains the sole Phase 11 xfail. The
 one-shot bootstrap-acceptance file was never collected or run.
+
+## 7. Cost correction dated 2026-08-12
+
+This is an append-only correction. The original §5 timing table and projection are
+retained as historical measurements but are superseded as estimates of normal engine
+runtime. The original benchmark started `tracemalloc` before its wall clock and stopped
+it only after wall capture. The reported 97,329 seconds / 27.04 hours at B = 4,999
+therefore measured the engine together with allocation tracing, not production wall
+time. The producer independently isolated a 6.821x inflation at B = 19; the auditor
+independently isolated 6.616x at B = 3.
+
+Before the type-guard optimization, the corrected untraced basis was
+`wall(B) = 3.4362593 + 2.868437975 * B` seconds. It projected B = 4,999 at
+14,342.76 seconds, or 3.98 hours. This pre-optimization basis is itself superseded by
+the post-fast-path measurement below.
+
+The benchmark now executes two explicit passes. The first measures wall time and RSS
+with `tracemalloc` disabled. The second measures traced allocations separately. Only
+the first pass enters runtime fitting. Both passes exercise identical surface wiring,
+discard their surface outputs, emit cost fields only, and remain subject to the 4 GB
+RSS stop. The external temporary directory was deleted in the benchmark's `finally`
+block, and the cleanup record was `temporary_directory_deleted = true`.
+
+Post-fast-path measurements on the 900-session, 70,200-row corpus were:
+
+| B | Untraced wall seconds | Timed-pass peak RSS bytes | Allocation-pass seconds | Allocation-pass peak RSS bytes | Peak traced bytes | Result-array bytes | Temporary bytes |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 3 | 8.094956 | 205,377,536 | 58.827710 | 211,173,376 | 124,365,341 | 4,884 | 84 |
+| 19 | 40.763704 | 209,125,376 | 294.017601 | 215,769,088 | 124,941,614 | 30,932 | 169 |
+| 49 | 101.903838 | 212,774,912 | 735.956578 | 218,394,624 | 126,135,378 | 79,772 | 254 |
+
+Ordinary least squares on the three untraced wall measurements gives
+`wall(B) = 1.9941832 + 2.0391542 * B` seconds. At B = 4,999 this projects
+10,195.73 seconds, or 2.832 hours, for one full run. The 1,200-run calibration design
+therefore projects 3,398.58 core-hours. Pairwise fits project one B = 4,999 run from
+2.831 to 2.836 hours and the complete design from 3,396.68 to 3,402.97 core-hours.
+This range measures small-B scaling-fit variation only; it does not include machine
+contention, parallel-efficiency loss, interruption, or rental-host differences.
+
+The post-fast-path slope is 28.91% below the corrected pre-optimization slope. No
+surface value, statistic, p-value, rejection outcome, Type-I or power result, or
+acceptance decision was printed or retained by this benchmark.

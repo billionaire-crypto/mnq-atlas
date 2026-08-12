@@ -215,7 +215,7 @@ def _one_cell(
     weighting: str,
     quantile_weights: list[np.ndarray] | None = None,
     cell_cache: dict[CellKey, _CellWeights] | None = None,
-) -> tuple[int, bool, str, int, int, float, int, int, float]:
+) -> tuple[int | None, bool, str, int, int, float, int, int, float]:
     eligible = completed & active
     support = contrast_support(target, PRIMARY_CONTRAST)
     target_weights = _fast_condition_weights(
@@ -329,7 +329,7 @@ def _one_cell(
         insufficient_completion=completion_failed,
         insufficient_overlap=positivity_failed,
     )
-    contrast = 0
+    contrast = None
     valid = decision.status == "ok"
     if valid:
         if quantile_weights is None:
@@ -404,7 +404,8 @@ def _surface_for_rows(
                     quantile_weights=quantile_weights,
                     cell_cache=cell_cache,
                 )
-                contrasts[plane, phase_index, state_index] = result[0]
+                if result[0] is not None:
+                    contrasts[plane, phase_index, state_index] = result[0]
                 valid[plane, phase_index, state_index] = result[1]
                 statuses[plane, phase_index, state_index] = result[2]
                 if result[1]:

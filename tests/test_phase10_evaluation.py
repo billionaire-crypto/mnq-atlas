@@ -20,7 +20,7 @@ from mnq_lab.phase8.production import (
 )
 
 
-def _fixture(weighting="natural_prevalence_contrast"):
+def _fixture(weighting="natural_prevalence_contrast", support_case="ok"):
     session_keys = np.arange(60, dtype=np.int32) + 20210101
     cell_phases = np.repeat(np.asarray(SESSION_PHASES), len(VOLATILITY_STATES))
     cell_states = np.tile(np.asarray(VOLATILITY_STATES), len(SESSION_PHASES))
@@ -36,6 +36,15 @@ def _fixture(weighting="natural_prevalence_contrast"):
     ).astype(np.int32)
     years = np.full(sessions.size, 2021, dtype=np.int64)
     target = CellKey("open", "high")
+    target_rows = (phases == target.phase) & (states == target.volatility_state)
+    if support_case == "missing":
+        active[target_rows] = False
+    elif support_case == "thin":
+        active[target_rows & (sessions > session_keys[1])] = False
+    elif support_case == "incomplete":
+        completed[target_rows] = False
+    elif support_case != "ok":
+        raise AssertionError(f"unknown support case: {support_case}")
     direct = _one_cell(
         values=values,
         prepared_values=prepare_weighted_quantile_ticks(values),
@@ -118,6 +127,13 @@ def _assert_equivalent(direct, row):
 )
 def test_phase10_fast_point_path_matches_phase8(weighting):
     direct, row = _fixture(weighting)
+    _assert_equivalent(direct, row)
+
+
+@pytest.mark.parametrize("support_case", ("missing", "thin", "incomplete"))
+def test_phase10_non_ok_status_path_matches_phase8(support_case):
+    direct, row = _fixture(support_case=support_case)
+    assert row["status"] != "ok"
     _assert_equivalent(direct, row)
 
 

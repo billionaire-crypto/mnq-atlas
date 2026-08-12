@@ -96,10 +96,29 @@ def spawn_session_mappings(
     replications: int,
 ) -> tuple[SessionMapping, ...]:
     """Spawn prefix-stable PCG64 children from the frozen root entropy."""
+    return spawn_session_mappings_from_seed_sequence(
+        session_ids,
+        strata,
+        replications,
+        root_sequence=np.random.SeedSequence(RNG_ROOT_ENTROPY),
+    )
+
+
+def spawn_session_mappings_from_seed_sequence(
+    session_ids: Any,
+    strata: Any,
+    replications: int,
+    *,
+    root_sequence: np.random.SeedSequence,
+) -> tuple[SessionMapping, ...]:
+    """Spawn mappings from one fresh explicit child without changing deployment."""
     if isinstance(replications, bool) or not isinstance(replications, int) or replications <= 0:
         raise SpineError("replications must be a positive built-in integer")
-    root = np.random.SeedSequence(RNG_ROOT_ENTROPY)
-    children = root.spawn(replications)
+    if not isinstance(root_sequence, np.random.SeedSequence):
+        raise SpineError("mapping root_sequence must be an explicit SeedSequence")
+    if root_sequence.n_children_spawned != 0:
+        raise SpineError("mapping root_sequence must be fresh and unconsumed")
+    children = root_sequence.spawn(replications)
     return tuple(
         generate_session_mapping(
             session_ids,

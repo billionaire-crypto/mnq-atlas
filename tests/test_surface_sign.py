@@ -108,3 +108,43 @@ def test_surface_negative_zero_fill_fails_the_positive_assertion():
     result.observed_z[0, 0, 1] = 0.0
     with pytest.raises(AssertionError):
         _assert_invalid_standardization_is_not_zero(result)
+
+
+def _assert_pooled_standardization(function):
+    observed = np.zeros((1, 5, 3), dtype=np.float64)
+    observed[0, 0, 0] = 10.0
+    observed_valid = np.ones(observed.shape, dtype=np.bool_)
+    observed_valid[0, 0, 1] = False
+    null = np.stack(
+        (
+            np.zeros(observed.shape, dtype=np.float64),
+            np.full(observed.shape, 2.0, dtype=np.float64),
+        )
+    )
+    null_valid = np.ones(null.shape, dtype=np.bool_)
+    result = function(observed, observed_valid, null, null_valid)
+    pooled_scale = float(np.std((10.0, 0.0, 2.0), ddof=1))
+    null_only_scale = float(np.std((0.0, 2.0), ddof=1))
+    assert result.scales[0, 0, 0] == pooled_scale
+    assert result.observed_z[0, 0, 0] == 10.0 / pooled_scale
+    assert result.null_z[1, 0, 0, 0] == 2.0 / pooled_scale
+    assert result.scales[0, 0, 1] == null_only_scale
+
+
+def test_surface_standardization_pools_observed_and_null_values():
+    _assert_pooled_standardization(shared_standardization)
+
+
+def test_surface_negative_null_only_scale_fails_the_positive_assertion():
+    def null_only_mutant(observed, observed_valid, null, null_valid):
+        result = shared_standardization(
+            observed, observed_valid, null, null_valid
+        )
+        scale = float(np.std(null[:, 0, 0, 0], ddof=1))
+        result.scales[0, 0, 0] = scale
+        result.observed_z[0, 0, 0] = observed[0, 0, 0] / scale
+        result.null_z[:, 0, 0, 0] = null[:, 0, 0, 0] / scale
+        return result
+
+    with pytest.raises(AssertionError):
+        _assert_pooled_standardization(null_only_mutant)

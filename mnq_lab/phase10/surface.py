@@ -59,7 +59,7 @@ def shared_standardization(
     null_raw: Any,
     null_valid: Any,
 ) -> StandardizedSurfaces:
-    """Apply one null-ensemble dispersion to observed and null contrasts."""
+    """Apply one pooled observed-plus-null dispersion to every contrast."""
     observed = _numeric_array(observed_raw, "observed_raw")
     observed_ok = _bool_array(observed_valid, "observed_valid")
     null_values = _numeric_array(null_raw, "null_raw")
@@ -84,11 +84,24 @@ def shared_standardization(
         for phase in range(lattice_shape[0]):
             for state in range(lattice_shape[1]):
                 keep = null_ok[:, plane, phase, state]
-                if int(np.count_nonzero(keep)) < 2:
+                null_cell = null_values[keep, plane, phase, state]
+                if observed_ok[plane, phase, state]:
+                    pooled = np.concatenate(
+                        (
+                            np.asarray(
+                                [observed[plane, phase, state]],
+                                dtype=np.float64,
+                            ),
+                            null_cell.astype(np.float64, copy=False),
+                        )
+                    )
+                else:
+                    pooled = null_cell.astype(np.float64, copy=False)
+                if pooled.size < 2:
                     continue
                 scale = float(
                     np.std(
-                        null_values[keep, plane, phase, state],
+                        pooled,
                         ddof=1,
                         dtype=np.float64,
                     )

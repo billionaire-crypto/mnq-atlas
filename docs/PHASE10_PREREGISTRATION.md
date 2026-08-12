@@ -239,6 +239,29 @@ the explicit upstream status. It does not become zero. If `n[c] < 2`, or the sha
 scale is non-finite or zero, the cell has `scale_status = unusable_null_scale` for the
 observed surface and every replication. Every invalid cell breaks adjacency.
 
+#### Amendment dated 2026-08-11 — pooled exchangeable scale
+
+The independent audit identified that the original implementation estimated each
+cell scale from the `B` valid null contrasts alone. Each null contrast therefore
+contributed to its own denominator while the observed contrast did not, breaking
+exchangeability between the observed statistic and the `B` null statistics and
+creating an anti-conservative effect of order `1/B`. The auditor's true-null
+diagnostic, using a maximum over 15 cells, measured 12.21% at `B = 19` against 5%
+nominal (+7.11 percentage points), 5.57% against 5.03% at `B = 199` (+0.54
+percentage points), and 5.22% against 5.22% at `B = 4999` (0.00 percentage points).
+The defect was inert at the frozen formal `B = 4999`, and no formal p-value had been
+produced.
+
+Before any authorized Phase 10 calibration evidence, Type-I or power evidence,
+corpus p-value, rejection result, or acceptance record existed, the estimator was
+amended to pool the observed contrast with every valid null contrast for the cell.
+The observed value contributes only when its cell is valid. The sample standard
+deviation still uses `ddof = 1`, requires at least two pooled values, uses its mean
+only for dispersion, and is applied identically to the observed and every null
+contrast without mean subtraction. A non-finite or zero scale remains unusable;
+missing, thin, or non-`ok` cells remain non-finite rather than zero and continue to
+break adjacency. No other Phase 10 estimator or decision changed.
+
 ### 4.2 Alternatives considered and cost
 
 1. **Session-block bootstrap inside every mapping.** This is the honest bootstrap

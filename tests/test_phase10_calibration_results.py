@@ -133,6 +133,22 @@ def test_hardcoded_target_mutant_fails_the_positive_helper(monkeypatch):
         _assert_target_derivation(lambda: frozenset(((1, 2), (2, 2), (3, 2))))
 
 
+def test_literal_high_column_mutant_fails_the_positive_helper(monkeypatch):
+    monkeypatch.setattr(
+        results_module,
+        "VOLATILITY_STATES",
+        ("high", "low", "mid"),
+    )
+    _assert_target_derivation(results_module.planted_target_cells)
+    with pytest.raises(AssertionError):
+        _assert_target_derivation(
+            lambda: frozenset(
+                (results_module.SESSION_PHASES.index(phase), 2)
+                for phase in results_module.PLANTED_EFFECT_PHASES
+            )
+        )
+
+
 def _assert_binding_localization(function):
     surface = _binding_surface()
     result = function(surface, True)

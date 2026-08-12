@@ -18,6 +18,7 @@ from mnq_lab.core import weights as weights_module
 from mnq_lab.core.weights import prepare_weighted_quantile_values
 from mnq_lab.phase10.adapter import FormalCorpus, FormalJoinReconciliation
 from mnq_lab.phase10.engine import NullSurfaceBatch, evaluate_null_surfaces
+from mnq_lab.phase10.surface import coherence_statistic, shared_standardization
 from mnq_lab.phase8.contrasts import (
     CellKey,
     SESSION_PHASES,
@@ -217,6 +218,25 @@ def test_numeric_ndarray_fast_path_is_bit_identical_across_phase10(monkeypatch):
     )
     production = _with_guard(monkeypatch, production_guard, _snapshot_phase10)
     assert _identical(production, reference)
+
+
+def test_real_null_surface_evaluation_retains_observed_regions():
+    batch = evaluate_null_surfaces(_synthetic_phase10_corpus(), replications=3)
+    standardized = shared_standardization(
+        batch.observed.contrasts,
+        batch.observed.valid,
+        batch.null_contrasts,
+        batch.null_valid,
+    )
+    expected = coherence_statistic(
+        standardized.observed_z,
+        standardized.observed_valid,
+        batch.observed.yearly_contrasts,
+        batch.observed.yearly_valid,
+    )
+
+    assert expected.regions
+    assert batch.observed_regions == expected.regions
 
 
 INVALID_CASES = (

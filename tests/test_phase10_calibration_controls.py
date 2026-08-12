@@ -274,13 +274,9 @@ def test_default_rng_call_is_unreachable(monkeypatch):
         np.random.default_rng(0)
 
 
-def test_outer_control_uses_control_child_and_corpus_quarters_only():
+def _assert_outer_control_contract(producer):
     corpus, _ = _fixture()
-    assert tuple(inspect.signature(generate_calibration_outer_control).parameters) == (
-        "corpus",
-        "replication_index",
-    )
-    observed = generate_calibration_outer_control(corpus, 5)
+    observed = producer(corpus, 5)
     expected_streams = calibration_replication_streams(5)
     expected = controls_module.generate_session_mapping(
         corpus.session_ids,
@@ -298,10 +294,14 @@ def test_outer_control_uses_control_child_and_corpus_quarters_only():
     np.testing.assert_array_equal(observed.strata, corpus.calendar_quarters)
 
 
-def test_internal_ensemble_root_is_fresh_and_naturally_rederived():
+def test_outer_control_uses_control_child_and_corpus_quarters_only():
+    _assert_outer_control_contract(generate_calibration_outer_control)
+
+
+def _assert_internal_ensemble_rederivation(producer):
     corpus, _ = _fixture()
-    first = calibration_replication_streams(5).ensemble_root
-    second = calibration_replication_streams(5).ensemble_root
+    first = producer(5).ensemble_root
+    second = producer(5).ensemble_root
     short = spawn_session_mappings_from_seed_sequence(
         corpus.session_ids,
         corpus.calendar_quarters,
@@ -325,16 +325,31 @@ def test_internal_ensemble_root_is_fresh_and_naturally_rederived():
         )
 
 
+def test_internal_ensemble_root_is_fresh_and_naturally_rederived():
+    _assert_internal_ensemble_rederivation(calibration_replication_streams)
+
+
 def test_wrong_outer_strata_mutant_fails_the_positive_assertion():
-    corpus, _ = _fixture()
-    streams = calibration_replication_streams(5)
-    mutant = controls_module.generate_session_mapping(
-        corpus.session_ids,
-        corpus.calendar_years,
-        streams.control_rng,
-    )
+    def wrong_strata(corpus, replication_index):
+        streams = calibration_replication_streams(replication_index)
+        return controls_module.generate_session_mapping(
+            corpus.session_ids,
+            corpus.calendar_years,
+            streams.control_rng,
+        )
+
     with pytest.raises(AssertionError):
-        np.testing.assert_array_equal(mutant.strata, corpus.calendar_quarters)
+        _assert_outer_control_contract(wrong_strata)
+
+
+def test_cached_ensemble_mutant_fails_the_positive_rederivation_helper():
+    cached = calibration_replication_streams(5)
+
+    def cached_streams(replication_index):
+        return cached
+
+    with pytest.raises(SpineError, match="fresh and unconsumed"):
+        _assert_internal_ensemble_rederivation(cached_streams)
 
 
 def _assert_effect_contract(corpus, control, result, magnitude):

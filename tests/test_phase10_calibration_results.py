@@ -269,6 +269,7 @@ def _wrong_denominator_mutant(surface, rejected, denominator):
         _filter_negative_mutant,
         _drop_negative_denominator_mutant,
         _plane_matching_mutant,
+        lambda surface, rejected: localization_overlap(surface, rejected).overlap,
         lambda surface, rejected: LocalizationResult(0.25, ()) if not rejected else localization_overlap(surface, True),
         lambda surface, rejected: LocalizationResult(0.25, ()) if surface.value == 0.0 else localization_overlap(surface, rejected),
         lambda surface, rejected: LocalizationResult(0.0, ()) if surface.value > 0.0 and surface.regions == _binding_surface().regions[3:] else localization_overlap(surface, rejected),
@@ -282,30 +283,47 @@ def test_localization_mutants_fail_the_same_binding_helper(mutant):
         _assert_binding_localization(mutant)
 
 
-def test_plane_identity_is_ignored_for_overlap():
+def _assert_plane_independence(function):
     target = tuple(sorted(planted_target_cells()))
     left = SurfaceStatistic(2.0, (_region(0, "positive", target, 2.0),))
     right = SurfaceStatistic(2.0, (_region(1, "positive", target, 2.0),))
-    assert localization_overlap(left, True).overlap == 1.0
-    assert localization_overlap(right, True).overlap == 1.0
+    assert function(left, True).overlap == 1.0
+    assert function(right, True).overlap == 1.0
+
+
+def test_plane_identity_is_ignored_for_overlap():
+    _assert_plane_independence(localization_overlap)
 
 
 def test_plane_matching_mutant_fails_a_binding_cross_plane_assertion():
     with pytest.raises(AssertionError):
-        _assert_binding_localization(_plane_matching_mutant)
+        _assert_plane_independence(_plane_matching_mutant)
 
 
-def test_real_coherence_statistic_supplies_an_exact_positive_maximizer():
+def _assert_realistic_synthetic_surface(statistic_function, localizer):
     z = np.zeros((2, 5, 3), dtype=np.float64)
     valid = np.ones(z.shape, dtype=np.bool_)
     z[0, 1:4, 2] = 2.0
     years = np.repeat(z[np.newaxis], 3, axis=0)
     year_valid = np.ones(years.shape, dtype=np.bool_)
-    surface = coherence_statistic(z, valid, years, year_valid)
-    result = localization_overlap(surface, True)
+    surface = statistic_function(z, valid, years, year_valid)
+    result = localizer(surface, True)
     assert result.overlap == 1.0
     assert result.co_maximal_regions
     assert all(region.statistic == surface.value for region in result.co_maximal_regions)
+
+
+def test_real_coherence_statistic_supplies_an_exact_positive_maximizer():
+    _assert_realistic_synthetic_surface(coherence_statistic, localization_overlap)
+
+
+def test_realistic_surface_wrong_overlap_mutant_fails_the_positive_helper():
+    def wrong_overlap(surface, rejected):
+        result = localization_overlap(surface, rejected)
+        return LocalizationResult(0.0, result.co_maximal_regions)
+
+    with pytest.raises(AssertionError):
+        _assert_realistic_synthetic_surface(coherence_statistic, wrong_overlap)
 
 
 def _assert_aggregation_contract(function):
@@ -326,13 +344,45 @@ def test_rejected_only_aggregation_mutant_fails_the_positive_helper():
         _assert_aggregation_contract(rejected_only)
 
 
-def test_aggregation_rejects_short_invalid_and_nonfinite_sequences():
-    with pytest.raises(SpineError, match="declared 300"):
-        mean_localization_overlap((0.0,) * 299)
+def _assert_aggregation_guards(function):
+    try:
+        function((0.0,) * 299)
+    except SpineError as exc:
+        assert "declared 300" in str(exc)
+    else:
+        raise AssertionError("short localization sequence was accepted")
     for bad in (True, -0.1, 1.1, np.nan):
         values = (0.0,) * 299 + (bad,)
-        with pytest.raises(SpineError, match=r"inside \[0,1\]"):
-            mean_localization_overlap(values)
+        try:
+            function(values)
+        except SpineError as exc:
+            assert "inside [0,1]" in str(exc)
+        else:
+            raise AssertionError("invalid localization value was accepted")
+
+
+def test_aggregation_rejects_short_invalid_and_nonfinite_sequences():
+    _assert_aggregation_guards(mean_localization_overlap)
+
+
+def test_aggregation_guard_mutants_fail_the_positive_helper():
+    def accepts_short(values):
+        supplied = tuple(values)
+        if len(supplied) == 299:
+            raise SpineError("localization value must be one finite real inside [0,1]")
+        return mean_localization_overlap(supplied)
+
+    def accepts_invalid(values):
+        supplied = tuple(values)
+        if len(supplied) == 300 and supplied[-1] in (True, -0.1, 1.1):
+            raise SpineError("localization values must match the declared 300 replications")
+        if len(supplied) == 300 and np.isnan(supplied[-1]):
+            raise SpineError("localization values must match the declared 300 replications")
+        return mean_localization_overlap(supplied)
+
+    for mutant in (accepts_short, accepts_invalid):
+        with pytest.raises(AssertionError):
+            _assert_aggregation_guards(mutant)
 
 
 def _member(name, magnitude, p_value, rejected, overlap):
@@ -405,7 +455,7 @@ PAYLOAD_FIELD_NAMES = (
 )
 
 
-def _assert_schema_shape(payload_type, telemetry_type):
+def _assert_schema_shape(payload_type, telemetry_type, hash_function):
     assert tuple(field.name for field in fields(payload_type)) == PAYLOAD_FIELD_NAMES
     assert tuple(field.name for field in fields(telemetry_type)) == (
         "elapsed_seconds",
@@ -419,11 +469,15 @@ def _assert_schema_shape(payload_type, telemetry_type):
         "peak_memory_bytes",
         "host_telemetry",
     }
-    assert tuple(inspect.signature(scientific_payload_hash).parameters) == ("payload",)
+    assert tuple(inspect.signature(hash_function).parameters) == ("payload",)
 
 
 def test_operational_telemetry_is_structurally_outside_scientific_payload():
-    _assert_schema_shape(ReplicationScientificPayload, OperationalTelemetry)
+    _assert_schema_shape(
+        ReplicationScientificPayload,
+        OperationalTelemetry,
+        scientific_payload_hash,
+    )
 
 
 def test_telemetry_inside_payload_mutant_fails_the_positive_schema_helper():
@@ -435,7 +489,19 @@ def test_telemetry_inside_payload_mutant_fails_the_positive_schema_helper():
         "elapsed_seconds": OperationalTelemetry.__dataclass_fields__["elapsed_seconds"],
     }
     with pytest.raises(AssertionError):
-        _assert_schema_shape(MutantPayload, OperationalTelemetry)
+        _assert_schema_shape(MutantPayload, OperationalTelemetry, scientific_payload_hash)
+
+
+def test_hash_function_with_telemetry_parameter_fails_the_schema_helper():
+    def mutant_hash(payload, telemetry):
+        return scientific_payload_hash(payload), telemetry
+
+    with pytest.raises(AssertionError):
+        _assert_schema_shape(
+            ReplicationScientificPayload,
+            OperationalTelemetry,
+            mutant_hash,
+        )
 
 
 def _assert_payload_valid(validator, payload):
@@ -552,6 +618,26 @@ def test_precision_loss_unsorted_and_inventory_mutants_fail_the_canonical_helper
             member.pop("retained_regions")
         return json.dumps(mapping, sort_keys=True, separators=(",", ":")).encode()
 
+    def drops_co_maximal(payload):
+        mapping = results_module._scientific_mapping(validate_scientific_payload(payload))
+        for member in mapping["quartet_members"]:
+            member.pop("co_maximal_regions")
+        return json.dumps(mapping, sort_keys=True, separators=(",", ":")).encode()
+
+    def adds_host_telemetry(payload):
+        mapping = results_module._scientific_mapping(validate_scientific_payload(payload))
+        mapping["host_telemetry"] = [["host", "mutable"]]
+        return json.dumps(mapping, sort_keys=True, separators=(",", ":")).encode()
+
+    calls = 0
+
+    def nondeterministic(payload):
+        nonlocal calls
+        mapping = results_module._scientific_mapping(validate_scientific_payload(payload))
+        calls += 1
+        mapping["unstable_attempt"] = calls
+        return json.dumps(mapping, sort_keys=True, separators=(",", ":")).encode()
+
     def adds_cross_member_summary(payload):
         mapping = results_module._scientific_mapping(validate_scientific_payload(payload))
         mapping["minimum_p_value"] = sorted(
@@ -559,7 +645,15 @@ def test_precision_loss_unsorted_and_inventory_mutants_fail_the_canonical_helper
         )[0]
         return json.dumps(mapping, sort_keys=True, separators=(",", ":")).encode()
 
-    for mutant in (lossy, unsorted, drops_retained, adds_cross_member_summary):
+    for mutant in (
+        lossy,
+        unsorted,
+        drops_retained,
+        drops_co_maximal,
+        adds_host_telemetry,
+        nondeterministic,
+        adds_cross_member_summary,
+    ):
         with pytest.raises(AssertionError):
             _assert_canonical_contract(mutant, scientific_payload_hash)
 

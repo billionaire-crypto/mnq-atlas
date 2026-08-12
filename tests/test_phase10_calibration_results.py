@@ -640,9 +640,7 @@ def test_precision_loss_unsorted_and_inventory_mutants_fail_the_canonical_helper
 
     def adds_cross_member_summary(payload):
         mapping = results_module._scientific_mapping(validate_scientific_payload(payload))
-        mapping["minimum_p_value"] = sorted(
-            member.p_value for member in payload.quartet_members
-        )[0]
+        mapping["minimum_p_value"] = "forbidden-field-sentinel"
         return json.dumps(mapping, sort_keys=True, separators=(",", ":")).encode()
 
     for mutant in (

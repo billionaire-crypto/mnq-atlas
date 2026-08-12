@@ -13,7 +13,11 @@ from mnq_lab.phase10.contract import artifact_metadata, load_phase10_contract
 from mnq_lab.phase10.evaluation import RawSurfaceEvaluation, evaluate_primary_surface
 from mnq_lab.phase10.mapping import apply_joint_mapping, spawn_session_mappings
 from mnq_lab.phase10.pvalue import permutation_pvalue
-from mnq_lab.phase10.surface import coherence_statistic, shared_standardization
+from mnq_lab.phase10.surface import (
+    SurfaceRegion,
+    coherence_statistic,
+    shared_standardization,
+)
 
 
 @dataclass(frozen=True)
@@ -24,6 +28,7 @@ class NullSurfaceBatch:
     null_yearly_contrasts: np.ndarray
     null_yearly_valid: np.ndarray
     observed_statistic: float
+    observed_regions: tuple[SurfaceRegion, ...]
     null_statistics: np.ndarray
 
 
@@ -31,6 +36,7 @@ class NullSurfaceBatch:
 class FormalTestResult:
     p_value: float
     observed_statistic: float
+    observed_regions: tuple[SurfaceRegion, ...]
     null_statistics: np.ndarray
     metadata: dict[str, Any]
 
@@ -73,12 +79,12 @@ def evaluate_null_surfaces(
         null_contrasts,
         null_valid,
     )
-    observed_statistic = coherence_statistic(
+    observed_surface = coherence_statistic(
         standardized.observed_z,
         standardized.observed_valid,
         observed.yearly_contrasts,
         observed.yearly_valid,
-    ).value
+    )
     null_statistics = np.empty(replications, dtype=np.float64)
     for index in range(replications):
         null_statistics[index] = coherence_statistic(
@@ -93,7 +99,8 @@ def evaluate_null_surfaces(
         null_valid,
         null_yearly,
         null_yearly_valid,
-        observed_statistic,
+        observed_surface.value,
+        observed_surface.regions,
         null_statistics,
     )
 
@@ -109,6 +116,7 @@ def run_formal_test(corpus: FormalCorpus, replications: int) -> FormalTestResult
     return FormalTestResult(
         permutation_pvalue(batch.observed_statistic, batch.null_statistics),
         batch.observed_statistic,
+        batch.observed_regions,
         batch.null_statistics.copy(),
         artifact_metadata(),
     )

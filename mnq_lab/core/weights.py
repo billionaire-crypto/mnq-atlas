@@ -113,6 +113,8 @@ class PreparedWeightedQuantileValues:
 
 def _reject_embedded_bools(values: Any, name: str) -> None:
     """Reject bools before a heterogeneous array-like coerces them to 0/1."""
+    if isinstance(values, np.ndarray) and values.dtype.kind in _REAL_DTYPE_KINDS:
+        return
     try:
         object_view = np.asarray(values, dtype=object)
     except (TypeError, ValueError, OverflowError) as exc:

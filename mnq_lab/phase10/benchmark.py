@@ -104,6 +104,65 @@ def _array_bytes(batch: Any) -> int:
     return sum(int(array.nbytes) for array in arrays)
 
 
+def _evaluate_with_rss(
+    corpus: Any,
+    count: int,
+    progress_kind: str,
+) -> tuple[Any, int]:
+    with _RssSampler() as sampler:
+        def progress(completed: int) -> None:
+            if sampler.peak >= _RSS_STOP_BYTES:
+                raise SpineError(
+                    "Phase 10 cost benchmark reached its 4 GB RSS stop boundary"
+                )
+            if completed % 10 == 0 or completed == count:
+                print(
+                    json.dumps(
+                        {
+                            "kind": progress_kind,
+                            "replications": count,
+                            "completed": completed,
+                            "sampled_rss_bytes": sampler.peak,
+                        },
+                        sort_keys=True,
+                    ),
+                    flush=True,
+                )
+
+        batch = evaluate_null_surfaces(corpus, count, progress)
+    return batch, sampler.peak
+
+
+def _timed_surface_pass(corpus: Any, count: int) -> tuple[Any, float, int]:
+    """Measure production wall time with allocation tracing disabled."""
+    if tracemalloc.is_tracing():
+        raise SpineError("Phase 10 timed pass cannot run while tracemalloc is active")
+    started = time.perf_counter()
+    batch, peak_rss = _evaluate_with_rss(corpus, count, "timing_progress")
+    wall = time.perf_counter() - started
+    return batch, wall, peak_rss
+
+
+def _traced_allocation_pass(
+    corpus: Any,
+    count: int,
+) -> tuple[Any, float, int, int]:
+    """Measure Python allocation cost in a separate, explicitly traced pass."""
+    if tracemalloc.is_tracing():
+        raise SpineError("Phase 10 allocation pass found tracemalloc already active")
+    tracemalloc.start()
+    started = time.perf_counter()
+    try:
+        batch, peak_rss = _evaluate_with_rss(
+            corpus, count, "allocation_progress"
+        )
+        allocation_wall = time.perf_counter() - started
+        _, traced_peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    return batch, allocation_wall, peak_rss, int(traced_peak)
+
+
 def run_cost_benchmark(root: Path, replications: tuple[int, ...]) -> None:
     """Print only wiring, scale, time, memory, and cleanup facts."""
     if not replications or any(
@@ -149,48 +208,38 @@ def run_cost_benchmark(root: Path, replications: tuple[int, ...]) -> None:
             temporary_bytes = sum(
                 int(path.stat().st_size) for path in temporary.iterdir() if path.is_file()
             )
-            tracemalloc.start()
-            started = time.perf_counter()
-            with _RssSampler() as sampler:
-                def progress(completed: int) -> None:
-                    if sampler.peak >= _RSS_STOP_BYTES:
-                        raise SpineError(
-                            "Phase 10 cost benchmark reached its 4 GB RSS stop boundary"
-                        )
-                    if completed % 10 == 0 or completed == count:
-                        print(
-                            json.dumps(
-                                {
-                                    "kind": "progress",
-                                    "replications": count,
-                                    "completed": completed,
-                                    "sampled_rss_bytes": sampler.peak,
-                                },
-                                sort_keys=True,
-                            ),
-                            flush=True,
-                        )
-
-                batch = evaluate_null_surfaces(corpus, count, progress)
-            wall = time.perf_counter() - started
-            _, traced_peak = tracemalloc.get_traced_memory()
-            tracemalloc.stop()
+            timed_batch, wall, timed_peak_rss = _timed_surface_pass(corpus, count)
+            result_array_bytes = _array_bytes(timed_batch)
+            del timed_batch
+            (
+                allocation_batch,
+                allocation_wall,
+                allocation_peak_rss,
+                traced_peak,
+            ) = _traced_allocation_pass(corpus, count)
+            allocation_result_array_bytes = _array_bytes(allocation_batch)
+            del allocation_batch
+            if allocation_result_array_bytes != result_array_bytes:
+                raise SpineError(
+                    "Phase 10 timed and allocation passes produced different array sizes"
+                )
             print(
                 json.dumps(
                     {
                         "kind": "cost",
                         "replications": count,
                         "wall_seconds": wall,
-                        "peak_rss_bytes": sampler.peak,
-                        "peak_traced_bytes": int(traced_peak),
+                        "peak_rss_bytes": timed_peak_rss,
+                        "allocation_pass_wall_seconds": allocation_wall,
+                        "allocation_pass_peak_rss_bytes": allocation_peak_rss,
+                        "peak_traced_bytes": traced_peak,
                         "temporary_output_bytes": temporary_bytes,
-                        "result_array_bytes": _array_bytes(batch),
+                        "result_array_bytes": result_array_bytes,
                     },
                     sort_keys=True,
                 ),
                 flush=True,
             )
-            del batch
     finally:
         shutil.rmtree(temporary, ignore_errors=False)
         deleted = not temporary.exists()

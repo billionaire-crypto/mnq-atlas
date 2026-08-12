@@ -164,11 +164,26 @@ def test_replication_streams_are_exact_fresh_index_coordinates():
     _assert_stream_contract(calibration_replication_streams)
 
 
-@pytest.mark.parametrize("mutant", ("deployment_root", "swapped_roles", "call_order", "philox"))
+@pytest.mark.parametrize(
+    "mutant",
+    (
+        "deployment_root",
+        "swapped_roles",
+        "call_order",
+        "philox",
+        "wrong_index",
+        "consumed_ensemble",
+        "cached_ensemble",
+    ),
+)
 def test_stream_mutants_fail_the_positive_contract(mutant):
     shared_root = calibration_root_seed_sequence()
+    cached = None
 
     def producer(index):
+        nonlocal cached
+        if mutant == "cached_ensemble" and cached is not None:
+            return cached
         if mutant == "deployment_root":
             root = np.random.SeedSequence((20260728,))
             replication = root.spawn(CALIBRATION_REPLICATIONS)[index]
@@ -187,13 +202,18 @@ def test_stream_mutants_fail_the_positive_contract(mutant):
             if mutant == "philox"
             else np.random.PCG64(control_child)
         )
-        return CalibrationReplicationStreams(
-            index,
+        if mutant == "consumed_ensemble":
+            ensemble_root.spawn(1)
+        result = CalibrationReplicationStreams(
+            index + 1 if mutant == "wrong_index" else index,
             control_child.spawn_key,
             ensemble_root.spawn_key,
             np.random.Generator(bit_generator),
             ensemble_root,
         )
+        if mutant == "cached_ensemble":
+            cached = result
+        return result
 
     with pytest.raises(AssertionError):
         _assert_stream_contract(producer)
@@ -250,6 +270,8 @@ def test_default_rng_call_is_unreachable(monkeypatch):
 
     monkeypatch.setattr(np.random, "default_rng", forbidden)
     _assert_stream_contract(calibration_replication_streams)
+    with pytest.raises(AssertionError, match="default_rng witness was reached"):
+        np.random.default_rng(0)
 
 
 def test_outer_control_uses_control_child_and_corpus_quarters_only():
@@ -326,17 +348,69 @@ def _assert_effect_contract(corpus, control, result, magnitude):
     )
 
 
-def test_ladder_and_explicit_intervention_api_are_frozen():
-    assert PLANTED_EFFECT_LADDER == (10, 30, 60)
-    assert all(type(value) is int for value in PLANTED_EFFECT_LADDER)
-    assert PLANTED_EFFECT_PHASES == ("morning", "midday", "afternoon")
-    signature = inspect.signature(plant_effect)
+def _assert_frozen_public_api(
+    stream_function,
+    outer_function,
+    effect_function,
+    ladder_function,
+    ladder,
+    target_phases,
+):
+    assert tuple(inspect.signature(stream_function).parameters) == (
+        "replication_index",
+    )
+    assert tuple(inspect.signature(outer_function).parameters) == (
+        "corpus",
+        "replication_index",
+    )
+    assert ladder == (10, 30, 60)
+    assert all(type(value) is int for value in ladder)
+    assert target_phases == ("morning", "midday", "afternoon")
+    signature = inspect.signature(effect_function)
     assert tuple(signature.parameters) == ("corpus", "control", "magnitude_ticks")
     assert signature.parameters["magnitude_ticks"].default is inspect.Parameter.empty
-    assert tuple(inspect.signature(plant_frozen_effect_ladder).parameters) == (
+    assert tuple(inspect.signature(ladder_function).parameters) == (
         "corpus",
         "control",
     )
+
+
+def test_ladder_and_explicit_intervention_api_are_frozen():
+    _assert_frozen_public_api(
+        calibration_replication_streams,
+        generate_calibration_outer_control,
+        plant_effect,
+        plant_frozen_effect_ladder,
+        PLANTED_EFFECT_LADDER,
+        PLANTED_EFFECT_PHASES,
+    )
+
+
+def test_public_api_and_constant_mutants_fail_the_positive_assertions():
+    def stream_override(replication_index, root=None):
+        return None
+
+    def strata_override(corpus, replication_index, strata=None):
+        return None
+
+    def magnitude_default(corpus, control, magnitude_ticks=10):
+        return None
+
+    def ladder_override(corpus, control, ladder=None):
+        return None
+
+    mutants = (
+        (stream_override, generate_calibration_outer_control, plant_effect, plant_frozen_effect_ladder, PLANTED_EFFECT_LADDER, PLANTED_EFFECT_PHASES),
+        (calibration_replication_streams, strata_override, plant_effect, plant_frozen_effect_ladder, PLANTED_EFFECT_LADDER, PLANTED_EFFECT_PHASES),
+        (calibration_replication_streams, generate_calibration_outer_control, magnitude_default, plant_frozen_effect_ladder, PLANTED_EFFECT_LADDER, PLANTED_EFFECT_PHASES),
+        (calibration_replication_streams, generate_calibration_outer_control, plant_effect, ladder_override, PLANTED_EFFECT_LADDER, PLANTED_EFFECT_PHASES),
+        (calibration_replication_streams, generate_calibration_outer_control, plant_effect, plant_frozen_effect_ladder, (10, 30, 61), PLANTED_EFFECT_PHASES),
+        (calibration_replication_streams, generate_calibration_outer_control, plant_effect, plant_frozen_effect_ladder, (10, 30, 60.0), PLANTED_EFFECT_PHASES),
+        (calibration_replication_streams, generate_calibration_outer_control, plant_effect, plant_frozen_effect_ladder, PLANTED_EFFECT_LADDER, ("open", *PLANTED_EFFECT_PHASES)),
+    )
+    for mutant in mutants:
+        with pytest.raises(AssertionError):
+            _assert_frozen_public_api(*mutant)
 
 
 def test_effect_shifts_exactly_the_complete_valid_target_conjunction():
@@ -544,7 +618,13 @@ def test_source_mask_identifier_and_axis_mutants_fail_the_named_checker():
         (replace(corpus, outcome_valid=_readonly(~corpus.outcome_valid)), control, "outcome validity"),
         (replace(corpus, window_fits_rth=_readonly(~corpus.window_fits_rth)), control, "structural fit"),
         (corpus, replace(control, state_valid=~control.state_valid), "state validity"),
+        (corpus, replace(control, state_codes=np.roll(control.state_codes, 1, axis=0)), "state codes"),
+        (replace(corpus, observation_grid=_readonly(np.roll(corpus.observation_grid, 1))), control, "observation grid"),
         (replace(corpus, phase_grid=_readonly(np.roll(corpus.phase_grid, 1))), control, "phases"),
+        (replace(corpus, ts_event_ns=_readonly(corpus.ts_event_ns + 1)), control, "timestamps"),
+        (replace(corpus, state_codes=_readonly(np.roll(corpus.state_codes, 1, axis=0))), control, "corpus state codes"),
+        (replace(corpus, state_valid=_readonly(~corpus.state_valid)), control, "corpus state validity"),
+        (replace(corpus, downward_excursion_ticks=_readonly(corpus.downward_excursion_ticks + 1, np.int32)), control, "control outcomes"),
         (replace(corpus, calendar_years=_readonly(corpus.calendar_years + 1)), control, "calendar years"),
         (replace(corpus, calendar_quarters=_readonly(np.roll(corpus.calendar_quarters, 1))), control, "calendar quarters"),
     )
@@ -579,6 +659,167 @@ def test_writable_corpus_and_direct_write_mutants_fail_closed():
         corpus.downward_excursion_ticks[0, 0] += 10
 
 
+def test_intervention_input_guard_mutants_reach_the_real_guards(monkeypatch):
+    corpus, control = _fixture()
+    wrong_mapping_ids = control.mapping.recipient_session_ids.copy()
+    wrong_mapping_ids[0] += 1
+    wrong_mapping = replace(
+        control.mapping,
+        recipient_session_ids=wrong_mapping_ids,
+    )
+    invalid_codes = control.state_codes.copy()
+    invalid_codes[0, 0] = len(VOLATILITY_STATES)
+    cases = (
+        (lambda: freeze_intervention_inputs(None, control), "FormalCorpus"),
+        (lambda: freeze_intervention_inputs(corpus, None), "control-assigned"),
+        (
+            lambda: freeze_intervention_inputs(
+                replace(corpus, outcome_valid=_readonly(corpus.outcome_valid[:, :-1])),
+                control,
+            ),
+            "outcome arrays",
+        ),
+        (
+            lambda: freeze_intervention_inputs(
+                replace(corpus, window_fits_rth=_readonly(corpus.window_fits_rth[:, :-1])),
+                control,
+            ),
+            "structural-fit",
+        ),
+        (
+            lambda: freeze_intervention_inputs(
+                corpus,
+                replace(control, state_codes=control.state_codes[:, :-1]),
+            ),
+            "state arrays",
+        ),
+        (
+            lambda: freeze_intervention_inputs(
+                corpus,
+                replace(control, state_valid=control.state_valid.astype(np.int8)),
+            ),
+            "must be boolean",
+        ),
+        (
+            lambda: freeze_intervention_inputs(
+                replace(corpus, phase_grid=_readonly(corpus.phase_grid[:-1])),
+                control,
+            ),
+            "phase grid",
+        ),
+        (
+            lambda: freeze_intervention_inputs(
+                replace(corpus, session_ids=_readonly(corpus.session_ids[:-1])),
+                control,
+            ),
+            "session ids",
+        ),
+        (
+            lambda: freeze_intervention_inputs(
+                replace(corpus, calendar_years=_readonly(corpus.calendar_years[:-1])),
+                control,
+            ),
+            "calendar years",
+        ),
+        (
+            lambda: freeze_intervention_inputs(
+                replace(corpus, calendar_quarters=_readonly(corpus.calendar_quarters[:-1])),
+                control,
+            ),
+            "calendar quarters",
+        ),
+        (
+            lambda: freeze_intervention_inputs(
+                corpus,
+                replace(control, mapping=wrong_mapping),
+            ),
+            "recipients differ",
+        ),
+        (
+            lambda: freeze_intervention_inputs(
+                replace(
+                    corpus,
+                    downward_excursion_ticks=_readonly(
+                        corpus.downward_excursion_ticks,
+                        np.int64,
+                    ),
+                ),
+                control,
+            ),
+            "signed int32",
+        ),
+        (
+            lambda: freeze_intervention_inputs(
+                replace(
+                    corpus,
+                    outcome_valid=_readonly(corpus.outcome_valid, np.int8),
+                ),
+                control,
+            ),
+            "must be boolean",
+        ),
+        (
+            lambda: freeze_intervention_inputs(
+                corpus,
+                replace(control, state_codes=invalid_codes),
+            ),
+            "outside the canonical encoding",
+        ),
+    )
+    for invoke, message in cases:
+        with pytest.raises((SpineError, TypeError), match=message):
+            invoke()
+    monkeypatch.setattr(
+        controls_module,
+        "PLANTED_EFFECT_PHASES",
+        ("morning", "undeclared"),
+    )
+    with pytest.raises(SpineError, match="outside the canonical phase axis"):
+        freeze_intervention_inputs(corpus, control)
+
+
+def test_magnitude_and_result_guard_mutants_reach_the_named_checker():
+    corpus, control = _fixture()
+    snapshot = freeze_intervention_inputs(corpus, control)
+    result = plant_effect(corpus, control, 10)
+    for invalid in (True, 10.0, 0, -1):
+        with pytest.raises(SpineError, match="positive built-in integer"):
+            assert_planted_effect_invariants(
+                corpus,
+                control,
+                snapshot,
+                invalid,
+                None,
+            )
+    wrong_mask = result.modification_mask.copy()
+    wrong_mask[0, 0] = ~wrong_mask[0, 0]
+    wrong_mask.setflags(write=False)
+    int64_outcomes = result.outcomes.astype(np.int64)
+    int64_outcomes.setflags(write=False)
+    short_outcomes = result.outcomes[:, :-1].copy()
+    short_outcomes.setflags(write=False)
+    writable_outcomes = result.outcomes.copy()
+    writable_mask = result.modification_mask.copy()
+    cases = (
+        (object(), "undeclared type"),
+        (replace(result, magnitude_ticks=11), "metadata differs"),
+        (replace(result, modification_mask=wrong_mask), "result mask differs"),
+        (replace(result, outcomes=int64_outcomes), "signed int32 storage"),
+        (replace(result, outcomes=short_outcomes), "frozen outcome shape"),
+        (replace(result, outcomes=writable_outcomes), "must be read-only"),
+        (replace(result, modification_mask=writable_mask), "must be read-only"),
+    )
+    for mutant, message in cases:
+        with pytest.raises(SpineError, match=message):
+            assert_planted_effect_invariants(
+                corpus,
+                control,
+                snapshot,
+                10,
+                mutant,
+            )
+
+
 def test_frozen_ladder_members_are_independent_not_accumulated():
     corpus, control = _fixture()
     results = plant_frozen_effect_ladder(corpus, control)
@@ -593,10 +834,7 @@ def test_frozen_ladder_members_are_independent_not_accumulated():
         _assert_effect_contract(corpus, control, mutant, PLANTED_EFFECT_LADDER[2])
 
 
-def test_uniform_synthetic_shift_moves_raw_target_contrast_exactly():
-    corpus, control = _fixture()
-    magnitude = 10
-    result = plant_effect(corpus, control, magnitude)
+def _assert_uniform_synthetic_contrast_shift(corpus, control, result, magnitude):
     phases = np.tile(corpus.phase_grid, corpus.session_ids.size)
     names = np.full(control.state_codes.shape, "low", dtype="<U4")
     for code, name in enumerate(VOLATILITY_STATES):
@@ -632,3 +870,17 @@ def test_uniform_synthetic_shift_moves_raw_target_contrast_exactly():
             after_contrast.contrast_ticks - before_contrast.contrast_ticks
             == magnitude
         )
+
+
+def test_uniform_synthetic_shift_moves_raw_target_contrast_exactly():
+    corpus, control = _fixture()
+    magnitude = 10
+    result = plant_effect(corpus, control, magnitude)
+    _assert_uniform_synthetic_contrast_shift(corpus, control, result, magnitude)
+
+
+def test_wrong_uniform_shift_fails_the_positive_contrast_assertion():
+    corpus, control = _fixture()
+    result = plant_effect(corpus, control, 9)
+    with pytest.raises(AssertionError):
+        _assert_uniform_synthetic_contrast_shift(corpus, control, result, 10)

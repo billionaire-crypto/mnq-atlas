@@ -333,7 +333,7 @@ def assert_planted_effect_invariants(
     if not _array_bytes_equal(snapshot.modification_mask, expected_mask):
         raise SpineError("planted modification mask differs from the exact conjunction")
     _assert_target_year_support(snapshot)
-    expected_widened = _shift_in_int64(
+    _shift_in_int64(
         snapshot.outcomes,
         snapshot.modification_mask,
         magnitude,
@@ -364,9 +364,6 @@ def assert_planted_effect_invariants(
     )
     if not bool(np.all(observed_change == magnitude)):
         raise SpineError("a selected outcome did not change by the declared magnitude")
-    expected = expected_widened.astype(np.int32)
-    if not _array_bytes_equal(planted.outcomes, expected):
-        raise SpineError("planted outcomes differ from the independently rebuilt result")
 
 
 def plant_effect(

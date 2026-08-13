@@ -36,7 +36,20 @@ def _outcome_digest(corpus):
 
 
 def _assert_exact_member_p_values(values):
-    assert tuple(values) == (0.70, 0.05, 0.05, 0.05)
+    assert tuple(values) == (0.65, 0.70, 0.45, 0.10)
+
+
+def _assert_effect_p_values_are_not_saturated(values):
+    effect_values = tuple(values)
+    assert len(effect_values) == 3
+    assert len(set(effect_values)) > 1
+
+
+def _assert_all_p_values_are_resolved(values):
+    p_values = tuple(values)
+    assert len(p_values) == 4
+    assert len(set(p_values)) == 4
+    assert 0.05 not in p_values
 
 
 def _assert_every_lattice_cell_is_ok(evaluations):
@@ -80,7 +93,7 @@ def _nondegenerate_fixture():
         size=shape,
         dtype=np.int8,
     )
-    outcomes = generator.integers(0, 401, size=shape, dtype=np.int32)
+    outcomes = generator.integers(0, 4001, size=shape, dtype=np.int32)
     reconciliation = FormalJoinReconciliation(
         verified_anchor_rows=session_count * width,
         verified_arm_rows=session_count * width,
@@ -148,9 +161,12 @@ def _assert_complete_member_specific_science(
     assert len(set(observed_member_outcomes)) == 4
     for start in range(4, len(calls), 4):
         assert tuple(calls[start : start + 4]) == observed_member_outcomes
-    _assert_exact_member_p_values(
+    p_values = tuple(
         member.p_value for member in result.scientific_payload.quartet_members
     )
+    _assert_exact_member_p_values(p_values)
+    _assert_all_p_values_are_resolved(p_values)
+    _assert_effect_p_values_are_not_saturated(p_values[1:])
     assert canonical_scientific_payload_bytes(result.scientific_payload)
     return result
 
@@ -166,7 +182,25 @@ def test_complete_scientific_quartet_runs_end_to_end_at_small_b(monkeypatch):
 
 def test_aliased_null_storage_fails_the_same_exact_pvalue_witness():
     with pytest.raises(AssertionError):
-        _assert_exact_member_p_values((0.75, 0.05, 0.05, 0.05))
+        _assert_exact_member_p_values((0.45, 0.05, 0.05, 0.05))
+
+
+def test_saturated_effect_pvalues_fail_the_same_nonsaturation_witness():
+    with pytest.raises(AssertionError):
+        _assert_effect_p_values_are_not_saturated((0.05, 0.05, 0.05))
+
+
+@pytest.mark.parametrize(
+    "unresolved",
+    (
+        (0.65, 0.70, 0.45),
+        (0.65, 0.70, 0.45, 0.45),
+        (0.65, 0.70, 0.45, 0.05),
+    ),
+)
+def test_unresolved_member_pvalues_fail_the_same_resolution_witness(unresolved):
+    with pytest.raises(AssertionError):
+        _assert_all_p_values_are_resolved(unresolved)
 
 
 @pytest.mark.parametrize(

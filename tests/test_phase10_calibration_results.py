@@ -577,6 +577,76 @@ def _assert_canonical_contract(serializer, hasher):
     assert hasher(changed) != hasher(payload)
 
 
+def _assert_mapping_completeness(
+    payload_mapper,
+    member_mapper=results_module._member_mapping,
+    region_mapper=results_module._region_mapping,
+):
+    payload = _payload()
+    mapped_payload = payload_mapper(payload)
+    for field in fields(ReplicationScientificPayload):
+        candidates = (field.name, f"{field.name}_hex")
+        assert sum(candidate in mapped_payload for candidate in candidates) == 1
+
+    member = payload.quartet_members[1]
+    mapped_member = member_mapper(member)
+    for field in fields(QuartetMemberResult):
+        candidates = (field.name, f"{field.name}_hex")
+        assert sum(candidate in mapped_member for candidate in candidates) == 1
+
+    region = member.retained_regions[0]
+    mapped_region = region_mapper(region)
+    for field in fields(SurfaceRegion):
+        candidates = (field.name, f"{field.name}_hex")
+        assert sum(candidate in mapped_region for candidate in candidates) == 1
+
+    payload_free_form = {
+        field.name: field
+        for field in fields(ReplicationScientificPayload)
+        if field.name in {
+            "attempt_lineage",
+            "structural_statuses",
+            "classified_failures",
+            "code_identity",
+            "package_identity",
+            "corpus_identity",
+            "environment_identity",
+            "worker_configuration_identity",
+        }
+    }
+    for name in payload_free_form:
+        original = getattr(payload, name)
+        changed_value = (
+            (*original, "hash-witness")
+            if isinstance(original, tuple)
+            else f"{original}-hash-witness"
+        )
+        assert scientific_payload_hash(replace(payload, **{name: changed_value})) != scientific_payload_hash(payload)
+
+    for field in fields(QuartetMemberResult):
+        if field.name not in {"structural_statuses", "classified_failures"}:
+            continue
+        original = getattr(member, field.name)
+        changed_member = replace(member, **{field.name: (*original, "hash-witness")})
+        quartet = list(payload.quartet_members)
+        quartet[1] = changed_member
+        assert scientific_payload_hash(replace(payload, quartet_members=tuple(quartet))) != scientific_payload_hash(payload)
+
+
+def test_canonical_mapping_completeness_is_derived_from_dataclass_fields():
+    _assert_mapping_completeness(results_module._scientific_mapping)
+
+
+def test_mapping_with_one_field_removed_fails_the_same_completeness_witness():
+    def missing_worker_configuration(payload):
+        mapped = results_module._scientific_mapping(payload)
+        mapped.pop("worker_configuration_identity")
+        return mapped
+
+    with pytest.raises(AssertionError):
+        _assert_mapping_completeness(missing_worker_configuration)
+
+
 def test_canonical_serialization_is_exact_deterministic_and_complete():
     _assert_canonical_contract(canonical_scientific_payload_bytes, scientific_payload_hash)
 

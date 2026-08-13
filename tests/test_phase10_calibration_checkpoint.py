@@ -119,6 +119,15 @@ def _assert_duplicate_contract(reconciler):
         assert "nondeterminism halts without selection" in str(exc)
     else:
         raise AssertionError("conflicting duplicate attempts were selected")
+    forged = object.__new__(type(result))
+    object.__setattr__(forged, "scientific_payload", result.scientific_payload)
+    object.__setattr__(forged, "scientific_payload_hash", "0" * 64)
+    try:
+        reconciler((result, forged))
+    except SpineError as exc:
+        assert "nondeterminism halts without selection" in str(exc)
+    else:
+        raise AssertionError("duplicate payload-hash mismatch was tolerated")
 
 
 def test_duplicate_attempts_compare_scientific_hashes_and_halt_on_conflict():

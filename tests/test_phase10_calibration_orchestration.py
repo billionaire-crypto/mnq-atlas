@@ -103,6 +103,11 @@ def test_environment_identity_is_complete_and_checked_before_work():
         _environment(),
         _environment(),
     )
+    _assert_environment_precedes_work(
+        run_after_environment_verification,
+        _environment(),
+        replace(_environment(), cpu_identity="different"),
+    )
 
 
 def test_environment_warning_or_late_check_mutants_fail_the_same_witness():

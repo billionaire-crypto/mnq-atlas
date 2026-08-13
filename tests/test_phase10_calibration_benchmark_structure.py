@@ -43,6 +43,7 @@ def _assert_benchmark_structure(timed_source, memory_source, result_type, entryp
     assert tuple(field.name for field in fields(result_type)) == ALLOWED_RESULT_FIELDS
     signature = inspect.signature(entrypoint)
     assert signature.parameters["authorization"].default is inspect.Parameter.empty
+    assert "validate_external_checkpoint_root" in inspect.getsource(entrypoint)
 
 
 def test_timing_memory_cleanup_and_result_inventory_are_structurally_separate():

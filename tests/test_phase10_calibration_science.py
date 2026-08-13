@@ -16,8 +16,8 @@ from mnq_lab.phase10.calibration_results import (
     CalibrationReplicationResult,
     canonical_scientific_payload_bytes,
 )
-from mnq_lab.phase10.contract import load_phase10_contract
 from mnq_lab.phase10.evaluation import evaluate_primary_surface as _real_evaluate_primary_surface
+from mnq_lab.phase10.contract import load_phase10_contract
 from tests.test_phase10_calibration_controls import _fixture
 from tests.test_phase10_calibration_orchestration import _environment
 
@@ -52,6 +52,7 @@ def _assert_complete_member_specific_science(
         corpus,
         0,
         ("synthetic-attempt-0",),
+        (),
         _environment(),
         permutation_count,
     )
@@ -99,7 +100,7 @@ def _assert_required_permutation_coordinate(function):
     assert parameter.default is inspect.Parameter.empty
     corpus, _ = _fixture()
     with pytest.raises(TypeError):
-        function(corpus, 0, ("attempt",), _environment())
+        function(corpus, 0, ("attempt",), (), _environment())
 
 
 def test_science_permutation_count_is_explicit_with_no_default():
@@ -107,7 +108,14 @@ def test_science_permutation_count_is_explicit_with_no_default():
 
 
 def test_defaulted_permutation_count_fails_the_same_signature_witness():
-    def defaulted(corpus, replication_index, attempt_lineage, environment, permutation_count=19):
+    def defaulted(
+        corpus,
+        replication_index,
+        attempt_lineage,
+        classified_failures,
+        environment,
+        permutation_count=19,
+    ):
         return None
 
     with pytest.raises(AssertionError):
@@ -156,6 +164,7 @@ def test_invalid_small_b_coordinates_fail_closed(monkeypatch):
                 corpus,
                 0,
                 ("attempt",),
+                (),
                 _environment(),
                 invalid,
             )

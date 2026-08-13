@@ -58,9 +58,40 @@ class FailureDecision:
 
 
 @dataclass(frozen=True)
+class ExternalFailureRecord:
+    cause: str
+    evidence: FailureEvidence
+
+
+@dataclass(frozen=True)
+class AttemptRecord:
+    replication_index: int
+    attempt_number: int
+    attempt_lineage: tuple[str, ...]
+    classified_failures: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class PersistedFailure:
+    replication_index: int
+    attempt_number: int
+    cause: str
+    prior_same_cause_retries: int
+    evidence: FailureEvidence
+    decision: FailureDecision
+
+
+@dataclass(frozen=True)
+class AttemptedReplication:
+    attempt: AttemptRecord
+    failure: PersistedFailure | None
+
+
+@dataclass(frozen=True)
 class RecoveryState:
     completed: tuple[tuple[int, str], ...]
-    unfinished: tuple[int, ...]
+    never_started: tuple[int, ...]
+    attempted: tuple[AttemptedReplication, ...]
 
 
 @dataclass(frozen=True)
@@ -132,7 +163,7 @@ def classify_failure(
             not retry,
             CALIBRATION_REPLICATIONS,
         )
-    if cause == "vanished_process" and not externally_transient:
+    if cause == "vanished_process":
         return FailureDecision("structural", False, True, CALIBRATION_REPLICATIONS)
     if externally_transient and cause not in _STRUCTURAL_CAUSES:
         return FailureDecision("transient", True, False, CALIBRATION_REPLICATIONS)
@@ -191,6 +222,232 @@ class CalibrationCheckpointStore:
             self._assert_no_validation_residue()
         self.payloads = CheckpointStore(self.root / "payloads", self.identity)
         self.transitions = CheckpointStore(self.root / "transitions", self.identity)
+
+    @staticmethod
+    def _validated_index(index: Any) -> int:
+        if (
+            isinstance(index, bool)
+            or not isinstance(index, int)
+            or not 0 <= index < CALIBRATION_REPLICATIONS
+        ):
+            raise SpineError("checkpoint replication index must be in [0,300)")
+        return index
+
+    def _numbered_store(
+        self,
+        prefix: str,
+        number: int,
+        *,
+        create: bool,
+    ) -> CheckpointStore | None:
+        path = self.root / f"{prefix}-{number:06d}"
+        if not path.exists() and not create:
+            return None
+        return CheckpointStore(path, self.identity)
+
+    def _numbered_store_indices(self, prefix: str) -> tuple[int, ...]:
+        result: list[int] = []
+        for path in self.root.glob(f"{prefix}-*"):
+            suffix = path.name[len(prefix) + 1 :]
+            if not path.is_dir() or not suffix.isdigit():
+                raise SpineError(f"unexpected {prefix} checkpoint entry")
+            result.append(int(suffix))
+        return tuple(sorted(result))
+
+    @staticmethod
+    def _decode_string_tuple(value: Any, name: str) -> tuple[str, ...]:
+        try:
+            decoded = json.loads(str(value))
+        except (TypeError, ValueError) as exc:
+            raise SpineError(f"checkpoint {name} is not canonical JSON") from exc
+        if (
+            not isinstance(decoded, list)
+            or any(not isinstance(item, str) or not item for item in decoded)
+        ):
+            raise SpineError(f"checkpoint {name} is invalid")
+        return tuple(decoded)
+
+    def attempt_records(self, index: int) -> tuple[AttemptRecord, ...]:
+        checked = self._validated_index(index)
+        records: list[AttemptRecord] = []
+        for number in self._numbered_store_indices("attempts"):
+            store = self._numbered_store("attempts", number, create=False)
+            assert store is not None
+            if not store.has_chunk(checked):
+                continue
+            chunk = store.read_chunk(checked)
+            observed_number = int(chunk["attempt_number"][0])
+            if observed_number != number or number != len(records):
+                raise SpineError("checkpoint attempt lineage is non-contiguous")
+            records.append(
+                AttemptRecord(
+                    checked,
+                    number,
+                    self._decode_string_tuple(
+                        chunk["attempt_lineage_json"][0],
+                        "attempt lineage",
+                    ),
+                    self._decode_string_tuple(
+                        chunk["classified_failures_json"][0],
+                        "classified failures",
+                    ),
+                )
+            )
+        return tuple(records)
+
+    def _read_failure(self, index: int, attempt_number: int) -> PersistedFailure | None:
+        store = self._numbered_store("failures", attempt_number, create=False)
+        if store is None or not store.has_chunk(index):
+            return None
+        chunk = store.read_chunk(index)
+        evidence = FailureEvidence(
+            str(chunk["external_event"][0]) or None,
+            bool(chunk["externally_confirmed"][0]),
+            bool(chunk["healthy_host"][0]),
+            bool(chunk["environment_compatible"][0]),
+        )
+        cause = str(chunk["cause"][0])
+        prior = int(chunk["prior_same_cause_retries"][0])
+        decision = classify_failure(cause, prior, evidence)
+        recorded = FailureDecision(
+            str(chunk["classification"][0]),
+            bool(chunk["retry_same_replication"][0]),
+            bool(chunk["halt_all_work"][0]),
+            int(chunk["declared_denominator"][0]),
+        )
+        if decision != recorded:
+            raise SpineError("persisted failure decision differs from frozen classification")
+        return PersistedFailure(index, attempt_number, cause, prior, evidence, decision)
+
+    def failure_for_attempt(self, attempt: AttemptRecord) -> PersistedFailure | None:
+        if not isinstance(attempt, AttemptRecord):
+            raise SpineError("failure lookup requires one persisted attempt")
+        return self._read_failure(attempt.replication_index, attempt.attempt_number)
+
+    def prior_same_cause_retries(self, index: int, cause: str) -> int:
+        checked = self._validated_index(index)
+        if not isinstance(cause, str) or not cause:
+            raise SpineError("failure cause must be one nonempty classification")
+        count = 0
+        for attempt in self.attempt_records(checked):
+            failure = self._read_failure(checked, attempt.attempt_number)
+            if (
+                failure is not None
+                and failure.cause == cause
+                and failure.decision.retry_same_replication
+            ):
+                count += 1
+        return count
+
+    @staticmethod
+    def _failure_label(failure: PersistedFailure) -> str:
+        return (
+            f"attempt-{failure.attempt_number}:{failure.cause}:"
+            f"{failure.decision.classification}"
+        )
+
+    def start_attempt(self, index: int, attempt_label: str) -> AttemptRecord:
+        checked = self._validated_index(index)
+        if not isinstance(attempt_label, str) or not attempt_label:
+            raise SpineError("checkpoint attempt label is absent")
+        if self.payloads.has_stage1_unit(self._unit_name(checked)):
+            raise SpineError("completed replication cannot start another attempt")
+        previous = self.attempt_records(checked)
+        classified: tuple[str, ...] = ()
+        lineage: tuple[str, ...] = ()
+        if previous:
+            prior_attempt = previous[-1]
+            prior_failure = self._read_failure(checked, prior_attempt.attempt_number)
+            if prior_failure is None:
+                raise SpineError("attempted replication lacks a classified failure")
+            if not prior_failure.decision.retry_same_replication:
+                raise SpineError("structural failure cannot start another attempt")
+            lineage = prior_attempt.attempt_lineage
+            classified = (
+                *prior_attempt.classified_failures,
+                self._failure_label(prior_failure),
+            )
+        number = len(previous)
+        lineage = (*lineage, f"{attempt_label}:attempt-{number}")
+        store = self._numbered_store("attempts", number, create=True)
+        assert store is not None
+        store.write_chunk(
+            checked,
+            {
+                "replication_index": np.asarray([checked], dtype=np.int32),
+                "attempt_number": np.asarray([number], dtype=np.int32),
+                "attempt_lineage_json": np.asarray(
+                    [canonical_json_bytes(list(lineage)).decode("utf-8")],
+                    dtype="U4096",
+                ),
+                "classified_failures_json": np.asarray(
+                    [canonical_json_bytes(list(classified)).decode("utf-8")],
+                    dtype="U4096",
+                ),
+            },
+        )
+        self._observe("attempt_started", checked)
+        return AttemptRecord(checked, number, lineage, classified)
+
+    def record_failure(
+        self,
+        attempt: AttemptRecord,
+        record: ExternalFailureRecord,
+        decision: FailureDecision,
+    ) -> PersistedFailure:
+        if not isinstance(attempt, AttemptRecord) or not isinstance(
+            record, ExternalFailureRecord
+        ):
+            raise SpineError("failure persistence requires one attempt and external record")
+        observed_attempts = self.attempt_records(attempt.replication_index)
+        if not observed_attempts or observed_attempts[-1] != attempt:
+            raise SpineError("failure record does not match the latest attempt")
+        if self._read_failure(attempt.replication_index, attempt.attempt_number) is not None:
+            raise SpineError("attempt failure is already classified")
+        prior = sum(
+            self._read_failure(attempt.replication_index, item.attempt_number).cause
+            == record.cause
+            for item in observed_attempts[:-1]
+            if self._read_failure(attempt.replication_index, item.attempt_number) is not None
+        )
+        expected = classify_failure(record.cause, prior, record.evidence)
+        if decision != expected:
+            raise SpineError("failure decision differs from frozen classification")
+        store = self._numbered_store("failures", attempt.attempt_number, create=True)
+        assert store is not None
+        store.write_chunk(
+            attempt.replication_index,
+            {
+                "cause": np.asarray([record.cause], dtype="U64"),
+                "prior_same_cause_retries": np.asarray([prior], dtype=np.int32),
+                "external_event": np.asarray(
+                    [record.evidence.external_event or ""], dtype="U64"
+                ),
+                "externally_confirmed": np.asarray(
+                    [record.evidence.externally_confirmed], dtype=np.bool_
+                ),
+                "healthy_host": np.asarray([record.evidence.healthy_host], dtype=np.bool_),
+                "environment_compatible": np.asarray(
+                    [record.evidence.environment_compatible], dtype=np.bool_
+                ),
+                "classification": np.asarray([decision.classification], dtype="U16"),
+                "retry_same_replication": np.asarray(
+                    [decision.retry_same_replication], dtype=np.bool_
+                ),
+                "halt_all_work": np.asarray([decision.halt_all_work], dtype=np.bool_),
+                "declared_denominator": np.asarray(
+                    [decision.declared_denominator], dtype=np.int32
+                ),
+            },
+        )
+        return PersistedFailure(
+            attempt.replication_index,
+            attempt.attempt_number,
+            record.cause,
+            prior,
+            record.evidence,
+            decision,
+        )
 
     def _observe(self, phase: str, index: int) -> None:
         if self._phase_observer is not None:
@@ -299,6 +556,19 @@ class CalibrationCheckpointStore:
         validate_scientific_payload(restored.scientific_payload)
         return restored
 
+    def completed_result(self, index: int) -> CalibrationReplicationResult | None:
+        checked = self._validated_index(index)
+        payload_exists = self.payloads.has_stage1_unit(self._unit_name(checked))
+        transition_exists = self.transitions.has_chunk(checked)
+        if transition_exists and not payload_exists:
+            raise SpineError("checkpoint marks a replication complete without its payload")
+        if not payload_exists:
+            return None
+        if not transition_exists:
+            result = self._read_payload_without_transition(checked)
+            self._write_transition(result)
+        return self._read_payload(checked)
+
     def _read_payload_without_transition(self, index: int) -> CalibrationReplicationResult:
         name = self._unit_name(index)
         manifest_path = self.root / "payloads" / f"stage1-{name}" / "manifest.json"
@@ -325,19 +595,25 @@ class CalibrationCheckpointStore:
     def recover(self) -> RecoveryState:
         self._assert_no_validation_residue()
         completed: list[tuple[int, str]] = []
-        unfinished: list[int] = []
+        never_started: list[int] = []
+        attempted: list[AttemptedReplication] = []
         for index in range(CALIBRATION_REPLICATIONS):
-            payload_exists = self.payloads.has_stage1_unit(self._unit_name(index))
-            transition_exists = self.transitions.has_chunk(index)
-            if transition_exists and not payload_exists:
-                raise SpineError("checkpoint marks a replication complete without its payload")
-            if payload_exists and not transition_exists:
-                result = self._read_payload_without_transition(index)
-                self._write_transition(result)
-                transition_exists = True
-            if payload_exists:
-                result = self._read_payload(index)
+            result = self.completed_result(index)
+            attempts = self.attempt_records(index)
+            if result is not None:
                 completed.append((index, result.scientific_payload_hash))
+            elif not attempts:
+                never_started.append(index)
             else:
-                unfinished.append(index)
-        return RecoveryState(tuple(completed), tuple(unfinished))
+                latest = attempts[-1]
+                attempted.append(
+                    AttemptedReplication(
+                        latest,
+                        self._read_failure(index, latest.attempt_number),
+                    )
+                )
+        return RecoveryState(
+            tuple(completed),
+            tuple(never_started),
+            tuple(attempted),
+        )

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 import hashlib
 import importlib.metadata
 import multiprocessing
@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 import platform
 import subprocess
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 
@@ -19,8 +19,14 @@ from mnq_lab import SpineError
 from mnq_lab.phase8.artifacts import canonical_json_bytes
 from mnq_lab.phase10.adapter import FormalCorpus
 from mnq_lab.phase10.calibration_checkpoint import (
+    AttemptRecord,
     CalibrationCheckpointStore,
+    ExternalFailureRecord,
+    FailureDecision,
+    FailureEvidence,
     assert_complete_replication_inventory,
+    classify_failure,
+    reconcile_duplicate_attempts,
 )
 from mnq_lab.phase10.calibration_controls import CALIBRATION_REPLICATIONS
 from mnq_lab.phase10.calibration_entropy import (
@@ -55,6 +61,19 @@ class CorpusExecutionIdentity:
 
 
 @dataclass(frozen=True)
+class FailureContext:
+    replication_index: int
+    attempt_number: int
+    attempt_lineage: tuple[str, ...]
+    exception_type: str | None
+    exception_message: str | None
+    recovery: bool
+
+
+FailureEvidenceResolver = Callable[[FailureContext], ExternalFailureRecord | None]
+
+
+@dataclass(frozen=True)
 class CalibrationEvidenceRequest:
     corpus: FormalCorpus
     corpus_identity: CorpusExecutionIdentity
@@ -62,6 +81,7 @@ class CalibrationEvidenceRequest:
     checkpoint_root: Path
     resume: bool
     attempt_label: str
+    failure_evidence_resolver: FailureEvidenceResolver
 
     def __post_init__(self) -> None:
         if not isinstance(self.corpus, FormalCorpus):
@@ -86,6 +106,8 @@ class CalibrationEvidenceRequest:
             raise SpineError("calibration resume state must be boolean")
         if not isinstance(self.attempt_label, str) or not self.attempt_label:
             raise SpineError("calibration attempt label is absent")
+        if not callable(self.failure_evidence_resolver):
+            raise SpineError("calibration request lacks an external failure-evidence resolver")
 
 
 @dataclass(frozen=True)
@@ -171,9 +193,14 @@ def _compute_verified(
     corpus_identity: CorpusExecutionIdentity,
     expected: WorkerEnvironmentIdentity,
     index: int,
-    attempt_label: str,
+    attempt_lineage: tuple[str, ...],
+    classified_failures: tuple[str, ...],
     permutation_count: int,
 ) -> CalibrationReplicationResult:
+    for field in fields(FormalCorpus):
+        value = getattr(corpus, field.name)
+        if isinstance(value, np.ndarray):
+            value.setflags(write=False)
     observed = capture_worker_environment(
         corpus_identity,
         expected.worker_count,
@@ -185,7 +212,8 @@ def _compute_verified(
         lambda: compute_calibration_replication(
             corpus,
             index,
-            (attempt_label,),
+            attempt_lineage,
+            classified_failures,
             observed,
             permutation_count,
         ),
@@ -200,6 +228,235 @@ def _frozen_permutation_count() -> int:
     return permutation_count
 
 
+def _resolve_failure(
+    checkpoint: CalibrationCheckpointStore,
+    attempt: AttemptRecord,
+    resolver: FailureEvidenceResolver,
+    exception: Exception | None,
+    *,
+    recovery: bool,
+) -> FailureDecision:
+    context = FailureContext(
+        attempt.replication_index,
+        attempt.attempt_number,
+        attempt.attempt_lineage,
+        None if exception is None else type(exception).__name__,
+        None if exception is None else str(exception),
+        recovery,
+    )
+    try:
+        external = resolver(context)
+    except Exception as exc:
+        raise SpineError("external failure-evidence resolver failed") from exc
+    if external is None:
+        external = ExternalFailureRecord(
+            "unknown",
+            FailureEvidence(None, False, False, False),
+        )
+    if not isinstance(external, ExternalFailureRecord):
+        raise SpineError("external failure-evidence resolver returned an invalid record")
+    prior = checkpoint.prior_same_cause_retries(
+        attempt.replication_index,
+        external.cause,
+    )
+    decision = classify_failure(external.cause, prior, external.evidence)
+    checkpoint.record_failure(attempt, external, decision)
+    return decision
+
+
+def _retry_or_halt(
+    checkpoint: CalibrationCheckpointStore,
+    attempt: AttemptRecord,
+    resolver: FailureEvidenceResolver,
+    exception: Exception | None,
+    *,
+    recovery: bool,
+    attempt_label: str,
+) -> AttemptRecord:
+    persisted = checkpoint.failure_for_attempt(attempt)
+    decision = (
+        persisted.decision
+        if persisted is not None
+        else _resolve_failure(
+            checkpoint,
+            attempt,
+            resolver,
+            exception,
+            recovery=recovery,
+        )
+    )
+    if decision.halt_all_work or not decision.retry_same_replication:
+        raise SpineError(
+            f"calibration replication {attempt.replication_index} failed structurally"
+        ) from exception
+    return checkpoint.start_attempt(attempt.replication_index, attempt_label)
+
+
+def _accept_worker_result(
+    assigned_index: int,
+    attempt: AttemptRecord,
+    result: CalibrationReplicationResult,
+    checkpoint: CalibrationCheckpointStore,
+    permutation_count: int,
+) -> None:
+    if result.scientific_payload.replication_index != assigned_index:
+        raise SpineError("worker result differs from its assigned replication index")
+    validate_scientific_payload(result.scientific_payload)
+    if result.scientific_payload.permutations != permutation_count:
+        raise SpineError("worker result permutation count differs from its assignment")
+    if result.scientific_payload.attempt_lineage != attempt.attempt_lineage:
+        raise SpineError("worker result attempt lineage differs from checkpoint")
+    if result.scientific_payload.classified_failures != attempt.classified_failures:
+        raise SpineError("worker result failure lineage differs from checkpoint")
+    existing = checkpoint.completed_result(assigned_index)
+    if existing is not None:
+        reconcile_duplicate_attempts((existing, result))
+        return
+    checkpoint.commit_replication(result)
+
+
+def _initial_attempts(
+    checkpoint: CalibrationCheckpointStore,
+    indices: tuple[int, ...],
+    resolver: FailureEvidenceResolver,
+    attempt_label: str,
+) -> tuple[AttemptRecord, ...]:
+    recovery = checkpoint.recover()
+    completed = {index for index, _ in recovery.completed}
+    never_started = set(recovery.never_started)
+    attempted = {
+        item.attempt.replication_index: item
+        for item in recovery.attempted
+    }
+    result: list[AttemptRecord] = []
+    for index in indices:
+        if index in completed:
+            continue
+        if index in never_started:
+            result.append(checkpoint.start_attempt(index, attempt_label))
+            continue
+        if index in attempted:
+            item = attempted[index]
+            result.append(
+                _retry_or_halt(
+                    checkpoint,
+                    item.attempt,
+                    resolver,
+                    None,
+                    recovery=True,
+                    attempt_label=attempt_label,
+                )
+            )
+            continue
+        raise SpineError("checkpoint recovery omitted a declared replication")
+    return tuple(result)
+
+
+def _execute_calibration_indices(
+    request: CalibrationEvidenceRequest,
+    checkpoint: CalibrationCheckpointStore,
+    indices: tuple[int, ...],
+    permutation_count: int,
+    worker_count: int,
+) -> None:
+    attempts = _initial_attempts(
+        checkpoint,
+        indices,
+        request.failure_evidence_resolver,
+        request.attempt_label,
+    )
+    if isinstance(worker_count, bool) or not isinstance(worker_count, int) or worker_count <= 0:
+        raise SpineError("calibration execution worker count must be positive")
+    if worker_count == 1:
+        for initial_attempt in attempts:
+            attempt = initial_attempt
+            while True:
+                try:
+                    result = _compute_verified(
+                        request.corpus,
+                        request.corpus_identity,
+                        request.expected_environment,
+                        attempt.replication_index,
+                        attempt.attempt_lineage,
+                        attempt.classified_failures,
+                        permutation_count,
+                    )
+                except Exception as exc:
+                    attempt = _retry_or_halt(
+                        checkpoint,
+                        attempt,
+                        request.failure_evidence_resolver,
+                        exc,
+                        recovery=False,
+                        attempt_label=request.attempt_label,
+                    )
+                    continue
+                _accept_worker_result(
+                    attempt.replication_index,
+                    attempt,
+                    result,
+                    checkpoint,
+                    permutation_count,
+                )
+                break
+        return
+
+    context = multiprocessing.get_context(
+        request.expected_environment.process_start_method
+    )
+    with ProcessPoolExecutor(
+        max_workers=worker_count,
+        mp_context=context,
+    ) as executor:
+        futures = {
+            executor.submit(
+                _compute_verified,
+                request.corpus,
+                request.corpus_identity,
+                request.expected_environment,
+                attempt.replication_index,
+                attempt.attempt_lineage,
+                attempt.classified_failures,
+                permutation_count,
+            ): attempt
+            for attempt in attempts
+        }
+        while futures:
+            future = next(as_completed(futures))
+            attempt = futures.pop(future)
+            try:
+                result = future.result()
+            except Exception as exc:
+                retry = _retry_or_halt(
+                    checkpoint,
+                    attempt,
+                    request.failure_evidence_resolver,
+                    exc,
+                    recovery=False,
+                    attempt_label=request.attempt_label,
+                )
+                futures[
+                    executor.submit(
+                        _compute_verified,
+                        request.corpus,
+                        request.corpus_identity,
+                        request.expected_environment,
+                        retry.replication_index,
+                        retry.attempt_lineage,
+                        retry.classified_failures,
+                        permutation_count,
+                    )
+                ] = retry
+                continue
+            _accept_worker_result(
+                attempt.replication_index,
+                attempt,
+                result,
+                checkpoint,
+                permutation_count,
+            )
+
+
 def execute_calibration_request(
     request: CalibrationEvidenceRequest,
 ) -> CalibrationRunCompletion:
@@ -210,48 +467,18 @@ def execute_calibration_request(
         request.expected_environment,
         resume=request.resume,
     )
-    recovery = checkpoint.recover()
-    pending = recovery.unfinished
     permutation_count = _frozen_permutation_count()
-    if request.expected_environment.worker_count == 1:
-        for index in pending:
-            result = _compute_verified(
-                request.corpus,
-                request.corpus_identity,
-                request.expected_environment,
-                index,
-                request.attempt_label,
-                permutation_count,
-            )
-            validate_scientific_payload(result.scientific_payload)
-            checkpoint.commit_replication(result)
-    else:
-        context = multiprocessing.get_context(
-            request.expected_environment.process_start_method
-        )
-        with ProcessPoolExecutor(
-            max_workers=request.expected_environment.worker_count,
-            mp_context=context,
-        ) as executor:
-            futures = {
-                executor.submit(
-                    _compute_verified,
-                    request.corpus,
-                    request.corpus_identity,
-                    request.expected_environment,
-                    index,
-                    request.attempt_label,
-                    permutation_count,
-                ): index
-                for index in pending
-            }
-            for future in as_completed(futures):
-                index = futures[future]
-                result = future.result()
-                if result.scientific_payload.replication_index != index:
-                    raise SpineError("worker result differs from its assigned replication index")
-                validate_scientific_payload(result.scientific_payload)
-                checkpoint.commit_replication(result)
+    if permutation_count != load_phase10_contract().permutations_final:
+        raise SpineError("authorized evidence path cannot override frozen permutations")
+    if request.expected_environment.worker_count <= 0:
+        raise SpineError("authorized evidence worker count differs")
+    _execute_calibration_indices(
+        request,
+        checkpoint,
+        tuple(range(CALIBRATION_REPLICATIONS)),
+        permutation_count,
+        request.expected_environment.worker_count,
+    )
     final = checkpoint.recover()
     assert_complete_replication_inventory(index for index, _ in final.completed)
     return CalibrationRunCompletion(final.completed, CALIBRATION_REPLICATIONS)

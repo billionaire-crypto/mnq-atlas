@@ -51,6 +51,7 @@ def compute_calibration_replication(
     corpus: FormalCorpus,
     replication_index: int,
     attempt_lineage: tuple[str, ...],
+    classified_failures: tuple[str, ...],
     environment: WorkerEnvironmentIdentity,
     permutation_count: int,
 ):
@@ -154,7 +155,7 @@ def compute_calibration_replication(
                 co_maximal_regions=co_maximal,
                 localization_overlap=overlap,
                 structural_statuses=statuses,
-                classified_failures=(),
+                classified_failures=classified_failures,
             )
         )
 
@@ -180,7 +181,7 @@ def compute_calibration_replication(
         weighting_planes=contract.weighting_planes,
         quartet_members=tuple(members),
         structural_statuses=tuple(dict.fromkeys(all_statuses)),
-        classified_failures=(),
+        classified_failures=classified_failures,
         code_identity=environment.repository_commit,
         package_identity=environment.package_lock_sha256,
         corpus_identity=environment.corpus_manifest_sha256,

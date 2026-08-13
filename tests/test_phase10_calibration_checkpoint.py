@@ -5,11 +5,14 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from mnq_lab import SpineError
 from mnq_lab.phase10.calibration_checkpoint import (
+    AttemptRecord,
     CalibrationCheckpointStore,
+    ExternalFailureRecord,
     FailureEvidence,
     assert_complete_replication_inventory,
     classify_failure,
@@ -48,7 +51,8 @@ def _assert_commit_order(committer, root: Path):
     ]
     recovered = store.recover()
     assert recovered.completed == ((7, _result().scientific_payload_hash),)
-    assert len(recovered.unfinished) == 299
+    assert len(recovered.never_started) == 299
+    assert recovered.attempted == ()
 
 
 def test_payload_is_validated_and_atomically_committed_before_transition(tmp_path):
@@ -159,6 +163,15 @@ def _assert_failure_contract(classifier):
     assert unknown.classification == "structural" and unknown.halt_all_work
     vanished = classifier("vanished_process", 0, _evidence())
     assert vanished.classification == "structural" and vanished.halt_all_work
+    externally_recorded_vanishing = classifier(
+        "vanished_process",
+        0,
+        _evidence("host_loss", True),
+    )
+    assert (
+        externally_recorded_vanishing.classification == "structural"
+        and externally_recorded_vanishing.halt_all_work
+    )
     first_oom = classifier("oom", 0, _evidence(healthy=True, compatible=True))
     assert first_oom.retry_same_replication and not first_oom.halt_all_work
     repeated_oom = classifier("oom", 1, _evidence(healthy=True, compatible=True))
@@ -205,3 +218,128 @@ def test_shortened_denominator_mutant_fails_the_same_witness():
 
     with pytest.raises(AssertionError):
         _assert_denominator_guard(accepts_short)
+
+
+def _assert_three_state_recovery(store_factory, root):
+    store = store_factory(root)
+    attempt = store.start_attempt(7, "attempted")
+    state = store.recover()
+    assert 7 not in state.never_started
+    assert tuple(item.attempt for item in state.attempted) == (attempt,)
+    assert 8 in state.never_started
+    assert state.completed == ()
+
+
+def test_attempt_start_is_a_distinct_non_retryable_recovery_state(tmp_path):
+    _assert_three_state_recovery(
+        lambda root: CalibrationCheckpointStore(root, _environment(), resume=False),
+        tmp_path / "three-state",
+    )
+
+
+def test_two_state_recovery_mutant_fails_the_same_three_state_witness(tmp_path):
+    class TwoStateStore:
+        def __init__(self, root):
+            self.real = CalibrationCheckpointStore(root, _environment(), resume=False)
+
+        def start_attempt(self, index, label):
+            return self.real.start_attempt(index, label)
+
+        def recover(self):
+            state = self.real.recover()
+            return replace(
+                state,
+                never_started=tuple(sorted((*state.never_started, 7))),
+                attempted=(),
+            )
+
+    with pytest.raises(AssertionError):
+        _assert_three_state_recovery(TwoStateStore, tmp_path / "two-state-mutant")
+
+
+def _assert_attempt_failure_lineage(store_factory, root):
+    store = store_factory(root)
+    first = store.start_attempt(7, "lineage")
+    external = ExternalFailureRecord(
+        "host_loss",
+        _evidence("host_loss", True),
+    )
+    decision = classify_failure(external.cause, 0, external.evidence)
+    store.record_failure(first, external, decision)
+    second = store.start_attempt(7, "lineage")
+    assert second.attempt_number == 1
+    assert second.attempt_lineage == (
+        "lineage:attempt-0",
+        "lineage:attempt-1",
+    )
+    assert second.classified_failures == ("attempt-0:host_loss:transient",)
+
+
+def test_persisted_external_failure_populates_retry_lineage(tmp_path):
+    _assert_attempt_failure_lineage(
+        lambda root: CalibrationCheckpointStore(root, _environment(), resume=False),
+        tmp_path / "failure-lineage",
+    )
+
+
+def test_missing_failure_lineage_mutant_fails_the_same_witness(tmp_path):
+    class MissingLineageStore:
+        def __init__(self, root):
+            self.real = CalibrationCheckpointStore(root, _environment(), resume=False)
+
+        def __getattr__(self, name):
+            return getattr(self.real, name)
+
+        def start_attempt(self, index, label):
+            result = self.real.start_attempt(index, label)
+            if result.attempt_number:
+                return replace(result, classified_failures=())
+            return result
+
+    with pytest.raises(AssertionError):
+        _assert_attempt_failure_lineage(
+            MissingLineageStore,
+            tmp_path / "missing-lineage-mutant",
+        )
+
+
+def _assert_transition_hash_guard(reader):
+    result = _result()
+    forged = object.__new__(type(result))
+    object.__setattr__(forged, "scientific_payload", result.scientific_payload)
+    object.__setattr__(forged, "scientific_payload_hash", "0" * 64)
+    try:
+        reader(forged, result.scientific_payload_hash)
+    except SpineError as exc:
+        assert "transition payload hash differs" in str(exc)
+    else:
+        raise AssertionError("transition payload hash mismatch was accepted")
+
+
+def test_transition_hash_is_compared_with_restored_payload():
+    def reader(restored, expected_hash):
+        class FakeTransitions:
+            @staticmethod
+            def has_chunk(_index):
+                return True
+
+            @staticmethod
+            def read_chunk(_index):
+                return {"payload_hash": np.asarray([expected_hash])}
+
+        class FakePayloads:
+            @staticmethod
+            def read_stage1_unit(*_args, **_kwargs):
+                return restored
+
+        store = object.__new__(CalibrationCheckpointStore)
+        store.transitions = FakeTransitions()
+        store.payloads = FakePayloads()
+        return store._read_payload(7)
+
+    _assert_transition_hash_guard(reader)
+
+
+def test_missing_transition_hash_comparison_fails_the_same_witness():
+    with pytest.raises(AssertionError):
+        _assert_transition_hash_guard(lambda restored, _expected_hash: restored)

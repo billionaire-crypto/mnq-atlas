@@ -303,6 +303,36 @@ def test_missing_failure_lineage_mutant_fails_the_same_witness(tmp_path):
         )
 
 
+def _assert_structural_failure_cannot_restart(starter, root):
+    store = CalibrationCheckpointStore(root, _environment(), resume=False)
+    first = store.start_attempt(7, "structural")
+    external = ExternalFailureRecord("unknown", _evidence())
+    decision = classify_failure(external.cause, 0, external.evidence)
+    assert decision.classification == "structural"
+    store.record_failure(first, external, decision)
+    try:
+        starter(store, 7, "structural")
+    except SpineError as exc:
+        assert "structural failure cannot start another attempt" in str(exc)
+    else:
+        raise AssertionError("structural failure started another attempt")
+
+
+def test_structural_failure_cannot_start_another_attempt(tmp_path):
+    _assert_structural_failure_cannot_restart(
+        lambda store, index, label: store.start_attempt(index, label),
+        tmp_path / "structural-restart",
+    )
+
+
+def test_missing_structural_restart_guard_fails_the_same_witness(tmp_path):
+    with pytest.raises(AssertionError):
+        _assert_structural_failure_cannot_restart(
+            lambda _store, _index, _label: None,
+            tmp_path / "unchecked-structural-restart",
+        )
+
+
 def _assert_transition_hash_guard(reader):
     result = _result()
     forged = object.__new__(type(result))

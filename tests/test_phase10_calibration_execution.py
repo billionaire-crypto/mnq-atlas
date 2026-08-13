@@ -323,6 +323,106 @@ def test_missing_parallel_index_check_fails_the_same_witness():
         _assert_parallel_index_agreement(unchecked)
 
 
+@pytest.mark.parametrize(
+    ("field_name", "error_fragment"),
+    (
+        ("attempt_lineage", "attempt lineage differs"),
+        ("classified_failures", "failure lineage differs"),
+    ),
+)
+def test_worker_result_lineage_must_match_checkpoint(field_name, error_fragment):
+    _assert_worker_lineage_agreement(
+        execution_module._accept_worker_result,
+        field_name,
+        error_fragment,
+    )
+
+
+def _assert_worker_lineage_agreement(acceptor, field_name, error_fragment):
+    result = _result()
+    changes = {field_name: ("different-lineage",)}
+    attempt = AttemptRecord(
+        result.scientific_payload.replication_index,
+        0,
+        result.scientific_payload.attempt_lineage,
+        result.scientific_payload.classified_failures,
+    )
+    attempt = replace(attempt, **changes)
+    try:
+        acceptor(
+            attempt.replication_index,
+            attempt,
+            result,
+            _AcceptanceCheckpoint(),
+            4999,
+        )
+    except SpineError as exc:
+        assert error_fragment in str(exc)
+    else:
+        raise AssertionError(f"worker {field_name} mismatch was accepted")
+
+
+@pytest.mark.parametrize(
+    ("field_name", "error_fragment"),
+    (
+        ("attempt_lineage", "attempt lineage differs"),
+        ("classified_failures", "failure lineage differs"),
+    ),
+)
+def test_missing_worker_lineage_guards_fail_the_same_witness(
+    field_name,
+    error_fragment,
+):
+    def unchecked(_assigned, _attempt, result, checkpoint, _permutation_count):
+        results_module.validate_scientific_payload(result.scientific_payload)
+        checkpoint.commit_replication(result)
+
+    with pytest.raises(AssertionError):
+        _assert_worker_lineage_agreement(unchecked, field_name, error_fragment)
+
+
+def _assert_authorized_permutation_count(executor, monkeypatch, tmp_path):
+    request = object.__new__(execution_module.CalibrationEvidenceRequest)
+    object.__setattr__(request, "checkpoint_root", tmp_path / "not-created")
+    object.__setattr__(request, "expected_environment", _environment())
+    object.__setattr__(request, "resume", False)
+    monkeypatch.setattr(
+        execution_module,
+        "CalibrationCheckpointStore",
+        lambda *_args, **_kwargs: object(),
+    )
+    monkeypatch.setattr(execution_module, "_frozen_permutation_count", lambda: 19)
+    try:
+        executor(request)
+    except SpineError as exc:
+        assert "cannot override frozen permutations" in str(exc)
+    else:
+        raise AssertionError("authorized evidence path accepted a non-frozen B")
+
+
+def test_authorized_execution_rejects_nonfrozen_permutation_count(
+    monkeypatch,
+    tmp_path,
+):
+    _assert_authorized_permutation_count(
+        execution_module.execute_calibration_request,
+        monkeypatch,
+        tmp_path,
+    )
+
+
+def test_missing_authorized_permutation_guard_fails_the_same_witness(
+    monkeypatch,
+    tmp_path,
+):
+    with pytest.raises(AssertionError):
+        _assert_authorized_permutation_count(
+            lambda _request: None,
+            monkeypatch,
+            tmp_path,
+        )
+
+
 def _assert_duplicate_reconciliation(acceptor, monkeypatch):
     result = _result()
     attempt = AttemptRecord(

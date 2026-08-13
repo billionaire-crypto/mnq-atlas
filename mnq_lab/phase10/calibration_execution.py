@@ -221,11 +221,7 @@ def _compute_verified(
 
 
 def _frozen_permutation_count() -> int:
-    contract = load_phase10_contract()
-    permutation_count = contract.permutations_final
-    if permutation_count != load_phase10_contract().permutations_final:
-        raise SpineError("authorized calibration permutation count differs from contract")
-    return permutation_count
+    return load_phase10_contract().permutations_final
 
 
 def _resolve_failure(

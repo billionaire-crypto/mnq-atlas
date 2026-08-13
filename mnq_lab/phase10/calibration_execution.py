@@ -93,10 +93,6 @@ class CalibrationRunCompletion:
     declared_denominator: int
 
 
-def _sha256_file(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
 def _git_observation() -> tuple[str, bool]:
     try:
         commit = subprocess.run(
@@ -138,7 +134,10 @@ def capture_worker_environment(
         raise SpineError("worker environment capture requires corpus identities")
     commit, dirty = _git_observation()
     source_hashes = tuple(
-        (path.relative_to(_REPO_ROOT).as_posix(), _sha256_file(path))
+        (
+            path.relative_to(_REPO_ROOT).as_posix(),
+            hashlib.sha256(path.read_bytes()).hexdigest(),
+        )
         for path in sorted((_REPO_ROOT / "mnq_lab" / "phase10").glob("*.py"))
     )
     settings = tuple((name, os.environ.get(name, "<unset>")) for name in _THREAD_VARIABLES)
@@ -152,7 +151,9 @@ def capture_worker_environment(
         architecture=platform.machine(),
         cpu_identity=platform.processor() or platform.machine(),
         phase10_source_sha256=source_hashes,
-        constants_sha256=_sha256_file(_REPO_ROOT / "analysis_constants_v1.yaml"),
+        constants_sha256=hashlib.sha256(
+            (_REPO_ROOT / "analysis_constants_v1.yaml").read_bytes()
+        ).hexdigest(),
         corpus_manifest_sha256=corpus_identity.manifest_sha256,
         corpus_column_sha256=corpus_identity.column_sha256,
         formal_session_count=900,

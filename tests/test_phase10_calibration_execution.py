@@ -413,6 +413,76 @@ def test_nonfrozen_permutation_selection_fails_the_same_witness():
         _assert_frozen_permutation_selection(lambda: 19)
 
 
+def _assert_authorized_execution_threads_frozen_count(executor, monkeypatch, tmp_path):
+    request = object.__new__(execution_module.CalibrationEvidenceRequest)
+    object.__setattr__(request, "checkpoint_root", tmp_path / "not-created")
+    object.__setattr__(request, "expected_environment", _environment())
+    object.__setattr__(request, "resume", False)
+
+    class CompleteCheckpoint:
+        @staticmethod
+        def recover():
+            return SimpleNamespace(
+                completed=tuple((index, "0" * 64) for index in range(300))
+            )
+
+    checkpoint = CompleteCheckpoint()
+    observed = []
+    monkeypatch.setattr(
+        execution_module,
+        "CalibrationCheckpointStore",
+        lambda *_args, **_kwargs: checkpoint,
+    )
+    monkeypatch.setattr(
+        execution_module,
+        "_execute_calibration_indices",
+        lambda _request, _checkpoint, _indices, permutations, _workers: (
+            observed.append(permutations)
+        ),
+    )
+    executor(request)
+    assert observed == [load_phase10_contract().permutations_final]
+
+
+def test_authorized_execution_threads_frozen_count_to_science(
+    monkeypatch,
+    tmp_path,
+):
+    _assert_authorized_execution_threads_frozen_count(
+        execution_module.execute_calibration_request,
+        monkeypatch,
+        tmp_path,
+    )
+
+
+def test_changed_science_count_fails_the_same_execution_witness(
+    monkeypatch,
+    tmp_path,
+):
+    def changed(request):
+        checkpoint = execution_module.CalibrationCheckpointStore(
+            request.checkpoint_root,
+            request.expected_environment,
+            resume=request.resume,
+        )
+        execution_module._execute_calibration_indices(
+            request,
+            checkpoint,
+            tuple(range(300)),
+            19,
+            request.expected_environment.worker_count,
+        )
+        final = checkpoint.recover()
+        return execution_module.CalibrationRunCompletion(final.completed, 300)
+
+    with pytest.raises(AssertionError):
+        _assert_authorized_execution_threads_frozen_count(
+            changed,
+            monkeypatch,
+            tmp_path,
+        )
+
+
 def test_authorized_execution_rejects_nonfrozen_permutation_count(
     monkeypatch,
     tmp_path,

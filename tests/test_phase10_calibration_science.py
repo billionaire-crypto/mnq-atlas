@@ -157,8 +157,12 @@ def test_aliased_null_storage_fails_the_same_exact_pvalue_witness():
         _assert_exact_member_p_values((0.75, 0.05, 0.05, 0.05))
 
 
-def test_incomplete_lattice_statuses_fail_the_same_all_ok_witness():
-    incomplete = type("Incomplete", (), {"structural_statuses": ("ok",) * 29})()
+@pytest.mark.parametrize(
+    "statuses",
+    (("ok",) * 29, ("ok",) * 29 + ("insufficient_anchors",)),
+)
+def test_invalid_lattice_statuses_fail_the_same_all_ok_witness(statuses):
+    incomplete = type("Incomplete", (), {"structural_statuses": statuses})()
     with pytest.raises(AssertionError):
         _assert_every_lattice_cell_is_ok((incomplete,) * 4)
 

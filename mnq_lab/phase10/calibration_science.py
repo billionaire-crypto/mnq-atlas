@@ -7,6 +7,7 @@ import hashlib
 
 import numpy as np
 
+from mnq_lab import SpineError
 from mnq_lab.phase8.artifacts import canonical_json_bytes
 from mnq_lab.phase10.adapter import FormalCorpus
 from mnq_lab.phase10.calibration_controls import plant_frozen_effect_ladder
@@ -51,8 +52,15 @@ def compute_calibration_replication(
     replication_index: int,
     attempt_lineage: tuple[str, ...],
     environment: WorkerEnvironmentIdentity,
+    permutation_count: int,
 ):
     """Evaluate one complete quartet with its own verified control and ensemble."""
+    if (
+        isinstance(permutation_count, bool)
+        or not isinstance(permutation_count, int)
+        or permutation_count <= 0
+    ):
+        raise SpineError("calibration permutation count must be a positive built-in integer")
     contract = load_phase10_contract()
     control = build_verified_outer_control(corpus, replication_index)
     effects = plant_frozen_effect_ladder(corpus, control)
@@ -67,22 +75,22 @@ def compute_calibration_replication(
     mappings = fresh_internal_mappings(
         corpus,
         replication_index,
-        contract.permutations_final,
+        permutation_count,
     )
     null_contrasts = tuple(
-        np.zeros((contract.permutations_final, *item.contrasts.shape), dtype=np.int64)
+        np.zeros((permutation_count, *item.contrasts.shape), dtype=np.int64)
         for item in observed
     )
     null_valid = tuple(
-        np.zeros((contract.permutations_final, *item.valid.shape), dtype=np.bool_)
+        np.zeros((permutation_count, *item.valid.shape), dtype=np.bool_)
         for item in observed
     )
     null_yearly = tuple(
-        np.zeros((contract.permutations_final, *item.yearly_contrasts.shape), dtype=np.int64)
+        np.zeros((permutation_count, *item.yearly_contrasts.shape), dtype=np.int64)
         for item in observed
     )
     null_yearly_valid = tuple(
-        np.zeros((contract.permutations_final, *item.yearly_valid.shape), dtype=np.bool_)
+        np.zeros((permutation_count, *item.yearly_valid.shape), dtype=np.bool_)
         for item in observed
     )
     for mapping_index, mapping in enumerate(mappings):
@@ -121,8 +129,8 @@ def compute_calibration_replication(
             observed[member_index].yearly_contrasts,
             observed[member_index].yearly_valid,
         )
-        null_statistics = np.empty(contract.permutations_final, dtype=np.float64)
-        for mapping_index in range(contract.permutations_final):
+        null_statistics = np.empty(permutation_count, dtype=np.float64)
+        for mapping_index in range(permutation_count):
             null_statistics[mapping_index] = coherence_statistic(
                 standardized.null_z[mapping_index],
                 standardized.null_valid[mapping_index],
@@ -166,7 +174,7 @@ def compute_calibration_replication(
         ensemble_spawn_key=(replication_index, 1),
         completion_state="complete",
         attempt_lineage=attempt_lineage,
-        permutations=contract.permutations_final,
+        permutations=permutation_count,
         rejection_rule_identity=REJECTION_RULE_IDENTITY,
         formal_population_identity=PERMUTATION_POPULATION,
         weighting_planes=contract.weighting_planes,

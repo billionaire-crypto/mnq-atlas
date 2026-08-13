@@ -36,6 +36,7 @@ from mnq_lab.phase10.calibration_results import (
     validate_scientific_payload,
 )
 from mnq_lab.phase10.calibration_science import compute_calibration_replication
+from mnq_lab.phase10.contract import load_phase10_contract
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _THREAD_VARIABLES = (
@@ -171,6 +172,7 @@ def _compute_verified(
     expected: WorkerEnvironmentIdentity,
     index: int,
     attempt_label: str,
+    permutation_count: int,
 ) -> CalibrationReplicationResult:
     observed = capture_worker_environment(
         corpus_identity,
@@ -185,8 +187,17 @@ def _compute_verified(
             index,
             (attempt_label,),
             observed,
+            permutation_count,
         ),
     )
+
+
+def _frozen_permutation_count() -> int:
+    contract = load_phase10_contract()
+    permutation_count = contract.permutations_final
+    if permutation_count != load_phase10_contract().permutations_final:
+        raise SpineError("authorized calibration permutation count differs from contract")
+    return permutation_count
 
 
 def execute_calibration_request(
@@ -201,6 +212,7 @@ def execute_calibration_request(
     )
     recovery = checkpoint.recover()
     pending = recovery.unfinished
+    permutation_count = _frozen_permutation_count()
     if request.expected_environment.worker_count == 1:
         for index in pending:
             result = _compute_verified(
@@ -209,6 +221,7 @@ def execute_calibration_request(
                 request.expected_environment,
                 index,
                 request.attempt_label,
+                permutation_count,
             )
             validate_scientific_payload(result.scientific_payload)
             checkpoint.commit_replication(result)
@@ -228,6 +241,7 @@ def execute_calibration_request(
                     request.expected_environment,
                     index,
                     request.attempt_label,
+                    permutation_count,
                 ): index
                 for index in pending
             }

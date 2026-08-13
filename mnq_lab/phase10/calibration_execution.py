@@ -264,15 +264,14 @@ def _resolve_failure(
     return decision
 
 
-def _retry_or_halt(
+def _require_retry_authorization(
     checkpoint: CalibrationCheckpointStore,
     attempt: AttemptRecord,
     resolver: FailureEvidenceResolver,
     exception: Exception | None,
     *,
     recovery: bool,
-    attempt_label: str,
-) -> AttemptRecord:
+) -> None:
     persisted = checkpoint.failure_for_attempt(attempt)
     decision = (
         persisted.decision
@@ -289,6 +288,24 @@ def _retry_or_halt(
         raise SpineError(
             f"calibration replication {attempt.replication_index} failed structurally"
         ) from exception
+
+
+def _retry_or_halt(
+    checkpoint: CalibrationCheckpointStore,
+    attempt: AttemptRecord,
+    resolver: FailureEvidenceResolver,
+    exception: Exception | None,
+    *,
+    recovery: bool,
+    attempt_label: str,
+) -> AttemptRecord:
+    _require_retry_authorization(
+        checkpoint,
+        attempt,
+        resolver,
+        exception,
+        recovery=recovery,
+    )
     return checkpoint.start_attempt(attempt.replication_index, attempt_label)
 
 
@@ -320,7 +337,9 @@ def _initial_attempts(
     indices: tuple[int, ...],
     resolver: FailureEvidenceResolver,
     attempt_label: str,
-) -> tuple[AttemptRecord, ...]:
+) -> tuple[int, ...]:
+    if not isinstance(attempt_label, str) or not attempt_label:
+        raise SpineError("calibration attempt label is absent")
     recovery = checkpoint.recover()
     completed = {index for index, _ in recovery.completed}
     never_started = set(recovery.never_started)
@@ -328,25 +347,23 @@ def _initial_attempts(
         item.attempt.replication_index: item
         for item in recovery.attempted
     }
-    result: list[AttemptRecord] = []
+    result: list[int] = []
     for index in indices:
         if index in completed:
             continue
         if index in never_started:
-            result.append(checkpoint.start_attempt(index, attempt_label))
+            result.append(index)
             continue
         if index in attempted:
             item = attempted[index]
-            result.append(
-                _retry_or_halt(
-                    checkpoint,
-                    item.attempt,
-                    resolver,
-                    None,
-                    recovery=True,
-                    attempt_label=attempt_label,
-                )
+            _require_retry_authorization(
+                checkpoint,
+                item.attempt,
+                resolver,
+                None,
+                recovery=True,
             )
+            result.append(index)
             continue
         raise SpineError("checkpoint recovery omitted a declared replication")
     return tuple(result)
@@ -359,7 +376,7 @@ def _execute_calibration_indices(
     permutation_count: int,
     worker_count: int,
 ) -> None:
-    attempts = _initial_attempts(
+    authorized_indices = _initial_attempts(
         checkpoint,
         indices,
         request.failure_evidence_resolver,
@@ -368,8 +385,8 @@ def _execute_calibration_indices(
     if isinstance(worker_count, bool) or not isinstance(worker_count, int) or worker_count <= 0:
         raise SpineError("calibration execution worker count must be positive")
     if worker_count == 1:
-        for initial_attempt in attempts:
-            attempt = initial_attempt
+        for index in authorized_indices:
+            attempt = checkpoint.start_attempt(index, request.attempt_label)
             while True:
                 try:
                     result = _compute_verified(
@@ -408,19 +425,21 @@ def _execute_calibration_indices(
         max_workers=worker_count,
         mp_context=context,
     ) as executor:
-        futures = {
-            executor.submit(
-                _compute_verified,
-                request.corpus,
-                request.corpus_identity,
-                request.expected_environment,
-                attempt.replication_index,
-                attempt.attempt_lineage,
-                attempt.classified_failures,
-                permutation_count,
-            ): attempt
-            for attempt in attempts
-        }
+        futures = {}
+        for index in authorized_indices:
+            attempt = checkpoint.start_attempt(index, request.attempt_label)
+            futures[
+                executor.submit(
+                    _compute_verified,
+                    request.corpus,
+                    request.corpus_identity,
+                    request.expected_environment,
+                    attempt.replication_index,
+                    attempt.attempt_lineage,
+                    attempt.classified_failures,
+                    permutation_count,
+                )
+            ] = attempt
         while futures:
             future = next(as_completed(futures))
             attempt = futures.pop(future)

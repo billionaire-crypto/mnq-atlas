@@ -397,15 +397,43 @@ def test_external_transient_record_retries_same_index_and_populates_lineage(tmp_
         "host_loss",
         FailureEvidence("host_loss", True, True, True),
     )
-    attempts = execution_module._initial_attempts(
+    authorized = execution_module._initial_attempts(
         checkpoint,
         (7,),
         lambda _context: external,
         "retry",
     )
-    assert tuple(item.replication_index for item in attempts) == (7,)
-    assert attempts[0].attempt_number == 1
-    assert attempts[0].classified_failures == ("attempt-0:host_loss:transient",)
+    assert authorized == (7,)
+    retry = checkpoint.start_attempt(7, "retry")
+    assert retry.attempt_number == 1
+    assert retry.classified_failures == ("attempt-0:host_loss:transient",)
+
+
+def test_structural_failure_leaves_later_serial_index_never_started(monkeypatch, tmp_path):
+    environment, corpus_identity = _identity()
+    corpus, _ = _fixture()
+    checkpoint = CalibrationCheckpointStore(
+        tmp_path / "serial-start-order",
+        environment,
+        resume=False,
+    )
+    monkeypatch.setattr(
+        execution_module,
+        "_compute_verified",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("structural")),
+    )
+    request = _request(corpus, environment, corpus_identity)
+    with pytest.raises(SpineError, match="failed structurally"):
+        execution_module._execute_calibration_indices(
+            request,
+            checkpoint,
+            (7, 8),
+            4999,
+            1,
+        )
+    state = checkpoint.recover()
+    assert tuple(item.attempt.replication_index for item in state.attempted) == (7,)
+    assert 8 in state.never_started
 
 
 def test_live_transient_failure_is_classified_and_retried_once(monkeypatch, tmp_path):

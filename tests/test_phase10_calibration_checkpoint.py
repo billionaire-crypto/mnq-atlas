@@ -67,11 +67,16 @@ def test_transition_first_mutant_fails_the_same_order_witness(tmp_path):
         _assert_commit_order(transition_first, tmp_path / "checkpoint-mutant")
 
 
-def _assert_recovery_halts_on_one_sided_state(mutator, root):
+def _assert_recovery_reconciles_one_sided_state(mutator, root, should_recover):
     store = CalibrationCheckpointStore(root, _environment(), resume=False)
     mutator(store, _result())
-    with pytest.raises(SpineError):
-        store.recover()
+    if should_recover:
+        recovered = store.recover()
+        assert recovered.completed == ((7, _result().scientific_payload_hash),)
+        assert store.transitions.has_chunk(7)
+    else:
+        with pytest.raises(SpineError):
+            store.recover()
 
 
 def test_recovery_halts_when_transition_or_payload_is_missing(tmp_path):
@@ -88,13 +93,15 @@ def test_recovery_halts_when_transition_or_payload_is_missing(tmp_path):
             row_ids=(f"replication-{index:06d}",),
         )
 
-    _assert_recovery_halts_on_one_sided_state(
+    _assert_recovery_reconciles_one_sided_state(
         transition_only,
         tmp_path / "transition-only",
+        False,
     )
-    _assert_recovery_halts_on_one_sided_state(
+    _assert_recovery_reconciles_one_sided_state(
         payload_only,
         tmp_path / "payload-only",
+        True,
     )
 
 

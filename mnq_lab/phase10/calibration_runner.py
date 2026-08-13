@@ -24,7 +24,14 @@ def _validate_execution_authorization(authorization: Any) -> None:
 
 
 def _execute_authorized_request(request: Any) -> Any:
-    raise SpineError("Phase 10 calibration execution request is not configured")
+    from mnq_lab.phase10.calibration_execution import (
+        CalibrationEvidenceRequest,
+        execute_calibration_request,
+    )
+
+    if not isinstance(request, CalibrationEvidenceRequest):
+        raise SpineError("Phase 10 calibration execution request is not configured")
+    return execute_calibration_request(request)
 
 
 def run_calibration_evidence(authorization: str, *, request: Any) -> Any:

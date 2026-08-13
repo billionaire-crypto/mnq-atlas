@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import json
 from pathlib import Path
 import shutil
 from typing import Any, Callable
@@ -298,6 +299,29 @@ class CalibrationCheckpointStore:
         validate_scientific_payload(restored.scientific_payload)
         return restored
 
+    def _read_payload_without_transition(self, index: int) -> CalibrationReplicationResult:
+        name = self._unit_name(index)
+        manifest_path = self.root / "payloads" / f"stage1-{name}" / "manifest.json"
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            expected_hash = str(manifest["declared_identity_sha256"])
+        except (OSError, KeyError, TypeError, ValueError) as exc:
+            raise SpineError("committed payload manifest is unreadable during recovery") from exc
+        if manifest_path.read_bytes() != canonical_json_bytes(manifest):
+            raise SpineError("committed payload manifest is not canonical during recovery")
+        restored = self.payloads.read_stage1_unit(
+            name,
+            declared_indices=(index,),
+            declared_identity_sha256=expected_hash,
+            row_ids=(f"replication-{index:06d}",),
+        )
+        if not isinstance(restored, CalibrationReplicationResult):
+            raise SpineError("committed payload restored with the wrong type")
+        validate_scientific_payload(restored.scientific_payload)
+        if restored.scientific_payload_hash != scientific_payload_hash(restored.scientific_payload):
+            raise SpineError("committed payload hash differs during recovery")
+        return restored
+
     def recover(self) -> RecoveryState:
         self._assert_no_validation_residue()
         completed: list[tuple[int, str]] = []
@@ -308,10 +332,9 @@ class CalibrationCheckpointStore:
             if transition_exists and not payload_exists:
                 raise SpineError("checkpoint marks a replication complete without its payload")
             if payload_exists and not transition_exists:
-                name = self._unit_name(index)
-                raise SpineError(
-                    f"committed payload lacks its completion transition: {name}"
-                )
+                result = self._read_payload_without_transition(index)
+                self._write_transition(result)
+                transition_exists = True
             if payload_exists:
                 result = self._read_payload(index)
                 completed.append((index, result.scientific_payload_hash))

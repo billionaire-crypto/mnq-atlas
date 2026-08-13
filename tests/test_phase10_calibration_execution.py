@@ -400,6 +400,19 @@ def _assert_authorized_permutation_count(executor, monkeypatch, tmp_path):
         raise AssertionError("authorized evidence path accepted a non-frozen B")
 
 
+def _assert_frozen_permutation_selection(selector):
+    assert selector() == load_phase10_contract().permutations_final
+
+
+def test_authorized_execution_selects_the_contract_permutation_count():
+    _assert_frozen_permutation_selection(execution_module._frozen_permutation_count)
+
+
+def test_nonfrozen_permutation_selection_fails_the_same_witness():
+    with pytest.raises(AssertionError):
+        _assert_frozen_permutation_selection(lambda: 19)
+
+
 def test_authorized_execution_rejects_nonfrozen_permutation_count(
     monkeypatch,
     tmp_path,

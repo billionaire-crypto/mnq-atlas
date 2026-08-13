@@ -74,8 +74,12 @@ def test_defaulted_or_token_supplying_mutants_fail_the_same_witness():
     def defaulted(authorization="forbidden-default", *, request=None):
         return authorization, request
 
+    def test_prefixed(authorization, *, request=None):
+        return authorization, request
+
     for entrypoint, sources, token in (
         (defaulted, ("pass\n",), runner_module.CALIBRATION_EXECUTION_AUTHORIZATION),
+        (test_prefixed, ("pass\n",), runner_module.CALIBRATION_EXECUTION_AUTHORIZATION),
         (
             runner_module.run_calibration_evidence,
             (

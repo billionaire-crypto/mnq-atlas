@@ -96,18 +96,36 @@ def _assert_environment_precedes_work(executor, expected, observed):
     assert result == "done"
 
 
+def _with_changed_environment_field(environment, field_name):
+    changed = object.__new__(WorkerEnvironmentIdentity)
+    for field in fields(WorkerEnvironmentIdentity):
+        value = getattr(environment, field.name)
+        if field.name == field_name:
+            if isinstance(value, bool):
+                value = not value
+            elif isinstance(value, int):
+                value += 1
+            elif isinstance(value, str):
+                value = "fork" if value == "spawn" else f"{value}-different"
+            else:
+                value = (*value, ("additional", "different"))
+        object.__setattr__(changed, field.name, value)
+    return changed
+
+
 def test_environment_identity_is_complete_and_checked_before_work():
-    assert tuple(field.name for field in fields(WorkerEnvironmentIdentity))
+    expected = _environment()
     _assert_environment_precedes_work(
         run_after_environment_verification,
-        _environment(),
-        _environment(),
+        expected,
+        expected,
     )
-    _assert_environment_precedes_work(
-        run_after_environment_verification,
-        _environment(),
-        replace(_environment(), cpu_identity="different"),
-    )
+    for field in fields(WorkerEnvironmentIdentity):
+        _assert_environment_precedes_work(
+            run_after_environment_verification,
+            expected,
+            _with_changed_environment_field(expected, field.name),
+        )
 
 
 def test_environment_warning_or_late_check_mutants_fail_the_same_witness():
@@ -211,11 +229,27 @@ def test_completion_order_assignment_mutant_fails_the_same_witness():
         _assert_indexed_determinism(completion_order)
 
 
-def test_serial_parallel_interrupted_and_resumed_bytes_are_identical():
-    variants = four_way_determinism_witness()
+def _assert_four_way_bytes(witness):
+    variants = witness()
     assert len(variants) == 4
     assert variants[0] == variants[1] == variants[2] == variants[3]
     assert len(variants[0]) == 6
+
+
+def test_serial_parallel_interrupted_and_resumed_bytes_are_identical():
+    _assert_four_way_bytes(four_way_determinism_witness)
+
+
+def test_different_resumed_bytes_fail_the_same_four_way_witness():
+    def different_resumed_bytes():
+        variants = list(four_way_determinism_witness())
+        resumed = list(variants[-1])
+        resumed[0] += b"mutant"
+        variants[-1] = tuple(resumed)
+        return tuple(variants)
+
+    with pytest.raises(AssertionError):
+        _assert_four_way_bytes(different_resumed_bytes)
 
 
 def test_partial_result_cannot_reduce_the_declared_inventory(monkeypatch):

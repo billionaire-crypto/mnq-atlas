@@ -39,6 +39,16 @@ def _assert_exact_member_p_values(values):
     assert tuple(values) == (0.70, 0.05, 0.05, 0.05)
 
 
+def _assert_every_lattice_cell_is_ok(members):
+    statuses = tuple(member.structural_statuses for member in members)
+    assert all(len(member_statuses) == 30 for member_statuses in statuses)
+    assert all(
+        status == "ok"
+        for member_statuses in statuses
+        for status in member_statuses
+    )
+
+
 def _readonly(values, dtype=None):
     result = np.array(values, dtype=dtype, copy=True)
     result.setflags(write=False)
@@ -120,11 +130,7 @@ def _assert_complete_member_specific_science(
     assert isinstance(result, CalibrationReplicationResult)
     assert result.scientific_payload.permutations == permutation_count
     assert len(result.scientific_payload.quartet_members) == 4
-    assert all(
-        status == "ok"
-        for member in result.scientific_payload.quartet_members
-        for status in member.structural_statuses
-    )
+    _assert_every_lattice_cell_is_ok(result.scientific_payload.quartet_members)
     assert len(calls) == 4 * (permutation_count + 1)
     observed_member_outcomes = tuple(calls[:4])
     assert len(set(observed_member_outcomes)) == 4
@@ -149,6 +155,12 @@ def test_complete_scientific_quartet_runs_end_to_end_at_small_b(monkeypatch):
 def test_aliased_null_storage_fails_the_same_exact_pvalue_witness():
     with pytest.raises(AssertionError):
         _assert_exact_member_p_values((0.75, 0.05, 0.05, 0.05))
+
+
+def test_incomplete_lattice_statuses_fail_the_same_all_ok_witness():
+    incomplete = type("Incomplete", (), {"structural_statuses": ("ok",) * 29})()
+    with pytest.raises(AssertionError):
+        _assert_every_lattice_cell_is_ok((incomplete,) * 4)
 
 
 def test_unplanted_null_member_corpora_fail_the_same_end_to_end_witness(monkeypatch):

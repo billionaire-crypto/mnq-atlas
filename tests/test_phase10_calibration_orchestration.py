@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from mnq_lab import SpineError
+import mnq_lab.phase10.calibration_orchestration as orchestration_module
 from mnq_lab.phase10.adapter import FormalCorpus, FormalJoinReconciliation
 from mnq_lab.phase10.calibration_orchestration import (
     WorkerEnvironmentIdentity,
@@ -173,6 +174,45 @@ def test_unchecked_control_provenance_mutant_fails_the_same_witness():
 
     with pytest.raises(AssertionError):
         _assert_control_provenance(build_verified_outer_control, unchecked)
+
+
+def _assert_builder_invokes_provenance(builder, monkeypatch):
+    calls = []
+    real_checker = assert_calibration_control_provenance
+
+    def tracked(corpus, index, control):
+        calls.append((corpus, index, control))
+        return real_checker(corpus, index, control)
+
+    monkeypatch.setattr(
+        orchestration_module,
+        "assert_calibration_control_provenance",
+        tracked,
+    )
+    corpus = _corpus()
+    control = builder(corpus, 7)
+    assert len(calls) == 1
+    assert calls[0][0] is corpus
+    assert calls[0][1] == 7
+    assert calls[0][2] is control
+
+
+def test_outer_control_builder_executes_the_provenance_guard(monkeypatch):
+    _assert_builder_invokes_provenance(build_verified_outer_control, monkeypatch)
+
+
+def test_builder_without_provenance_call_fails_the_same_witness(monkeypatch):
+    def unchecked(corpus, index):
+        mapping = orchestration_module.generate_calibration_outer_control(corpus, index)
+        return apply_joint_mapping(
+            corpus.state_codes,
+            corpus.state_valid,
+            (corpus.outcome_valid, corpus.window_fits_rth),
+            mapping,
+        )
+
+    with pytest.raises(AssertionError):
+        _assert_builder_invokes_provenance(unchecked, monkeypatch)
 
 
 def _mapping_bytes(mapping: SessionMapping) -> tuple[bytes, ...]:

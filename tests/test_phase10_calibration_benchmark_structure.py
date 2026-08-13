@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import fields
+from pathlib import Path
+import sys
+import tracemalloc
 
 import pytest
 
 from mnq_lab.phase10.calibration_benchmark import (
+    CostPassResult,
     CostBenchmarkResult,
     _memory_pass,
     _timed_pass,
@@ -107,4 +111,85 @@ def test_scientific_result_field_mutants_fail_the_same_inventory_witness():
             inspect.getsource(_memory_pass),
             MutantResult,
             run_calibration_cost_benchmark,
+        )
+
+
+def _assert_timed_region_rejects_instrumentation(timed_pass, root: Path, hook):
+    workload_calls = []
+
+    def workload(_path, _workers):
+        workload_calls.append("called")
+        return CostPassResult(1, 1.0, 0)
+
+    prior_trace = sys.gettrace()
+    prior_profile = sys.getprofile()
+    was_tracing = tracemalloc.is_tracing()
+    try:
+        if hook == "trace":
+            sys.settrace(lambda *_args: None)
+        elif hook == "profile":
+            sys.setprofile(lambda *_args: None)
+        elif hook == "allocation":
+            if not was_tracing:
+                tracemalloc.start()
+        else:
+            raise AssertionError("undeclared instrumentation hook")
+        try:
+            timed_pass(workload, root, 1)
+        except Exception as exc:
+            assert "timed benchmark region cannot run" in str(exc)
+        else:
+            raise AssertionError("instrumented timed region was executed")
+        assert workload_calls == []
+    finally:
+        sys.settrace(prior_trace)
+        sys.setprofile(prior_profile)
+        if not was_tracing and tracemalloc.is_tracing():
+            tracemalloc.stop()
+
+
+@pytest.mark.parametrize("hook", ("trace", "profile", "allocation"))
+def test_timed_region_refuses_live_instrumentation(tmp_path, hook):
+    _assert_timed_region_rejects_instrumentation(
+        _timed_pass,
+        tmp_path / hook,
+        hook,
+    )
+
+
+def test_unguarded_timed_region_fails_the_same_live_hook_witness(tmp_path):
+    def unguarded(workload, root, workers):
+        root.mkdir(parents=True, exist_ok=True)
+        return 0.0, 0.0, workload(root, workers)
+
+    with pytest.raises(AssertionError):
+        _assert_timed_region_rejects_instrumentation(
+            unguarded,
+            tmp_path / "unguarded",
+            "allocation",
+        )
+
+
+def _assert_timed_result_type_guard(timed_pass, root: Path):
+    try:
+        timed_pass(lambda _path, _workers: object(), root, 1)
+    except Exception as exc:
+        assert "scientific or undeclared output" in str(exc)
+    else:
+        raise AssertionError("timed pass accepted an undeclared result type")
+
+
+def test_timed_pass_rejects_undeclared_scientific_results(tmp_path):
+    _assert_timed_result_type_guard(_timed_pass, tmp_path / "result-guard")
+
+
+def test_missing_timed_result_guard_fails_the_same_witness(tmp_path):
+    def unguarded(workload, root, workers):
+        root.mkdir(parents=True, exist_ok=True)
+        return 0.0, 0.0, workload(root, workers)
+
+    with pytest.raises(AssertionError):
+        _assert_timed_result_type_guard(
+            unguarded,
+            tmp_path / "missing-result-guard",
         )

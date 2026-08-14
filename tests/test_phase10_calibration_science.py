@@ -16,6 +16,7 @@ import mnq_lab.phase10.calibration_science as science_module
 from mnq_lab.phase10.adapter import FormalCorpus, FormalJoinReconciliation
 from mnq_lab.phase10.calibration_results import (
     CalibrationReplicationResult,
+    ReplicationScientificPayload,
     canonical_scientific_payload_bytes,
 )
 from mnq_lab.phase10.evaluation import evaluate_primary_surface as _real_evaluate_primary_surface
@@ -180,6 +181,72 @@ def test_complete_scientific_quartet_runs_end_to_end_at_small_b(monkeypatch):
     )
 
 
+def _assert_evidence_wrapper_seals(wrapper, monkeypatch):
+    unsealed = object()
+    sealed = object()
+    seal_calls = []
+    monkeypatch.setattr(
+        science_module,
+        "compute_unsealed_calibration_replication",
+        lambda *_args, **_kwargs: unsealed,
+    )
+    monkeypatch.setattr(
+        science_module,
+        "seal_scientific_payload",
+        lambda payload: seal_calls.append(payload) or sealed,
+    )
+    result = wrapper(None, 0, (), (), None, 19)
+    assert seal_calls == [unsealed]
+    assert result is sealed
+
+
+def test_evidence_wrapper_seals_the_inner_payload(monkeypatch):
+    _assert_evidence_wrapper_seals(
+        science_module.compute_calibration_replication,
+        monkeypatch,
+    )
+
+
+def test_unsealed_evidence_wrapper_mutant_fails_the_same_seal_witness(monkeypatch):
+    def unsealed(*args, **kwargs):
+        return science_module.compute_unsealed_calibration_replication(*args, **kwargs)
+
+    with pytest.raises(AssertionError):
+        _assert_evidence_wrapper_seals(unsealed, monkeypatch)
+
+
+def _assert_inner_layer_does_not_seal(function):
+    assert "seal_scientific_payload" not in inspect.getsource(function)
+
+
+def test_inner_scientific_layer_does_not_seal():
+    _assert_inner_layer_does_not_seal(
+        science_module.compute_unsealed_calibration_replication
+    )
+
+
+def test_sealing_inner_mutant_fails_the_same_source_witness():
+    def sealing_inner(payload):
+        return science_module.seal_scientific_payload(payload)
+
+    with pytest.raises(AssertionError):
+        _assert_inner_layer_does_not_seal(sealing_inner)
+
+
+def test_inner_scientific_layer_returns_reduced_b_payload_without_sealing():
+    corpus = _nondegenerate_fixture()
+    payload = science_module.compute_unsealed_calibration_replication(
+        corpus,
+        0,
+        ("synthetic-unsealed",),
+        (),
+        _environment(),
+        2,
+    )
+    assert isinstance(payload, ReplicationScientificPayload)
+    assert payload.permutations == 2
+
+
 def test_aliased_null_storage_fails_the_same_exact_pvalue_witness():
     with pytest.raises(AssertionError):
         _assert_exact_member_p_values((0.45, 0.05, 0.05, 0.05))
@@ -281,12 +348,14 @@ def _assert_no_quartet_pvalue_reduction(source):
 
 def test_scientific_quartet_contains_no_cross_member_pvalue_reduction():
     _assert_no_quartet_pvalue_reduction(
-        inspect.getsource(science_module.compute_calibration_replication)
+        inspect.getsource(science_module.compute_unsealed_calibration_replication)
     )
 
 
 def test_minimum_quartet_pvalue_mutant_fails_the_same_ast_witness():
-    source = inspect.getsource(science_module.compute_calibration_replication)
+    source = inspect.getsource(
+        science_module.compute_unsealed_calibration_replication
+    )
     source = source.replace(
         "    environment_hash =",
         "    minimum_p_value = min(member.p_value for member in members)\n"

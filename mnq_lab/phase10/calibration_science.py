@@ -47,15 +47,15 @@ def _member_statuses(evaluation: RawSurfaceEvaluation) -> tuple[str, ...]:
     )
 
 
-def compute_calibration_replication(
+def compute_unsealed_calibration_replication(
     corpus: FormalCorpus,
     replication_index: int,
     attempt_lineage: tuple[str, ...],
     classified_failures: tuple[str, ...],
     environment: WorkerEnvironmentIdentity,
     permutation_count: int,
-):
-    """Evaluate one complete quartet with its own verified control and ensemble."""
+) -> ReplicationScientificPayload:
+    """Evaluate one complete quartet without creating an evidence payload hash."""
     if (
         isinstance(permutation_count, bool)
         or not isinstance(permutation_count, int)
@@ -188,4 +188,25 @@ def compute_calibration_replication(
         environment_identity=environment_hash,
         worker_configuration_identity=worker_hash,
     )
-    return seal_scientific_payload(payload)
+    return payload
+
+
+def compute_calibration_replication(
+    corpus: FormalCorpus,
+    replication_index: int,
+    attempt_lineage: tuple[str, ...],
+    classified_failures: tuple[str, ...],
+    environment: WorkerEnvironmentIdentity,
+    permutation_count: int,
+):
+    """Evaluate and seal one evidence-path calibration replication."""
+    return seal_scientific_payload(
+        compute_unsealed_calibration_replication(
+            corpus,
+            replication_index,
+            attempt_lineage,
+            classified_failures,
+            environment,
+            permutation_count,
+        )
+    )

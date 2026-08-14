@@ -17,6 +17,7 @@ from mnq_lab.phase10.calibration_benchmark import (
     _timed_pass,
     run_calibration_cost_benchmark,
 )
+from tests.test_phase10_calibration_results import _payload
 
 
 ALLOWED_RESULT_FIELDS = (
@@ -170,9 +171,9 @@ def test_unguarded_timed_region_fails_the_same_live_hook_witness(tmp_path):
         )
 
 
-def _assert_timed_result_type_guard(timed_pass, root: Path):
+def _assert_timed_result_type_guard(timed_pass, root: Path, returned=object()):
     try:
-        timed_pass(lambda _path, _workers: object(), root, 1)
+        timed_pass(lambda _path, _workers: returned, root, 1)
     except Exception as exc:
         assert "scientific or undeclared output" in str(exc)
     else:
@@ -181,6 +182,14 @@ def _assert_timed_result_type_guard(timed_pass, root: Path):
 
 def test_timed_pass_rejects_undeclared_scientific_results(tmp_path):
     _assert_timed_result_type_guard(_timed_pass, tmp_path / "result-guard")
+
+
+def test_timed_pass_rejects_an_unsealed_scientific_payload(tmp_path):
+    _assert_timed_result_type_guard(
+        _timed_pass,
+        tmp_path / "unsealed-scientific-result",
+        _payload(),
+    )
 
 
 def test_missing_timed_result_guard_fails_the_same_witness(tmp_path):

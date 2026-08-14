@@ -11,7 +11,16 @@ from mnq_lab.phase10.calibration_execution import (
     CalibrationEvidenceRequest,
     execute_calibration_request,
 )
-from mnq_lab.phase10.calibration_science import compute_calibration_replication
+from mnq_lab.phase10.calibration_science import (
+    compute_calibration_replication,
+    compute_unsealed_calibration_replication,
+)
+
+
+def _science_source():
+    return inspect.getsource(
+        compute_unsealed_calibration_replication
+    ) + inspect.getsource(compute_calibration_replication)
 
 
 def _assert_execution_wiring(science_source, execution_source, request_type):
@@ -29,7 +38,7 @@ def _assert_execution_wiring(science_source, execution_source, request_type):
 
 def test_runner_wires_provenance_fresh_resume_environment_schema_and_denominator():
     _assert_execution_wiring(
-        inspect.getsource(compute_calibration_replication),
+        _science_source(),
         inspect.getsource(execute_calibration_request) + inspect.getsource(__import__(
             "mnq_lab.phase10.calibration_execution",
             fromlist=["_compute_verified"],
@@ -49,7 +58,7 @@ def test_runner_wires_provenance_fresh_resume_environment_schema_and_denominator
     ),
 )
 def test_runner_wiring_omission_mutants_fail_the_same_witness(removed):
-    science = inspect.getsource(compute_calibration_replication)
+    science = _science_source()
     module = __import__("mnq_lab.phase10.calibration_execution", fromlist=["_compute_verified"])
     execution = inspect.getsource(execute_calibration_request) + inspect.getsource(module._compute_verified)
     if removed in science:

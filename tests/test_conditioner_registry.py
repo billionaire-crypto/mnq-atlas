@@ -39,6 +39,7 @@ from mnq_lab.core.dependency import (
     LocalityReport,
     OutputComparison,
     OutputKind,
+    run_dependency_locality,
 )
 
 
@@ -586,8 +587,7 @@ def test_causal_admission_refuses_mask_widening_even_when_trace_is_erased():
     assert registry.entries() == ()
 
 
-def test_causal_admission_refuses_bounded_comparison_widening():
-    registry = ConditionerRegistry()
+def test_dependency_locality_refuses_bounded_comparison_widening():
     holder = {}
     widened = OutputComparison(OutputKind.FLOAT, atol=2.2)
 
@@ -610,67 +610,8 @@ def test_causal_admission_refuses_bounded_comparison_widening():
         comparison=OutputComparison(OutputKind.FLOAT),
     )
     holder["case"] = case
-    changed = _readonly([7, 3, 11, 13, 5, 17], np.float64)
-    witness = DeterministicWitness(
-        name="bounded_comparison_change",
-        changed_inputs={"x": changed},
-        expected_baseline=_readonly(10.0 + np.tanh(11.0), np.float64),
-        expected_changed=_readonly(15.0 + np.tanh(11.0), np.float64),
-        affected_output_index=(),
-    )
-
-    def future_read(call):
-        return np.asarray(call.values["x"][2], dtype=np.float64)
-
-    locality_control = NegativeControl(
-        name="bounded_comparison_future_read",
-        failure=NegativeControlFailure.LOCALITY_OUTPUT_CHANGE,
-        case=DependencyCase(
-            name="bounded_comparison_future_read",
-            coordinates_ns=case.coordinates_ns,
-            allowed_dependency_mask=case.allowed_dependency_mask,
-            inputs=case.inputs,
-            invoke=future_read,
-            comparison=OutputComparison(OutputKind.FLOAT),
-        ),
-    )
-
-    def allowed_sum(call):
-        values = call.values["x"]
-        return np.asarray(values[0] + values[1] + values[4], dtype=np.float64)
-
-    witness_control_case = DependencyCase(
-        name="bounded_comparison_wrong_witness",
-        coordinates_ns=case.coordinates_ns,
-        allowed_dependency_mask=case.allowed_dependency_mask,
-        inputs=case.inputs,
-        invoke=allowed_sum,
-        comparison=OutputComparison(OutputKind.FLOAT),
-    )
-    witness_control = NegativeControl(
-        name="bounded_comparison_wrong_witness",
-        failure=NegativeControlFailure.WITNESS_CHANGED_OUTPUT,
-        case=witness_control_case,
-        witness=DeterministicWitness(
-            name="bounded_comparison_wrong_witness",
-            changed_inputs={"x": changed},
-            expected_baseline=_readonly(10.0, np.float64),
-            expected_changed=_readonly(14.0, np.float64),
-            affected_output_index=(),
-        ),
-    )
-
     with pytest.raises(SpineError, match="comparison"):
-        register_causal_conditioner(
-            registry,
-            "synthetic.causal.bounded_comparison_widening",
-            bounded_future_read,
-            metadata={"purpose": "bounded comparison attack"},
-            locality_cases=(case,),
-            witness_checks=(WitnessCheck(case, witness),),
-            negative_controls=(locality_control, witness_control),
-        )
-    assert registry.entries() == ()
+        run_dependency_locality(case)
 
 
 def test_causal_admission_refuses_witness_input_mapping_content_rewrite():

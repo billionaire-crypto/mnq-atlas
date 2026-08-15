@@ -2076,3 +2076,120 @@ not depend on either timing measurement and remain unchanged.
 memory planning statements. It changes no code, checkpoint identity, scientific
 rule or production artifact. It does not authorize production or declare
 readiness. **Status:** `RESOLVED`.
+
+---
+
+## D38. D18 admission-gate remediation and calendar/provenance audit record
+
+**Audit scope and unchanged scientific result.** An independent re-audit
+executed 47 admission-gate attacks. The D18 D-1 exception-prose correction and
+D-2 unvalidated-causal-insertion correction were independently confirmed
+sound; neither was broken. The data spine, contract roll, session calendar,
+anchor grid and baseline half of every contrast also passed. No bar, calendar
+classification, anchor, contrast baseline, published number or scientific
+finding changes as a result of this entry. Phase 7, Phase 8 and the Phase 10
+calibration were not rerun.
+
+**F-1 (CRITICAL) — mutable dependency declaration and read-after-invoke.** At
+the audited base commit `28d6bcc`, all six frozen dataclasses in
+`mnq_lab/core/dependency.py:109,207,215,245,257,299` lacked slots. In
+particular, `DependencyCase` at `dependency.py:215` and
+`DeterministicWitness` at `dependency.py:257` retained writable instance
+`__dict__` mappings despite `frozen=True`. In addition,
+`run_dependency_locality` invoked caller code before reading the allowed mask
+at `dependency.py:589-590`. A callable reading `x[0] + x[2]` therefore widened
+its own declaration so index 2 appeared in-window during the suite, collapsed
+the probes from two forbidden regions of sizes `(2, 1)` to one of size `(1,)`,
+and was admitted as confirmation-eligible with one locality case, one witness
+and two negative controls. The untampered control was correctly rejected, and
+direct numpy-array mutation was already refused; the writable `__dict__` swap
+was the open route.
+
+**F-1 correction.** All six dependency dataclasses now use
+`@dataclass(frozen=True, slots=True)` (`dependency.py:109,207,215,245,257,299`).
+`run_dependency_locality` snapshots `allowed_dependency_mask`, `inputs` and
+`invoke` before the first invocation (`dependency.py:633-655`), probes only the
+snapshotted mask and inputs, calls only the snapshotted callable, and reasserts
+all three identities after every callable invocation
+(`dependency.py:399-442`). Any identity change raises `SpineError`; it cannot
+produce admission evidence. Separate negative tests cover persistent
+mask-widening, trace-erasing mask restoration, and the absence of writable
+instance dictionaries on both mandatory declaration types.
+
+**F-2 (MEDIUM) — validation/execution callable TOCTOU.** At `28d6bcc`,
+`mnq_lab/conditioners/registry.py:402` established that each declared locality
+case invoked the registered conditioner, but the execution loops at
+`registry.py:308-313` later reread mutable case fields. During case 1, a caller
+could replace case 2's `invoke`, causing evidence to be recorded for a callable
+that never ran. Execution now reasserts exact registered-conditioner identity
+immediately before every locality case and witness, and reasserts each negative
+control's pre-suite callable snapshot immediately before that control runs
+(`registry.py:315-343`). Cross-case swaps targeting all three loops are refused
+atomically.
+
+**F-3/F-4 threat-model decision — reachable deliberate same-process abuse.**
+F-3 remains mechanically reachable: the plain storage dictionary declared at
+`registry.py:220-225,231` in `28d6bcc` can be reached as
+`registry._ConditionerRegistry__entries`, and direct insertion can forge an
+eligible descriptor with zero cases, witnesses and controls, including from
+inside a running suite. F-4 also remains mechanically reachable at the audited
+`registry.py:175-214`: `object.__setattr__` can rewrite a stored descriptor,
+and `gc.get_referents` can expose and mutate the backing dictionary of nested
+`MappingProxyType` metadata. Ordinary `setattr`, `dataclasses.replace`, pickle,
+deepcopy and direct mapping-proxy writes remain blocked.
+
+The decision is explicit: deliberate same-process private-attribute access,
+`object.__setattr__` and garbage-collector referent extraction are outside the
+admission registry's enforceable threat model. Python name mangling and frozen
+dataclasses are ordinary API controls, not security boundaries. The supported
+API and in-suite execution paths are the enforcement boundary, now stated in
+`registry.py:176-230`. This narrows D18 D-2's rationale: its operative result
+under the eleven ordinary insertion attacks remains sound, but the statement
+that name mangling itself prevents private-storage access is not a stronger
+security claim.
+
+**C-1 (LOW) — stale protected provenance pins.** Two of the eight protected
+hashes at `docs/PHASE7_CALENDAR_INPUT.md:43-50` no longer resolve.
+`docs/DISCREPANCIES.md` grew from 49,015 to 115,515 bytes before this append,
+and the calendar-input test changed at commits `39685e7` and `fe1476c`. The live
+pin `governance.discrepancies_sha256_after_d19` at
+`cme_equity_index_sessions_20190506_20230329_v1.manifest.json:74` is therefore
+dead inside an immutable artifact. The artifact is recorded as-is and is not
+edited. This is a provenance defect only and affects no computed result.
+
+**C-2 (LOW) — Independence Day extension boundary.** The pinned rule
+`USIndependenceDayBefore2022PreviousDay` means this calendar version models no
+July 3 12:15 CT early close from 2022 onward. CME equity index products did
+close at 12:15 CT on 2023-07-03. That date lies outside the governed
+2019-05-06 through 2023-03-29 range, so present impact is zero. Extending this
+calendar version beyond 2023-03-29 without reviewing the rule would introduce
+a real calendar error.
+
+**C-3 (LOW) — undisclosed session-start anomaly.** D19's battery tested session
+ends only. Testing starts finds exactly one formal-population session that does
+not open at 17:00 CT: session 20200701 opens at 19:00 CT on 2020-06-30 and has
+249 bars, with 24 missing at the head. It is the tail of the same outage that
+truncated session 20200630, is included in the 900-session formal population,
+and has no anomaly flag. Its complete 78-of-78 RTH anchor grid is unaffected
+because the gap lies wholly outside `[08:30,15:00)`.
+
+**C-5 (LOW) — undocumented structural pause change.** The 15:15-15:30 CT daily
+pause exists through 2021-06-25: 536 sessions have 273 bars. It is absent from
+2021-06-28 onward: 440 sessions have 276 bars. The change is outside RTH and
+has no anchor effect.
+
+**C-6 (LOW) — two correct granularities stated without reconciliation.**
+`docs/PHASE7_CALENDAR_CORROBORATION.md:56,58` reports 09:59 and 09:11 for the
+two truncated sessions, while D19 reports 10:00 and 09:15. The first pair is at
+one-minute granularity and the second at five-minute granularity; both are
+correct, but the two project records had not explained the difference. No
+computed result is affected.
+
+**Ruling and status.** D18 remains open. The F-1 and F-2 corrections are
+implemented, but they return for a focused independent admission-gate re-audit
+and are not self-ratified here. F-3/F-4 are recorded limitations under the
+explicit same-process threat boundary. C-1, C-2, C-3, C-5 and C-6 are LOW
+calendar/provenance disclosures with zero effect on a computed result. Stage E
+remains blocked, and this entry does not authorize any new phase checkpoint or
+production work. **Status:** `OPEN; CORRECTED PENDING FOCUSED INDEPENDENT
+RE-AUDIT`.

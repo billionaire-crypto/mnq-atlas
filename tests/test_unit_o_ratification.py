@@ -805,10 +805,15 @@ V2_DIRECT_PIN_RUN_COMMIT_AUDIT_ENTRY = (
     / "mnq_lab/ledger/audit_entries"
     / "2026-08-12-phase7-unit-o-session-aware-v2-run-commit-direct-pin-restoration.json"
 )
-V2_RUN_COMMIT_AUDIT_ENTRY = (
+V2_PREDECESSOR_RUN_COMMIT_AUDIT_ENTRY = (
     REPO_ROOT
     / "mnq_lab/ledger/audit_entries"
     / "2026-08-13-phase7-unit-o-session-aware-v2-run-commit-predecessor-pin-restoration.json"
+)
+V2_RUN_COMMIT_AUDIT_ENTRY = (
+    REPO_ROOT
+    / "mnq_lab/ledger/audit_entries"
+    / "2026-08-14-phase7-unit-o-session-aware-v2-d38-evidence-pin-amendment.json"
 )
 
 
@@ -841,7 +846,7 @@ def test_v2_audit_entry_records_the_audited_commit_tree_and_closed_verdict():
 
 def _v2_run_commit_audit_entry() -> dict:
     return _v2_entry(
-        "2026-08-13-phase7-unit-o-session-aware-v2-run-commit-predecessor-pin-restoration"
+        "2026-08-14-phase7-unit-o-session-aware-v2-d38-evidence-pin-amendment"
     )
 
 
@@ -927,13 +932,13 @@ def _assert_evidence_superset(effective: dict, prior: dict) -> None:
 
 def test_v2_audit_entry_evidence_hashes_match_the_repository_bytes():
     """Every in-repository evidence hash is re-read, not trusted."""
-    entry = _v2_audit_entry()
+    entry = _v2_run_commit_audit_entry()
     assert _mismatched_evidence(entry) == []
 
 
 def test_negative_case_a_tampered_evidence_hash_is_detected():
     """Proves the check above can fail: flip one digit and it must be caught."""
-    entry = copy.deepcopy(_v2_audit_entry())
+    entry = copy.deepcopy(_v2_run_commit_audit_entry())
     relative = "docs/DISCREPANCIES.md"
     original = entry["evidence_hashes"][relative]
     entry["evidence_hashes"][relative] = (
@@ -960,6 +965,9 @@ def test_v2_evidence_pin_restorations_bind_the_immutable_prior_entries():
     direct_pin_run = _v2_entry(
         "2026-08-12-phase7-unit-o-session-aware-v2-run-commit-direct-pin-restoration"
     )
+    predecessor_run = _v2_entry(
+        "2026-08-13-phase7-unit-o-session-aware-v2-run-commit-predecessor-pin-restoration"
+    )
     prior_closeout = V2_PRIOR_AUDIT_ENTRY.relative_to(REPO_ROOT).as_posix()
     prior_run = V2_PRIOR_RUN_COMMIT_AUDIT_ENTRY.relative_to(REPO_ROOT).as_posix()
     amended_closeout_path = V2_AMENDED_AUDIT_ENTRY.relative_to(REPO_ROOT).as_posix()
@@ -971,6 +979,9 @@ def test_v2_evidence_pin_restorations_bind_the_immutable_prior_entries():
         REPO_ROOT
     ).as_posix()
     direct_pin_run_path = V2_DIRECT_PIN_RUN_COMMIT_AUDIT_ENTRY.relative_to(
+        REPO_ROOT
+    ).as_posix()
+    predecessor_run_path = V2_PREDECESSOR_RUN_COMMIT_AUDIT_ENTRY.relative_to(
         REPO_ROOT
     ).as_posix()
 
@@ -992,12 +1003,14 @@ def test_v2_evidence_pin_restorations_bind_the_immutable_prior_entries():
     assert run_commit["evidence_hashes"][restored_closeout_path] == hashlib.sha256(
         V2_AUDIT_ENTRY.read_bytes()
     ).hexdigest()
-    assert set(run_commit["evidence_hashes"]) == (
-        set(direct_pin_run["evidence_hashes"])
-        | {restored_run_path, direct_pin_run_path}
-    )
+    assert set(run_commit["evidence_hashes"]) == set(
+        predecessor_run["evidence_hashes"]
+    ) | {predecessor_run_path}
     for relative, digest in direct_pin_run["evidence_hashes"].items():
-        assert run_commit["evidence_hashes"][relative] == digest
+        if relative == "docs/DISCREPANCIES.md":
+            assert run_commit["evidence_hashes"][relative] != digest
+        else:
+            assert run_commit["evidence_hashes"][relative] == digest
     assert run_commit["evidence_hashes"][prior_closeout] == hashlib.sha256(
         V2_PRIOR_AUDIT_ENTRY.read_bytes()
     ).hexdigest()
@@ -1007,15 +1020,18 @@ def test_v2_evidence_pin_restorations_bind_the_immutable_prior_entries():
     assert run_commit["evidence_hashes"][direct_pin_run_path] == hashlib.sha256(
         V2_DIRECT_PIN_RUN_COMMIT_AUDIT_ENTRY.read_bytes()
     ).hexdigest()
+    assert run_commit["evidence_hashes"][predecessor_run_path] == hashlib.sha256(
+        V2_PREDECESSOR_RUN_COMMIT_AUDIT_ENTRY.read_bytes()
+    ).hexdigest()
 
     # Negative witness: a schema-valid restoration with a corrupted prior-entry
     # pin is detected by repository-byte re-reading.
-    altered = copy.deepcopy(closeout)
-    original = altered["evidence_hashes"][amended_closeout_path]
-    altered["evidence_hashes"][amended_closeout_path] = (
+    altered = copy.deepcopy(run_commit)
+    original = altered["evidence_hashes"][predecessor_run_path]
+    altered["evidence_hashes"][predecessor_run_path] = (
         "0" if original[0] != "0" else "1"
     ) + original[1:]
-    assert _mismatched_evidence(altered) == [amended_closeout_path]
+    assert _mismatched_evidence(altered) == [predecessor_run_path]
     ratification._validate_audit_entry(altered)
 
 
@@ -1039,6 +1055,9 @@ def test_v2_restorations_prevent_undocumented_evidence_withdrawal(monkeypatch):
     direct_pin_run = _v2_entry(
         "2026-08-12-phase7-unit-o-session-aware-v2-run-commit-direct-pin-restoration"
     )
+    predecessor_run = _v2_entry(
+        "2026-08-13-phase7-unit-o-session-aware-v2-run-commit-predecessor-pin-restoration"
+    )
     effective_run = _v2_run_commit_audit_entry()
 
     # Historical negative controls: this guard catches the undisclosed shrinkage
@@ -1054,14 +1073,15 @@ def test_v2_restorations_prevent_undocumented_evidence_withdrawal(monkeypatch):
     _assert_evidence_superset(restored_closeout, amended_closeout)
     _assert_evidence_superset(restored_run, amended_run)
     _assert_evidence_superset(direct_pin_run, restored_run)
-    _assert_evidence_superset(effective_run, direct_pin_run)
+    _assert_evidence_superset(predecessor_run, direct_pin_run)
+    _assert_evidence_superset(effective_run, predecessor_run)
     _assert_evidence_superset(restored_closeout, prior_closeout)
     _assert_evidence_superset(effective_run, prior_run)
 
     assert len(restored_closeout["evidence_hashes"]) == 18
     assert len(restored_run["evidence_hashes"]) == 20
     assert len(direct_pin_run["evidence_hashes"]) == 21
-    assert len(effective_run["evidence_hashes"]) == 23
+    assert len(effective_run["evidence_hashes"]) == 24
 
     # Negative witness: deleting one restored receipt pin remains schema-valid,
     # and only the evidence-set rule identifies and names the withdrawal.
@@ -1209,6 +1229,7 @@ def test_repository_unit_o_audit_and_certificate_validate_exact_completed_tree()
         "2026-08-11-phase7-unit-o-session-aware-v2-run-commit-evidence-pin-restoration",
         "2026-08-12-phase7-unit-o-session-aware-v2-run-commit-direct-pin-restoration",
         "2026-08-13-phase7-unit-o-session-aware-v2-run-commit-predecessor-pin-restoration",
+        "2026-08-14-phase7-unit-o-session-aware-v2-d38-evidence-pin-amendment",
     ]
     result = evaluate_ratification_certificate(
         certificate_path, repo_root=REPO_ROOT

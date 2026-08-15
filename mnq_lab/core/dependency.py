@@ -106,7 +106,7 @@ def _finite_nonnegative_tolerance(value: Any, name: str) -> float:
     return result
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class OutputComparison:
     """Immutable exact or floating output-comparison policy."""
 
@@ -204,7 +204,7 @@ def _validate_inputs(value: Any, size: int) -> Mapping[str, np.ndarray]:
     return MappingProxyType(validated)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class DependencyInputs:
     """Fresh immutable invocation inputs supplied to the callable."""
 
@@ -212,7 +212,7 @@ class DependencyInputs:
     values: Mapping[str, np.ndarray]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class DependencyCase:
     """One declared dependency window for one explicitly invoked output."""
 
@@ -242,7 +242,7 @@ class DependencyCase:
         object.__setattr__(self, "inputs", inputs)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class LocalityReport:
     """Diagnostic facts from one executed locality run; never admission proof."""
 
@@ -254,7 +254,7 @@ class LocalityReport:
     test_seed: int = _TEST_SEED
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class DeterministicWitness:
     """Hand-built in-window change with independently written expectations."""
 
@@ -296,7 +296,7 @@ class DeterministicWitness:
         )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class WitnessReport:
     """Diagnostic facts from one executed witness; never admission proof."""
 
@@ -383,27 +383,56 @@ def _compare_outputs(
 
 
 def _fresh_invocation(
-    case: DependencyCase, values: Mapping[str, np.ndarray]
+    case: DependencyCase,
+    declared_inputs: Mapping[str, np.ndarray],
+    values: Mapping[str, np.ndarray],
 ) -> DependencyInputs:
     coordinates = _immutable_copy(case.coordinates_ns)
     fresh_values = {
-        name: _immutable_copy(np.asarray(values[name])) for name in case.inputs
+        name: _immutable_copy(np.asarray(values[name])) for name in declared_inputs
     }
     return DependencyInputs(coordinates, MappingProxyType(fresh_values))
 
 
+def _assert_case_execution_snapshot(
+    case: DependencyCase,
+    allowed_dependency_mask: np.ndarray,
+    declared_inputs: Mapping[str, np.ndarray],
+    invoke: Callable[[DependencyInputs], Any],
+) -> None:
+    snapshots = (
+        ("allowed_dependency_mask", allowed_dependency_mask),
+        ("inputs", declared_inputs),
+        ("invoke", invoke),
+    )
+    for field, expected in snapshots:
+        if getattr(case, field) is not expected:
+            raise SpineError(
+                f"case {case.name!r} changed snapshotted field {field!r} "
+                "during dependency execution"
+            )
+
+
 def _invoke_once(
-    case: DependencyCase, values: Mapping[str, np.ndarray], context: str
+    case: DependencyCase,
+    allowed_dependency_mask: np.ndarray,
+    declared_inputs: Mapping[str, np.ndarray],
+    invoke: Callable[[DependencyInputs], Any],
+    values: Mapping[str, np.ndarray],
+    context: str,
 ) -> np.ndarray:
-    call = _fresh_invocation(case, values)
+    call = _fresh_invocation(case, declared_inputs, values)
     coordinate_snapshot = call.coordinates_ns.tobytes(order="C")
     value_snapshots = {
         name: array.tobytes(order="C") for name, array in call.values.items()
     }
     try:
-        raw_output = case.invoke(call)
+        raw_output = invoke(call)
     except Exception as exc:
         raise SpineError(f"case {case.name!r} callable raised: {exc}") from exc
+    _assert_case_execution_snapshot(
+        case, allowed_dependency_mask, declared_inputs, invoke
+    )
     if call.coordinates_ns.tobytes(order="C") != coordinate_snapshot:
         raise SpineError(f"case {case.name!r} callable mutated coordinates_ns")
     for name, array in call.values.items():
@@ -413,10 +442,29 @@ def _invoke_once(
 
 
 def _invoke_stably(
-    case: DependencyCase, values: Mapping[str, np.ndarray], context: str
+    case: DependencyCase,
+    allowed_dependency_mask: np.ndarray,
+    declared_inputs: Mapping[str, np.ndarray],
+    invoke: Callable[[DependencyInputs], Any],
+    values: Mapping[str, np.ndarray],
+    context: str,
 ) -> np.ndarray:
-    first = _invoke_once(case, values, context)
-    second = _invoke_once(case, values, context)
+    first = _invoke_once(
+        case,
+        allowed_dependency_mask,
+        declared_inputs,
+        invoke,
+        values,
+        context,
+    )
+    second = _invoke_once(
+        case,
+        allowed_dependency_mask,
+        declared_inputs,
+        invoke,
+        values,
+        context,
+    )
     if not _bit_identical(first, second):
         raise SpineError(
             f"case {case.name!r} produced nondeterministic output on "
@@ -474,12 +522,15 @@ def _element_changed(left: np.generic, right: np.generic) -> bool:
 
 
 def _mutated_region_input(
-    case: DependencyCase,
+    declared_inputs: Mapping[str, np.ndarray],
     region: np.ndarray,
     input_name: str,
     rng: np.random.Generator,
 ) -> tuple[dict[str, np.ndarray], int]:
-    mutated = {name: np.array(array, copy=True) for name, array in case.inputs.items()}
+    mutated = {
+        name: np.array(array, copy=True)
+        for name, array in declared_inputs.items()
+    }
     array = mutated[input_name]
     baseline = np.array(array, copy=True)
     changed = 0
@@ -528,13 +579,14 @@ def _landmark_targets(dtype: np.dtype) -> tuple[tuple[str, np.generic], ...]:
 
 
 def _landmark_region_input(
-    case: DependencyCase,
+    declared_inputs: Mapping[str, np.ndarray],
     region: np.ndarray,
     input_name: str,
     target: np.generic,
 ) -> tuple[dict[str, np.ndarray], int] | None:
     mutated = {
-        name: np.array(array, copy=True) for name, array in case.inputs.items()
+        name: np.array(array, copy=True)
+        for name, array in declared_inputs.items()
     }
     array = mutated[input_name]
     baseline = np.array(array, copy=True)
@@ -552,19 +604,21 @@ def _landmark_region_input(
 
 
 def _region_mutation_trials(
-    case: DependencyCase,
+    declared_inputs: Mapping[str, np.ndarray],
     region: np.ndarray,
     input_name: str,
     rng: np.random.Generator,
 ) -> tuple[tuple[str, dict[str, np.ndarray], int], ...]:
     random_mutated, random_changed = _mutated_region_input(
-        case, region, input_name, rng
+        declared_inputs, region, input_name, rng
     )
     trials = [("pcg64", random_mutated, random_changed)]
     seen = {random_mutated[input_name].tobytes(order="C")}
-    dtype = case.inputs[input_name].dtype
+    dtype = declared_inputs[input_name].dtype
     for name, target in _landmark_targets(dtype):
-        result = _landmark_region_input(case, region, input_name, target)
+        result = _landmark_region_input(
+            declared_inputs, region, input_name, target
+        )
         if result is None:
             continue
         mutated, changed = result
@@ -586,8 +640,18 @@ def run_dependency_locality(case: DependencyCase) -> LocalityReport:
 
     if not isinstance(case, DependencyCase):
         raise SpineError("case must be a DependencyCase")
-    baseline = _invoke_stably(case, case.inputs, "baseline")
-    regions = _forbidden_regions(case.allowed_dependency_mask)
+    allowed_dependency_mask = case.allowed_dependency_mask
+    declared_inputs = case.inputs
+    invoke = case.invoke
+    baseline = _invoke_stably(
+        case,
+        allowed_dependency_mask,
+        declared_inputs,
+        invoke,
+        declared_inputs,
+        "baseline",
+    )
+    regions = _forbidden_regions(allowed_dependency_mask)
     if not regions:
         raise SpineError("dependency case has no out-of-window region")
 
@@ -597,14 +661,23 @@ def run_dependency_locality(case: DependencyCase) -> LocalityReport:
     trial_count = 0
     for region_index, region in enumerate(regions):
         region_changed = 0
-        for input_name in case.inputs:
-            trials = _region_mutation_trials(case, region, input_name, rng)
+        for input_name in declared_inputs:
+            trials = _region_mutation_trials(
+                declared_inputs, region, input_name, rng
+            )
             for probe_name, mutated, changed in trials:
                 context = (
                     f"out-of-window region {region_index} input {input_name!r} "
                     f"probe {probe_name!r}"
                 )
-                output = _invoke_stably(case, mutated, context)
+                output = _invoke_stably(
+                    case,
+                    allowed_dependency_mask,
+                    declared_inputs,
+                    invoke,
+                    mutated,
+                    context,
+                )
                 try:
                     _compare_outputs(
                         output,
@@ -768,12 +841,29 @@ def run_deterministic_witness(
     if not isinstance(witness.name, str) or not witness.name:
         raise SpineError("witness name must be a non-empty string")
 
+    allowed_dependency_mask = case.allowed_dependency_mask
+    declared_inputs = case.inputs
+    invoke = case.invoke
     changed_inputs, changed_count = _validated_witness_inputs(case, witness)
     expected_baseline, expected_changed, index = _validated_witness_expectations(
         case, witness
     )
-    baseline_output = _invoke_stably(case, case.inputs, "witness baseline")
-    changed_output = _invoke_stably(case, changed_inputs, "witness changed")
+    baseline_output = _invoke_stably(
+        case,
+        allowed_dependency_mask,
+        declared_inputs,
+        invoke,
+        declared_inputs,
+        "witness baseline",
+    )
+    changed_output = _invoke_stably(
+        case,
+        allowed_dependency_mask,
+        declared_inputs,
+        invoke,
+        changed_inputs,
+        "witness changed",
+    )
     _compare_outputs(
         baseline_output,
         expected_baseline,

@@ -501,6 +501,90 @@ def test_failed_locality_case_leaves_registry_unchanged():
     assert registry.entries() == ()
 
 
+def _f1_mask_widening_attack_suite(*, restore_honest_mask):
+    holder = {}
+    honest_mask = _readonly(
+        [True, True, False, False, True, False], np.bool_
+    )
+    widened_mask = _readonly(
+        [True, True, True, True, True, False], np.bool_
+    )
+
+    def widens_own_window(call):
+        holder["case"].__dict__["allowed_dependency_mask"] = widened_mask
+        return np.asarray(
+            call.values["x"][0] + call.values["x"][2], dtype=np.int64
+        )
+
+    primary = _case(widens_own_window, name="self_widening_window")
+    holder["case"] = primary
+    witness = DeterministicWitness(
+        name="self_widening_change",
+        changed_inputs={
+            "x": _readonly([7, 3, 11, 13, 5, 17], np.int64)
+        },
+        expected_baseline=_readonly(13, np.int64),
+        expected_changed=_readonly(18, np.int64),
+        affected_output_index=(),
+    )
+
+    def locality_negative(call):
+        if restore_honest_mask:
+            holder["case"].__dict__["allowed_dependency_mask"] = honest_mask
+        return np.asarray(call.values["x"][2], dtype=np.int64)
+
+    locality_control = NegativeControl(
+        name="planted_future_read",
+        failure=NegativeControlFailure.LOCALITY_OUTPUT_CHANGE,
+        case=_case(locality_negative, name="planted_future_read"),
+    )
+    independent = _case(_synthetic_sum, name="independent_witness_control")
+    witness_control = NegativeControl(
+        name="planted_wrong_expected_change",
+        failure=NegativeControlFailure.WITNESS_CHANGED_OUTPUT,
+        case=independent,
+        witness=_witness(
+            expected_changed=14, name="planted_wrong_expected_change"
+        ),
+    )
+    return primary, witness, (locality_control, witness_control), honest_mask
+
+
+def test_causal_admission_refuses_mid_suite_dependency_mask_widening():
+    registry = ConditionerRegistry()
+    case, witness, controls, _ = _f1_mask_widening_attack_suite(
+        restore_honest_mask=False
+    )
+
+    with pytest.raises(SpineError):
+        _register_causal(
+            registry,
+            case.invoke,
+            locality_cases=(case,),
+            witness_checks=(WitnessCheck(case, witness),),
+            negative_controls=controls,
+        )
+    assert registry.entries() == ()
+
+
+def test_causal_admission_refuses_mask_widening_even_when_trace_is_erased():
+    registry = ConditionerRegistry()
+    case, witness, controls, honest_mask = _f1_mask_widening_attack_suite(
+        restore_honest_mask=True
+    )
+
+    with pytest.raises(SpineError):
+        _register_causal(
+            registry,
+            case.invoke,
+            locality_cases=(case,),
+            witness_checks=(WitnessCheck(case, witness),),
+            negative_controls=controls,
+        )
+    assert np.array_equal(case.allowed_dependency_mask, honest_mask)
+    assert registry.entries() == ()
+
+
 def test_failed_witness_leaves_registry_unchanged():
     registry = ConditionerRegistry()
 

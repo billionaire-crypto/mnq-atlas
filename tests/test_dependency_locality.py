@@ -441,6 +441,24 @@ def _witness(
     )
 
 
+def test_dependency_case_has_no_writable_instance_dict():
+    case = _case(lambda call: np.asarray(call.values["x"][0], dtype=np.int64))
+
+    with pytest.raises(AttributeError):
+        case.__dict__["invoke"] = lambda call: np.asarray(0, dtype=np.int64)
+
+
+def test_deterministic_witness_has_no_writable_instance_dict():
+    witness = _witness(
+        {"x": _readonly([7, 3, 11, 13, 5, 17], np.int64)},
+        _readonly(10, np.int64),
+        _readonly(15, np.int64),
+    )
+
+    with pytest.raises(AttributeError):
+        witness.__dict__["expected_changed"] = _readonly(10, np.int64)
+
+
 def test_integer_witness_asserts_independent_baseline_and_changed_responses():
     allowed = np.asarray([True, True, False, False, True, False])
     case = _case(

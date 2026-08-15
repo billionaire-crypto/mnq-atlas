@@ -1,4 +1,4 @@
-"""Market-free dependency declarations and adversarial locality checks.
+"""Market-free dependency declarations and failure-seeking locality checks.
 
 Phase 6 supplies empirical admission infrastructure, not proof of causality.
 Membership is declared by immutable event-time coordinates plus an immutable
@@ -15,7 +15,7 @@ minimally sufficient window remains a Phase 7 obligation.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, is_dataclass
 from enum import Enum
 from numbers import Real
 from types import MappingProxyType
@@ -42,6 +42,48 @@ __all__ = [
 
 _TEST_SEED = 0
 _VALUE_DTYPE_KINDS = frozenset("biuf")
+
+
+def _snapshot_declaration_content(value: Any) -> Any:
+    """Return an immutable structural snapshot of declaration content."""
+
+    if isinstance(value, np.ndarray):
+        return (
+            "ndarray",
+            value.dtype.str,
+            value.shape,
+            value.tobytes(order="C"),
+        )
+    if isinstance(value, Mapping):
+        return (
+            "mapping",
+            frozenset(
+                (key, _snapshot_declaration_content(item))
+                for key, item in value.items()
+            ),
+        )
+    if isinstance(value, tuple):
+        return (
+            "tuple",
+            tuple(_snapshot_declaration_content(item) for item in value),
+        )
+    if is_dataclass(value) and not isinstance(value, type):
+        return (
+            "dataclass",
+            type(value),
+            tuple(
+                (
+                    field.name,
+                    _snapshot_declaration_content(
+                        getattr(value, field.name)
+                    ),
+                )
+                for field in fields(value)
+            ),
+        )
+    if value is None or isinstance(value, (bool, int, float, str, Enum)):
+        return ("value", type(value), value)
+    return ("identity", type(value), id(value))
 
 
 class OutputKind(Enum):
@@ -251,9 +293,18 @@ class _DependencyCaseSnapshot(NamedTuple):
     inputs: Mapping[str, np.ndarray]
     invoke: Callable[[DependencyInputs], Any]
     comparison: OutputComparison
+    field_contents: tuple[tuple[str, Any], ...]
 
 
 def _snapshot_dependency_case(case: DependencyCase) -> _DependencyCaseSnapshot:
+    executable_fields = (
+        "name",
+        "coordinates_ns",
+        "allowed_dependency_mask",
+        "inputs",
+        "invoke",
+        "comparison",
+    )
     return _DependencyCaseSnapshot(
         name=case.name,
         coordinates_ns=case.coordinates_ns,
@@ -261,6 +312,13 @@ def _snapshot_dependency_case(case: DependencyCase) -> _DependencyCaseSnapshot:
         inputs=case.inputs,
         invoke=case.invoke,
         comparison=case.comparison,
+        field_contents=tuple(
+            (
+                field,
+                _snapshot_declaration_content(getattr(case, field)),
+            )
+            for field in executable_fields
+        ),
     )
 
 
@@ -419,11 +477,21 @@ def _assert_case_execution_snapshot(
     case: DependencyCase,
     snapshot: _DependencyCaseSnapshot,
 ) -> None:
-    for field, expected in zip(snapshot._fields, snapshot, strict=True):
+    for field in snapshot._fields[:-1]:
+        expected = getattr(snapshot, field)
         if getattr(case, field) is not expected:
             raise SpineError(
                 f"case {snapshot.name!r} changed snapshotted field {field!r} "
                 "during dependency execution"
+            )
+    for field, expected_content in snapshot.field_contents:
+        if (
+            _snapshot_declaration_content(getattr(case, field))
+            != expected_content
+        ):
+            raise SpineError(
+                f"case {snapshot.name!r} changed snapshotted field {field!r} "
+                "content during dependency execution"
             )
 
 

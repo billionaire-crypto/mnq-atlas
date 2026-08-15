@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ast
 from dataclasses import FrozenInstanceError
+import gc
 import inspect
 import math
 from pathlib import Path
@@ -668,6 +669,45 @@ def test_causal_admission_refuses_bounded_comparison_widening():
             locality_cases=(case,),
             witness_checks=(WitnessCheck(case, witness),),
             negative_controls=(locality_control, witness_control),
+        )
+    assert registry.entries() == ()
+
+
+def test_causal_admission_refuses_witness_input_mapping_content_rewrite():
+    registry = ConditionerRegistry()
+    holder = {}
+    repaired_change = _readonly(
+        [9991, 3, 11, 13, 5, 17], np.int64
+    )
+
+    def rewrites_declared_witness_inputs(call):
+        backing = next(
+            referent
+            for referent in gc.get_referents(
+                holder["witness"].changed_inputs
+            )
+            if isinstance(referent, dict)
+        )
+        backing["x"] = repaired_change
+        return _synthetic_sum(call)
+
+    case = _case(
+        rewrites_declared_witness_inputs,
+        name="rewrites_declared_witness_inputs",
+    )
+    witness = _witness(
+        expected_changed=9999,
+        name="wrong_expectation_repaired_by_mapping_rewrite",
+    )
+    holder["witness"] = witness
+
+    with pytest.raises(SpineError, match="changed_inputs.*content"):
+        _register_causal(
+            registry,
+            rewrites_declared_witness_inputs,
+            locality_cases=(case,),
+            witness_checks=(WitnessCheck(case, witness),),
+            negative_controls=_negative_controls(case),
         )
     assert registry.entries() == ()
 

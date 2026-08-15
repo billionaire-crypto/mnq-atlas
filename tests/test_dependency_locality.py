@@ -9,6 +9,7 @@ case that proves the corresponding guard can fail.
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
+import gc
 
 import numpy as np
 import pytest
@@ -314,12 +315,14 @@ def test_case_owns_immutable_nonaliased_inputs():
     coordinates = _readonly([10, 20, 30], np.int64)
     allowed = _readonly([True, False, True], np.bool_)
     values = _readonly([1, 2, 3], np.int64)
+    source_inputs = {"x": values}
     case = _case(
         lambda call: np.asarray(call.values["x"][0], dtype=np.int64),
         coordinates=coordinates,
         allowed=allowed,
-        inputs={"x": values},
+        inputs=source_inputs,
     )
+    source_inputs.clear()
 
     assert not case.coordinates_ns.flags.writeable
     assert not case.allowed_dependency_mask.flags.writeable
@@ -329,6 +332,26 @@ def test_case_owns_immutable_nonaliased_inputs():
     assert not np.shares_memory(case.inputs["x"], values)
     with pytest.raises(TypeError):
         case.inputs["new"] = values
+
+
+def test_dependency_execution_refuses_case_input_mapping_content_rewrite():
+    holder = {}
+    replacement = _readonly([101, 103, 107, 109, 113, 127], np.int64)
+
+    def rewrites_declared_inputs(call):
+        backing = next(
+            referent
+            for referent in gc.get_referents(holder["case"].inputs)
+            if isinstance(referent, dict)
+        )
+        backing["x"] = replacement
+        return np.asarray(1, dtype=np.int64)
+
+    case = _case(rewrites_declared_inputs, name="rewrites_declared_inputs")
+    holder["case"] = case
+
+    with pytest.raises(SpineError, match="inputs.*content"):
+        run_dependency_locality(case)
 
 
 @pytest.mark.parametrize(
@@ -733,7 +756,9 @@ def test_witness_owns_immutable_nonaliased_arrays_and_mapping():
     changed = _readonly([7, 3, 11, 13, 5, 17], np.int64)
     baseline = _readonly(2, np.int64)
     expected = _readonly(7, np.int64)
-    witness = _witness({"x": changed}, baseline, expected)
+    source_inputs = {"x": changed}
+    witness = _witness(source_inputs, baseline, expected)
+    source_inputs.clear()
 
     assert not np.shares_memory(witness.changed_inputs["x"], changed)
     assert not np.shares_memory(witness.expected_baseline, baseline)

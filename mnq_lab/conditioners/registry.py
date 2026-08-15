@@ -24,6 +24,7 @@ from mnq_lab.core.dependency import (
     DependencyFailure,
     DeterministicWitness,
     OutputKind,
+    _snapshot_declaration_content,
     run_dependency_locality,
     run_deterministic_witness,
 )
@@ -45,28 +46,47 @@ __all__ = [
     "register_descriptive_conditioner",
 ]
 
-_DeclarationSnapshot = tuple[tuple[str, Any], ...]
+_DeclarationSnapshot = tuple[tuple[str, Any, Any], ...]
+
+
+def _snapshot_registry_field_content(value: Any) -> Any:
+    if isinstance(value, (DependencyCase, DeterministicWitness)):
+        return ("identity", type(value), id(value))
+    return _snapshot_declaration_content(value)
 
 
 def _snapshot_declaration(value: Any) -> _DeclarationSnapshot:
-    """Capture every dataclass field identity before admission code executes."""
+    """Capture every dataclass field identity and structural content."""
 
     return tuple(
-        (field.name, getattr(value, field.name)) for field in fields(value)
+        (
+            field.name,
+            getattr(value, field.name),
+            _snapshot_registry_field_content(getattr(value, field.name)),
+        )
+        for field in fields(value)
     )
 
 
 def _snapshot_field(snapshot: _DeclarationSnapshot, name: str) -> Any:
-    return next(value for field, value in snapshot if field == name)
+    return next(value for field, value, _ in snapshot if field == name)
 
 
 def _assert_declaration_snapshot(
     value: Any, snapshot: _DeclarationSnapshot, context: str
 ) -> None:
-    for field, expected in snapshot:
+    for field, expected, expected_content in snapshot:
         if getattr(value, field) is not expected:
             raise SpineError(
                 f"{context} changed snapshotted field {field!r} before execution"
+            )
+        if (
+            _snapshot_registry_field_content(getattr(value, field))
+            != expected_content
+        ):
+            raise SpineError(
+                f"{context} changed snapshotted field {field!r} content "
+                "before execution"
             )
 
 
@@ -201,8 +221,9 @@ class ConditionerDescriptor:
     """Retrieval view immutable through supported Python operations.
 
     Direct same-process mutation of an already-stored descriptor through
-    ``object.__setattr__`` or a mapping proxy's referent is outside the registry
-    threat model; Python object encapsulation is not a security boundary.
+    ``object.__setattr__`` or a mapping proxy's referent is outside the
+    supported retrieval-integrity guarantee; Python object encapsulation does
+    not provide process isolation.
     """
 
     identifier: str
@@ -246,11 +267,12 @@ def _make_descriptor(
 class ConditionerRegistry:
     """One insertion-ordered namespace shared by both classifications.
 
-    Caller-controlled declarations supplied to the public causal-admission API
-    are in scope for the complete transaction, including mutation attempted
-    through ``object.__setattr__`` while suite code runs. Direct access to
-    name-mangled registry storage or already-stored descriptors remains outside
-    the boundary because Python object encapsulation is not process isolation.
+    Snapshotted declaration identities and structural content supplied to the
+    public causal-admission API are rechecked before their execution and after
+    each dependency callable returns. Direct access to name-mangled registry
+    storage or already-stored descriptors remains outside the supported
+    retrieval-integrity guarantee because Python object encapsulation does not
+    provide process isolation.
     """
 
     __slots__ = (

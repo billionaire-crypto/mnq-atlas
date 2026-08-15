@@ -628,6 +628,37 @@ def test_every_declared_locality_case_executes_before_atomic_insertion():
     assert registry.entries() == ()
 
 
+def test_execution_refuses_cross_case_invoke_swap_before_locality():
+    registry = ConditionerRegistry()
+    holder = {}
+
+    def substitute(call):
+        return _synthetic_sum(call)
+
+    def conditioner(call):
+        if int(call.coordinates_ns[0]) == 10:
+            object.__setattr__(holder["second"], "invoke", substitute)
+        return _synthetic_sum(call)
+
+    first = _case(conditioner, name="invoke_swap_first")
+    second = _case(
+        conditioner,
+        name="invoke_swap_second",
+        coordinates=[100, 110, 120, 130, 140, 150],
+    )
+    holder["second"] = second
+
+    with pytest.raises(SpineError, match="exact conditioner.*execution"):
+        _register_causal(
+            registry,
+            conditioner,
+            locality_cases=(first, second),
+            witness_checks=(WitnessCheck(first, _witness()),),
+            negative_controls=_negative_controls(first),
+        )
+    assert registry.entries() == ()
+
+
 def test_every_declared_witness_executes_before_atomic_insertion():
     registry = ConditionerRegistry()
 
@@ -653,6 +684,82 @@ def test_every_declared_witness_executes_before_atomic_insertion():
             locality_cases=(first, second),
             witness_checks=checks,
             negative_controls=_negative_controls(first),
+        )
+    assert registry.entries() == ()
+
+
+def test_execution_refuses_invoke_swap_before_witness():
+    registry = ConditionerRegistry()
+    holder = {}
+
+    def substitute(call):
+        return _synthetic_sum(call)
+
+    def conditioner(call):
+        if int(call.coordinates_ns[0]) == 100:
+            object.__setattr__(holder["first"], "invoke", substitute)
+        return _synthetic_sum(call)
+
+    first = _case(conditioner, name="witness_swap_target")
+    second = _case(
+        conditioner,
+        name="witness_swap_trigger",
+        coordinates=[100, 110, 120, 130, 140, 150],
+    )
+    holder["first"] = first
+
+    with pytest.raises(SpineError, match="witness.*exact conditioner.*execution"):
+        _register_causal(
+            registry,
+            conditioner,
+            locality_cases=(first, second),
+            witness_checks=(WitnessCheck(first, _witness()),),
+            negative_controls=_negative_controls(second),
+        )
+    assert registry.entries() == ()
+
+
+def test_execution_refuses_invoke_swap_before_negative_control():
+    registry = ConditionerRegistry()
+    holder = {}
+
+    def substitute_future_read(call):
+        return np.asarray(call.values["x"][2], dtype=np.int64)
+
+    def conditioner(call):
+        object.__setattr__(
+            holder["control"], "invoke", substitute_future_read
+        )
+        return _synthetic_sum(call)
+
+    primary = _case(conditioner, name="control_swap_trigger")
+
+    def original_future_read(call):
+        return np.asarray(call.values["x"][2], dtype=np.int64)
+
+    control_case = _case(original_future_read, name="control_swap_target")
+    holder["control"] = control_case
+    locality_control = NegativeControl(
+        name="control_swap_target",
+        failure=NegativeControlFailure.LOCALITY_OUTPUT_CHANGE,
+        case=control_case,
+    )
+    witness_control = NegativeControl(
+        name="independent_wrong_witness",
+        failure=NegativeControlFailure.WITNESS_CHANGED_OUTPUT,
+        case=_case(_synthetic_sum, name="independent_wrong_witness"),
+        witness=_witness(
+            expected_changed=14, name="independent_wrong_witness"
+        ),
+    )
+
+    with pytest.raises(SpineError, match="negative control.*invoke.*execution"):
+        _register_causal(
+            registry,
+            conditioner,
+            locality_cases=(primary,),
+            witness_checks=(WitnessCheck(primary, _witness()),),
+            negative_controls=(locality_control, witness_control),
         )
     assert registry.entries() == ()
 

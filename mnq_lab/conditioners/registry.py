@@ -302,14 +302,32 @@ class ConditionerRegistry:
                 witness_checks,
                 negative_controls,
             )
+            control_invokes = tuple(control.case.invoke for control in controls)
             self.__require_available(exact_identifier, exact_conditioner)
             self.__admission_in_progress = True
             try:
                 for case in cases:
+                    if case.invoke is not exact_conditioner:
+                        raise SpineError(
+                            f"locality case {case.name!r} no longer invokes "
+                            "the exact conditioner callable at execution"
+                        )
                     run_dependency_locality(case)
                 for check in checks:
+                    if check.case.invoke is not exact_conditioner:
+                        raise SpineError(
+                            f"witness {check.witness.name!r} case no longer "
+                            "invokes the exact conditioner callable at execution"
+                        )
                     run_deterministic_witness(check.case, check.witness)
-                for control in controls:
+                for control, expected_invoke in zip(
+                    controls, control_invokes, strict=True
+                ):
+                    if control.case.invoke is not expected_invoke:
+                        raise SpineError(
+                            f"negative control {control.name!r} case invoke "
+                            "identity changed before execution"
+                        )
                     _run_negative_control(control)
             finally:
                 self.__admission_in_progress = False

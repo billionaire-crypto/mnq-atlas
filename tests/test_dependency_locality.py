@@ -354,6 +354,22 @@ def test_dependency_execution_refuses_case_input_mapping_content_rewrite():
         run_dependency_locality(case)
 
 
+def test_locality_refuses_forbidden_regions_with_zero_mutation_trials():
+    case = _case(
+        lambda call: np.asarray(1, dtype=np.int64),
+        name="vacuous_locality_run",
+    )
+    backing = next(
+        referent
+        for referent in gc.get_referents(case.inputs)
+        if isinstance(referent, dict)
+    )
+    backing.clear()
+
+    with pytest.raises(SpineError, match="zero mutation trials"):
+        run_dependency_locality(case)
+
+
 @pytest.mark.parametrize(
     ("coordinates", "allowed", "message"),
     [

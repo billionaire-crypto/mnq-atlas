@@ -759,6 +759,12 @@ def run_dependency_locality(case: DependencyCase) -> LocalityReport:
         region_sizes.append(int(region.size))
         changed_counts.append(region_changed)
 
+    if trial_count == 0:
+        raise SpineError(
+            f"case {snapshot.name!r} executed zero mutation trials for "
+            "declared out-of-window regions"
+        )
+
     return LocalityReport(
         case_name=snapshot.name,
         forbidden_region_count=len(regions),

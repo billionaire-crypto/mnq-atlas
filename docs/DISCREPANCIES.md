@@ -2262,3 +2262,77 @@ This correction changes admission enforcement, its negative tests and the
 append-only record only. It is not self-ratification and does not authorize a
 new phase checkpoint. **Status:** `OPEN; CORRECTED PENDING FOCUSED INDEPENDENT
 RE-AUDIT`. Stage E remains blocked.
+
+---
+
+## D40. D18 focused re-audit remains OPEN: mutable declaration content and vacuous locality coverage
+
+**Independent follow-up.** The focused review of `16efe2c` confirmed that the
+D39 six-field comparison-policy correction is structurally sound. Roughly
+twenty failure-seeking variations were all refused and left the registry empty.
+The follow-up nevertheless found two separate declaration-content and coverage
+gaps. D18 and Stage E therefore remain open and blocked respectively.
+
+**F-6 (HIGH) — mapping content could change without changing mapping
+identity.** At `16efe2c`, `DependencyCase.inputs` and
+`DeterministicWitness.changed_inputs` were read-only `MappingProxyType` views
+over copied ordinary dictionaries (`mnq_lab/core/dependency.py:204,311`), but
+the backing dictionaries remained reachable in-process. Dependency execution
+and registry admission reasserted only object identity
+(`dependency.py:418-426`; `mnq_lab/conditioners/registry.py:51-70`). Replacing a
+mapping value therefore left every identity check unchanged. A deterministic
+witness with a deliberately wrong expected result of `9999.0` instead of the
+true `1010.0` was repaired during an earlier suite call by substituting its
+declared input array, and the resulting suite was stored as CAUSAL and
+confirmation-eligible. The identical declaration without that substitution
+was correctly refused. The arrays themselves remained immutable; the gap was
+the mapping content.
+
+The correction retains constructor-owned mappings and immutable, non-aliased
+array copies (`dependency.py:216-246,258-284,338-377`) and adds structural
+content snapshots covering mapping keys plus array dtype, shape and bytes
+(`dependency.py:47-87,287-321`; `registry.py:48-89`). Identity and content are
+now reasserted at the existing dependency-call and registry-phase boundaries
+(`dependency.py:476-500`; `registry.py:75-89`). Negative tests demonstrate
+both a case-input content rewrite during dependency execution and a
+wrong-witness repair during causal admission; both failed before the correction
+and pass only when the rewrite is refused.
+
+**F-7 (MEDIUM) — zero probes could produce a successful locality report.** At
+`16efe2c`, `run_dependency_locality` iterated input names from the live mapping
+and returned a report without requiring any probe to have run
+(`dependency.py:633-694`). Emptying the backing mapping after baseline
+evaluation yielded `mutation_trial_count == 0`,
+`forbidden_region_count == 2`, and `changed_value_counts == (0, 0)` while the
+runner reported success. The runner now raises whenever declared forbidden
+regions would produce zero mutation trials (`dependency.py:701-770`), with a
+negative test that failed before and passes after the correction. A report can
+no longer claim locality coverage that was not executed.
+
+**Existing checks prevented stored admission of a genuinely out-of-window
+callable.** Three independent requirements held: a witness must reference the
+same object as a declared locality case (`registry.py:547-555`), witness input
+names must exactly match case input names (`dependency.py:777-788`), and a
+witness must change at least one in-window value (`dependency.py:822-824`).
+Together they refused the reproduced genuinely out-of-window callable despite
+the zero-probe locality report. This defence-in-depth result does not excuse
+F-6 or F-7; it limits their observed effect.
+
+**Integrity-boundary wording corrected.** D39 and the former registry
+docstring described caller declarations as protected for the complete
+transaction. Identity checks could not support that statement for mutable
+mapping content. The implementation now checks identity and structural content,
+and `registry.py:267-276` states the exact enforcement points: before a
+declaration's execution and after each dependency callable returns. Direct
+same-process modification of name-mangled registry storage or an already-stored
+descriptor remains outside the supported retrieval-integrity guarantee. This
+is an offline scientific self-check boundary concerned with correctness and
+reproducibility.
+
+**Scope and status.** No currently registered first-party measurement function
+performs either rewrite, and no published number, scientific artifact,
+threshold or tolerance is affected. No data store was rebuilt and no
+production or calibration phase was rerun. This correction changes future
+admission enforcement, its negative tests and the append-only record only. It
+is not self-ratification and does not authorize Stage E. **Status:** `OPEN;
+CORRECTED PENDING FOCUSED INDEPENDENT RE-AUDIT`. Stage E remains blocked.

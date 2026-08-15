@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from enum import Enum
 from numbers import Real
 from types import MappingProxyType
-from typing import Any
+from typing import Any, NamedTuple
 
 import numpy as np
 
@@ -242,6 +242,28 @@ class DependencyCase:
         object.__setattr__(self, "inputs", inputs)
 
 
+class _DependencyCaseSnapshot(NamedTuple):
+    """Every executable declaration field, captured before caller code runs."""
+
+    name: str
+    coordinates_ns: np.ndarray
+    allowed_dependency_mask: np.ndarray
+    inputs: Mapping[str, np.ndarray]
+    invoke: Callable[[DependencyInputs], Any]
+    comparison: OutputComparison
+
+
+def _snapshot_dependency_case(case: DependencyCase) -> _DependencyCaseSnapshot:
+    return _DependencyCaseSnapshot(
+        name=case.name,
+        coordinates_ns=case.coordinates_ns,
+        allowed_dependency_mask=case.allowed_dependency_mask,
+        inputs=case.inputs,
+        invoke=case.invoke,
+        comparison=case.comparison,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class LocalityReport:
     """Diagnostic facts from one executed locality run; never admission proof."""
@@ -383,91 +405,69 @@ def _compare_outputs(
 
 
 def _fresh_invocation(
-    case: DependencyCase,
-    declared_inputs: Mapping[str, np.ndarray],
+    snapshot: _DependencyCaseSnapshot,
     values: Mapping[str, np.ndarray],
 ) -> DependencyInputs:
-    coordinates = _immutable_copy(case.coordinates_ns)
+    coordinates = _immutable_copy(snapshot.coordinates_ns)
     fresh_values = {
-        name: _immutable_copy(np.asarray(values[name])) for name in declared_inputs
+        name: _immutable_copy(np.asarray(values[name])) for name in snapshot.inputs
     }
     return DependencyInputs(coordinates, MappingProxyType(fresh_values))
 
 
 def _assert_case_execution_snapshot(
     case: DependencyCase,
-    allowed_dependency_mask: np.ndarray,
-    declared_inputs: Mapping[str, np.ndarray],
-    invoke: Callable[[DependencyInputs], Any],
+    snapshot: _DependencyCaseSnapshot,
 ) -> None:
-    snapshots = (
-        ("allowed_dependency_mask", allowed_dependency_mask),
-        ("inputs", declared_inputs),
-        ("invoke", invoke),
-    )
-    for field, expected in snapshots:
+    for field, expected in zip(snapshot._fields, snapshot, strict=True):
         if getattr(case, field) is not expected:
             raise SpineError(
-                f"case {case.name!r} changed snapshotted field {field!r} "
+                f"case {snapshot.name!r} changed snapshotted field {field!r} "
                 "during dependency execution"
             )
 
 
 def _invoke_once(
     case: DependencyCase,
-    allowed_dependency_mask: np.ndarray,
-    declared_inputs: Mapping[str, np.ndarray],
-    invoke: Callable[[DependencyInputs], Any],
+    snapshot: _DependencyCaseSnapshot,
     values: Mapping[str, np.ndarray],
     context: str,
 ) -> np.ndarray:
-    call = _fresh_invocation(case, declared_inputs, values)
+    call = _fresh_invocation(snapshot, values)
     coordinate_snapshot = call.coordinates_ns.tobytes(order="C")
     value_snapshots = {
         name: array.tobytes(order="C") for name, array in call.values.items()
     }
     try:
-        raw_output = invoke(call)
+        raw_output = snapshot.invoke(call)
     except Exception as exc:
-        raise SpineError(f"case {case.name!r} callable raised: {exc}") from exc
-    _assert_case_execution_snapshot(
-        case, allowed_dependency_mask, declared_inputs, invoke
-    )
+        raise SpineError(
+            f"case {snapshot.name!r} callable raised: {exc}"
+        ) from exc
+    _assert_case_execution_snapshot(case, snapshot)
     if call.coordinates_ns.tobytes(order="C") != coordinate_snapshot:
-        raise SpineError(f"case {case.name!r} callable mutated coordinates_ns")
+        raise SpineError(
+            f"case {snapshot.name!r} callable mutated coordinates_ns"
+        )
     for name, array in call.values.items():
         if array.tobytes(order="C") != value_snapshots[name]:
-            raise SpineError(f"case {case.name!r} callable mutated input {name!r}")
-    return _validate_output(raw_output, case.comparison, context)
+            raise SpineError(
+                f"case {snapshot.name!r} callable mutated input {name!r}"
+            )
+    return _validate_output(raw_output, snapshot.comparison, context)
 
 
 def _invoke_stably(
     case: DependencyCase,
-    allowed_dependency_mask: np.ndarray,
-    declared_inputs: Mapping[str, np.ndarray],
-    invoke: Callable[[DependencyInputs], Any],
+    snapshot: _DependencyCaseSnapshot,
     values: Mapping[str, np.ndarray],
     context: str,
 ) -> np.ndarray:
-    first = _invoke_once(
-        case,
-        allowed_dependency_mask,
-        declared_inputs,
-        invoke,
-        values,
-        context,
-    )
-    second = _invoke_once(
-        case,
-        allowed_dependency_mask,
-        declared_inputs,
-        invoke,
-        values,
-        context,
-    )
+    first = _invoke_once(case, snapshot, values, context)
+    second = _invoke_once(case, snapshot, values, context)
     if not _bit_identical(first, second):
         raise SpineError(
-            f"case {case.name!r} produced nondeterministic output on "
+            f"case {snapshot.name!r} produced nondeterministic output on "
             "identical fresh inputs"
         )
     return first
@@ -640,18 +640,14 @@ def run_dependency_locality(case: DependencyCase) -> LocalityReport:
 
     if not isinstance(case, DependencyCase):
         raise SpineError("case must be a DependencyCase")
-    allowed_dependency_mask = case.allowed_dependency_mask
-    declared_inputs = case.inputs
-    invoke = case.invoke
+    snapshot = _snapshot_dependency_case(case)
     baseline = _invoke_stably(
         case,
-        allowed_dependency_mask,
-        declared_inputs,
-        invoke,
-        declared_inputs,
+        snapshot,
+        snapshot.inputs,
         "baseline",
     )
-    regions = _forbidden_regions(allowed_dependency_mask)
+    regions = _forbidden_regions(snapshot.allowed_dependency_mask)
     if not regions:
         raise SpineError("dependency case has no out-of-window region")
 
@@ -661,9 +657,9 @@ def run_dependency_locality(case: DependencyCase) -> LocalityReport:
     trial_count = 0
     for region_index, region in enumerate(regions):
         region_changed = 0
-        for input_name in declared_inputs:
+        for input_name in snapshot.inputs:
             trials = _region_mutation_trials(
-                declared_inputs, region, input_name, rng
+                snapshot.inputs, region, input_name, rng
             )
             for probe_name, mutated, changed in trials:
                 context = (
@@ -672,9 +668,7 @@ def run_dependency_locality(case: DependencyCase) -> LocalityReport:
                 )
                 output = _invoke_stably(
                     case,
-                    allowed_dependency_mask,
-                    declared_inputs,
-                    invoke,
+                    snapshot,
                     mutated,
                     context,
                 )
@@ -682,7 +676,7 @@ def run_dependency_locality(case: DependencyCase) -> LocalityReport:
                     _compare_outputs(
                         output,
                         baseline,
-                        case.comparison,
+                        snapshot.comparison,
                         context,
                         DependencyCheck.LOCALITY,
                     )
@@ -690,7 +684,7 @@ def run_dependency_locality(case: DependencyCase) -> LocalityReport:
                     raise DependencyCheckError(
                         exc.check,
                         exc.failure,
-                        f"case {case.name!r}: {context} changed output: {exc}",
+                        f"case {snapshot.name!r}: {context} changed output: {exc}",
                     ) from exc
                 region_changed += changed
                 trial_count += 1
@@ -698,7 +692,7 @@ def run_dependency_locality(case: DependencyCase) -> LocalityReport:
         changed_counts.append(region_changed)
 
     return LocalityReport(
-        case_name=case.name,
+        case_name=snapshot.name,
         forbidden_region_count=len(regions),
         forbidden_region_sizes=tuple(region_sizes),
         changed_value_counts=tuple(changed_counts),
@@ -707,11 +701,11 @@ def run_dependency_locality(case: DependencyCase) -> LocalityReport:
 
 
 def _validated_witness_inputs(
-    case: DependencyCase, witness: DeterministicWitness
+    snapshot: _DependencyCaseSnapshot, witness: DeterministicWitness
 ) -> tuple[Mapping[str, np.ndarray], int]:
     if not isinstance(witness.changed_inputs, Mapping) or set(
         witness.changed_inputs
-    ) != set(case.inputs):
+    ) != set(snapshot.inputs):
         raise SpineError(
             "witness changed_inputs must have exactly the same names as "
             "the dependency case inputs"
@@ -719,7 +713,7 @@ def _validated_witness_inputs(
 
     validated: dict[str, np.ndarray] = {}
     changed_count = 0
-    for name, baseline in case.inputs.items():
+    for name, baseline in snapshot.inputs.items():
         raw = _require_readonly_array(
             witness.changed_inputs[name], f"witness input {name!r}"
         )
@@ -742,7 +736,7 @@ def _validated_witness_inputs(
             ],
             dtype=np.bool_,
         )
-        forbidden_change = changed & ~case.allowed_dependency_mask
+        forbidden_change = changed & ~snapshot.allowed_dependency_mask
         if np.any(forbidden_change):
             index = int(np.flatnonzero(forbidden_change)[0])
             raise SpineError(
@@ -781,7 +775,7 @@ def _validated_affected_index(
 
 
 def _validated_witness_expectations(
-    case: DependencyCase, witness: DeterministicWitness
+    snapshot: _DependencyCaseSnapshot, witness: DeterministicWitness
 ) -> tuple[np.ndarray, np.ndarray, tuple[int, ...]]:
     raw_baseline = _require_readonly_array(
         witness.expected_baseline, "witness expected_baseline"
@@ -790,10 +784,10 @@ def _validated_witness_expectations(
         witness.expected_changed, "witness expected_changed"
     )
     expected_baseline = _validate_output(
-        raw_baseline, case.comparison, "witness expected_baseline"
+        raw_baseline, snapshot.comparison, "witness expected_baseline"
     )
     expected_changed = _validate_output(
-        raw_changed, case.comparison, "witness expected_changed"
+        raw_changed, snapshot.comparison, "witness expected_changed"
     )
     if expected_baseline.shape != expected_changed.shape:
         raise SpineError("witness expected outputs must have the same shape")
@@ -805,7 +799,7 @@ def _validated_witness_expectations(
 
     baseline_value = expected_baseline[index]
     changed_value = expected_changed[index]
-    if case.comparison.kind is not OutputKind.FLOAT:
+    if snapshot.comparison.kind is not OutputKind.FLOAT:
         if not _element_changed(baseline_value, changed_value):
             raise SpineError(
                 "witness is vacuous at the required affected output element"
@@ -814,11 +808,11 @@ def _validated_witness_expectations(
 
     baseline_wide = np.longdouble(baseline_value)
     changed_wide = np.longdouble(changed_value)
-    baseline_band = np.longdouble(case.comparison.atol) + np.longdouble(
-        case.comparison.rtol
+    baseline_band = np.longdouble(snapshot.comparison.atol) + np.longdouble(
+        snapshot.comparison.rtol
     ) * np.abs(baseline_wide)
-    changed_band = np.longdouble(case.comparison.atol) + np.longdouble(
-        case.comparison.rtol
+    changed_band = np.longdouble(snapshot.comparison.atol) + np.longdouble(
+        snapshot.comparison.rtol
     ) * np.abs(changed_wide)
     separation = np.abs(changed_wide - baseline_wide)
     if not separation > baseline_band + changed_band:
@@ -841,45 +835,39 @@ def run_deterministic_witness(
     if not isinstance(witness.name, str) or not witness.name:
         raise SpineError("witness name must be a non-empty string")
 
-    allowed_dependency_mask = case.allowed_dependency_mask
-    declared_inputs = case.inputs
-    invoke = case.invoke
-    changed_inputs, changed_count = _validated_witness_inputs(case, witness)
+    snapshot = _snapshot_dependency_case(case)
+    changed_inputs, changed_count = _validated_witness_inputs(snapshot, witness)
     expected_baseline, expected_changed, index = _validated_witness_expectations(
-        case, witness
+        snapshot, witness
     )
     baseline_output = _invoke_stably(
         case,
-        allowed_dependency_mask,
-        declared_inputs,
-        invoke,
-        declared_inputs,
+        snapshot,
+        snapshot.inputs,
         "witness baseline",
     )
     changed_output = _invoke_stably(
         case,
-        allowed_dependency_mask,
-        declared_inputs,
-        invoke,
+        snapshot,
         changed_inputs,
         "witness changed",
     )
     _compare_outputs(
         baseline_output,
         expected_baseline,
-        case.comparison,
+        snapshot.comparison,
         "witness baseline",
         DependencyCheck.WITNESS_BASELINE,
     )
     _compare_outputs(
         changed_output,
         expected_changed,
-        case.comparison,
+        snapshot.comparison,
         "witness changed",
         DependencyCheck.WITNESS_CHANGED,
     )
     return WitnessReport(
-        case_name=case.name,
+        case_name=snapshot.name,
         witness_name=witness.name,
         changed_input_count=changed_count,
         affected_output_index=index,

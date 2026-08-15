@@ -9,7 +9,7 @@ added separately behind the ratified executed-suite boundary.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from enum import Enum
 import math
 from threading import RLock
@@ -44,6 +44,30 @@ __all__ = [
     "register_causal_conditioner",
     "register_descriptive_conditioner",
 ]
+
+_DeclarationSnapshot = tuple[tuple[str, Any], ...]
+
+
+def _snapshot_declaration(value: Any) -> _DeclarationSnapshot:
+    """Capture every dataclass field identity before admission code executes."""
+
+    return tuple(
+        (field.name, getattr(value, field.name)) for field in fields(value)
+    )
+
+
+def _snapshot_field(snapshot: _DeclarationSnapshot, name: str) -> Any:
+    return next(value for field, value in snapshot if field == name)
+
+
+def _assert_declaration_snapshot(
+    value: Any, snapshot: _DeclarationSnapshot, context: str
+) -> None:
+    for field, expected in snapshot:
+        if getattr(value, field) is not expected:
+            raise SpineError(
+                f"{context} changed snapshotted field {field!r} before execution"
+            )
 
 
 class ConditionerClass(Enum):
@@ -312,45 +336,108 @@ class ConditionerRegistry:
                 witness_checks,
                 negative_controls,
             )
-            control_invokes = tuple(control.case.invoke for control in controls)
+            case_snapshots = tuple(
+                _snapshot_declaration(case) for case in cases
+            )
+            check_snapshots = tuple(
+                (
+                    _snapshot_declaration(check),
+                    _snapshot_declaration(check.case),
+                    _snapshot_declaration(check.witness),
+                )
+                for check in checks
+            )
+            control_snapshots = tuple(
+                (
+                    _snapshot_declaration(control),
+                    _snapshot_declaration(control.case),
+                    None
+                    if control.witness is None
+                    else _snapshot_declaration(control.witness),
+                )
+                for control in controls
+            )
+            comparison_policies = tuple(
+                RegisteredComparison(
+                    case_name=_snapshot_field(snapshot, "name"),
+                    kind=_snapshot_field(snapshot, "comparison").kind,
+                    atol=_snapshot_field(snapshot, "comparison").atol,
+                    rtol=_snapshot_field(snapshot, "comparison").rtol,
+                )
+                for snapshot in case_snapshots
+            )
             self.__require_available(exact_identifier, exact_conditioner)
             self.__admission_in_progress = True
             try:
-                for case in cases:
+                for case, snapshot in zip(cases, case_snapshots, strict=True):
                     if case.invoke is not exact_conditioner:
                         raise SpineError(
-                            f"locality case {case.name!r} no longer invokes "
+                            f"locality case {_snapshot_field(snapshot, 'name')!r} "
+                            "no longer invokes "
                             "the exact conditioner callable at execution"
                         )
+                    _assert_declaration_snapshot(
+                        case,
+                        snapshot,
+                        f"locality case {_snapshot_field(snapshot, 'name')!r}",
+                    )
                     run_dependency_locality(case)
-                for check in checks:
+                for check, snapshots in zip(
+                    checks, check_snapshots, strict=True
+                ):
+                    check_snapshot, case_snapshot, witness_snapshot = snapshots
+                    _assert_declaration_snapshot(
+                        check,
+                        check_snapshot,
+                        "witness check",
+                    )
                     if check.case.invoke is not exact_conditioner:
                         raise SpineError(
-                            f"witness {check.witness.name!r} case no longer "
+                            f"witness {_snapshot_field(witness_snapshot, 'name')!r} "
+                            "case no longer "
                             "invokes the exact conditioner callable at execution"
                         )
+                    _assert_declaration_snapshot(
+                        check.case,
+                        case_snapshot,
+                        f"witness {_snapshot_field(witness_snapshot, 'name')!r} case",
+                    )
+                    _assert_declaration_snapshot(
+                        check.witness,
+                        witness_snapshot,
+                        f"witness {_snapshot_field(witness_snapshot, 'name')!r}",
+                    )
                     run_deterministic_witness(check.case, check.witness)
-                for control, expected_invoke in zip(
-                    controls, control_invokes, strict=True
+                for control, snapshots in zip(
+                    controls, control_snapshots, strict=True
                 ):
+                    control_snapshot, case_snapshot, witness_snapshot = snapshots
+                    control_name = _snapshot_field(control_snapshot, "name")
+                    _assert_declaration_snapshot(
+                        control,
+                        control_snapshot,
+                        f"negative control {control_name!r}",
+                    )
+                    expected_invoke = _snapshot_field(case_snapshot, "invoke")
                     if control.case.invoke is not expected_invoke:
                         raise SpineError(
-                            f"negative control {control.name!r} case invoke "
+                            f"negative control {control_name!r} case invoke "
                             "identity changed before execution"
+                        )
+                    _assert_declaration_snapshot(
+                        control.case,
+                        case_snapshot,
+                        f"negative control {control_name!r} case",
+                    )
+                    if witness_snapshot is not None:
+                        _assert_declaration_snapshot(
+                            control.witness,
+                            witness_snapshot,
+                            f"negative control {control_name!r} witness",
                         )
                     _run_negative_control(control)
             finally:
                 self.__admission_in_progress = False
-
-            comparison_policies = tuple(
-                RegisteredComparison(
-                    case_name=case.name,
-                    kind=case.comparison.kind,
-                    atol=case.comparison.atol,
-                    rtol=case.comparison.rtol,
-                )
-                for case in cases
-            )
             descriptor = _make_descriptor(
                 identifier=exact_identifier,
                 conditioner=exact_conditioner,

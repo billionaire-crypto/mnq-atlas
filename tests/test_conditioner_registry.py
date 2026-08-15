@@ -585,6 +585,93 @@ def test_causal_admission_refuses_mask_widening_even_when_trace_is_erased():
     assert registry.entries() == ()
 
 
+def test_causal_admission_refuses_bounded_comparison_widening():
+    registry = ConditionerRegistry()
+    holder = {}
+    widened = OutputComparison(OutputKind.FLOAT, atol=2.2)
+
+    def bounded_future_read(call):
+        object.__setattr__(holder["case"], "comparison", widened)
+        values = call.values["x"]
+        return np.asarray(
+            values[0] + values[1] + values[4] + np.tanh(values[2]),
+            dtype=np.float64,
+        )
+
+    case = DependencyCase(
+        name="bounded_comparison_widening",
+        coordinates_ns=_readonly([10, 20, 30, 40, 50, 60], np.int64),
+        allowed_dependency_mask=_readonly(
+            [True, True, False, False, True, False], np.bool_
+        ),
+        inputs={"x": _readonly([2, 3, 11, 13, 5, 17], np.float64)},
+        invoke=bounded_future_read,
+        comparison=OutputComparison(OutputKind.FLOAT),
+    )
+    holder["case"] = case
+    changed = _readonly([7, 3, 11, 13, 5, 17], np.float64)
+    witness = DeterministicWitness(
+        name="bounded_comparison_change",
+        changed_inputs={"x": changed},
+        expected_baseline=_readonly(10.0 + np.tanh(11.0), np.float64),
+        expected_changed=_readonly(15.0 + np.tanh(11.0), np.float64),
+        affected_output_index=(),
+    )
+
+    def future_read(call):
+        return np.asarray(call.values["x"][2], dtype=np.float64)
+
+    locality_control = NegativeControl(
+        name="bounded_comparison_future_read",
+        failure=NegativeControlFailure.LOCALITY_OUTPUT_CHANGE,
+        case=DependencyCase(
+            name="bounded_comparison_future_read",
+            coordinates_ns=case.coordinates_ns,
+            allowed_dependency_mask=case.allowed_dependency_mask,
+            inputs=case.inputs,
+            invoke=future_read,
+            comparison=OutputComparison(OutputKind.FLOAT),
+        ),
+    )
+
+    def allowed_sum(call):
+        values = call.values["x"]
+        return np.asarray(values[0] + values[1] + values[4], dtype=np.float64)
+
+    witness_control_case = DependencyCase(
+        name="bounded_comparison_wrong_witness",
+        coordinates_ns=case.coordinates_ns,
+        allowed_dependency_mask=case.allowed_dependency_mask,
+        inputs=case.inputs,
+        invoke=allowed_sum,
+        comparison=OutputComparison(OutputKind.FLOAT),
+    )
+    witness_control = NegativeControl(
+        name="bounded_comparison_wrong_witness",
+        failure=NegativeControlFailure.WITNESS_CHANGED_OUTPUT,
+        case=witness_control_case,
+        witness=DeterministicWitness(
+            name="bounded_comparison_wrong_witness",
+            changed_inputs={"x": changed},
+            expected_baseline=_readonly(10.0, np.float64),
+            expected_changed=_readonly(14.0, np.float64),
+            affected_output_index=(),
+        ),
+    )
+
+    with pytest.raises(SpineError, match="comparison"):
+        register_causal_conditioner(
+            registry,
+            "synthetic.causal.bounded_comparison_widening",
+            bounded_future_read,
+            metadata={"purpose": "bounded comparison attack"},
+            locality_cases=(case,),
+            witness_checks=(WitnessCheck(case, witness),),
+            negative_controls=(locality_control, witness_control),
+        )
+    assert registry.entries() == ()
+
+
 def test_failed_witness_leaves_registry_unchanged():
     registry = ConditionerRegistry()
 
@@ -649,6 +736,35 @@ def test_execution_refuses_cross_case_invoke_swap_before_locality():
     holder["second"] = second
 
     with pytest.raises(SpineError, match="exact conditioner.*execution"):
+        _register_causal(
+            registry,
+            conditioner,
+            locality_cases=(first, second),
+            witness_checks=(WitnessCheck(first, _witness()),),
+            negative_controls=_negative_controls(first),
+        )
+    assert registry.entries() == ()
+
+
+def test_execution_refuses_cross_case_comparison_swap_before_locality():
+    registry = ConditionerRegistry()
+    holder = {}
+    replacement = OutputComparison(OutputKind.INTEGER)
+
+    def conditioner(call):
+        if int(call.coordinates_ns[0]) == 10:
+            object.__setattr__(holder["second"], "comparison", replacement)
+        return _synthetic_sum(call)
+
+    first = _case(conditioner, name="comparison_swap_first")
+    second = _case(
+        conditioner,
+        name="comparison_swap_second",
+        coordinates=[100, 110, 120, 130, 140, 150],
+    )
+    holder["second"] = second
+
+    with pytest.raises(SpineError, match="comparison.*execution"):
         _register_causal(
             registry,
             conditioner,

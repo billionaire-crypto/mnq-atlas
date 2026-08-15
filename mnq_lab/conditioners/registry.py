@@ -174,7 +174,12 @@ class RegisteredComparison:
 
 @dataclass(frozen=True, slots=True, init=False)
 class ConditionerDescriptor:
-    """Immutable retrieval view of one stored registry entry."""
+    """Retrieval view immutable through supported Python operations.
+
+    Deliberate same-process bypasses such as ``object.__setattr__`` and
+    extracting a mapping proxy's referent are outside the registry threat
+    model; Python object encapsulation is not treated as a security boundary.
+    """
 
     identifier: str
     conditioner: Callable[..., Any]
@@ -215,7 +220,12 @@ def _make_descriptor(
 
 
 class ConditionerRegistry:
-    """One insertion-ordered namespace shared by both classifications."""
+    """One insertion-ordered namespace shared by both classifications.
+
+    The supported API and in-suite execution paths are the enforcement
+    boundary.  Deliberate access to name-mangled storage is outside the threat
+    model because name mangling is not a same-process security boundary.
+    """
 
     __slots__ = (
         "__entries",

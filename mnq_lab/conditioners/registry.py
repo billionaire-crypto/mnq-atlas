@@ -200,9 +200,9 @@ class RegisteredComparison:
 class ConditionerDescriptor:
     """Retrieval view immutable through supported Python operations.
 
-    Deliberate same-process bypasses such as ``object.__setattr__`` and
-    extracting a mapping proxy's referent are outside the registry threat
-    model; Python object encapsulation is not treated as a security boundary.
+    Direct same-process mutation of an already-stored descriptor through
+    ``object.__setattr__`` or a mapping proxy's referent is outside the registry
+    threat model; Python object encapsulation is not a security boundary.
     """
 
     identifier: str
@@ -246,9 +246,11 @@ def _make_descriptor(
 class ConditionerRegistry:
     """One insertion-ordered namespace shared by both classifications.
 
-    The supported API and in-suite execution paths are the enforcement
-    boundary.  Deliberate access to name-mangled storage is outside the threat
-    model because name mangling is not a same-process security boundary.
+    Caller-controlled declarations supplied to the public causal-admission API
+    are in scope for the complete transaction, including mutation attempted
+    through ``object.__setattr__`` while suite code runs. Direct access to
+    name-mangled registry storage or already-stored descriptors remains outside
+    the boundary because Python object encapsulation is not process isolation.
     """
 
     __slots__ = (

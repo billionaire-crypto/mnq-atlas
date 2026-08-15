@@ -2193,3 +2193,72 @@ calendar/provenance disclosures with zero effect on a computed result. Stage E
 remains blocked, and this entry does not authorize any new phase checkpoint or
 production work. **Status:** `OPEN; CORRECTED PENDING FOCUSED INDEPENDENT
 RE-AUDIT`.
+
+---
+
+## D39. D18 focused re-audit remains OPEN: comparison-policy admission bypass
+
+**Independent verdict.** The focused independent re-audit of candidate
+`7319f8929b29cab85e08535f88213973114d35e7` returned `OPEN`. Every defence
+implemented in D38 held under attack, all seven D38 negative tests were genuine,
+the D38 append and evidence-pin chain were correct, and both authorized
+regressions passed. The auditor nevertheless admitted one genuinely
+out-of-window callable through the ordinary public causal-registration API by
+mutating an unsnapshotted sibling field. D18 and Stage E therefore remain open
+and blocked respectively.
+
+**F-5 (CRITICAL) — comparison policy was reread after caller execution.** The
+D38 remediation snapshotted `allowed_dependency_mask`, `inputs` and `invoke`,
+but not `comparison`. On the audited candidate,
+`mnq_lab/core/dependency.py:676` executed the caller and
+`dependency.py:686` later reread `case.comparison`. A conditioner computing
+`x[0] + x[1] + x[4] + tanh(x[2])`, where index 2 was declared out of window,
+replaced its exact floating comparison with `atol=2.2` during its first call.
+Because the planted leak is bounded, all probe deviations were absorbed by the
+widened policy. Registration stored a CAUSAL, confirmation-eligible descriptor
+with one locality case, one witness and two negative controls. The identical
+conditioner without the swap was correctly refused. Restoring the exact policy
+after registration erased the declaration mutation from the case.
+
+The candidate descriptor did preserve a partial forensic trace by recording
+the widened `atol=2.2`, but no gate cross-checked that record against the
+pre-suite declaration. This trace did not prevent admission and is not a
+defence. The defect affects the guard for future registrations. All 35 existing
+Phase 7 conditioners are first-party, none performs the swap, and no published
+number or scientific artifact is contaminated.
+
+**Exhaustive correction.** A `DependencyCase` execution snapshot now enumerates
+all six fields: `name`, `coordinates_ns`, `allowed_dependency_mask`, `inputs`,
+`invoke` and `comparison` (`dependency.py:245-264`). Locality and deterministic
+witness execution use only that snapshot for invocation inputs, validation,
+comparison, diagnostics and reports, and reassert every field identity after
+each callable invocation (`dependency.py:418-450,633-712,826-884`). No
+post-caller `case.*` reread remains outside the initial snapshot operation.
+
+The registry also snapshots every dataclass field of each locality case,
+witness declaration and negative control before the first suite callable runs
+(`mnq_lab/conditioners/registry.py:51-70,341-369`). It reasserts those complete
+declarations at each execution phase, preventing one case or control from
+rewriting a later declaration. Stored comparison-policy evidence is constructed
+from the pre-suite snapshots rather than live cases. Negative tests reproduce
+both the bounded self-widening admission and a cross-case comparison replacement;
+each failed on `7319f89` and passes only after the correction.
+
+**Threat boundary corrected, superseding D38's overbroad wording.**
+Caller-controlled declarations submitted through the public causal-admission
+API are in scope for the entire admission transaction, including mutations
+attempted with `object.__setattr__` while caller suite code runs. This is the
+boundary enforced by the F-1, F-2 and F-5 snapshots and rechecks. Direct
+same-process mutation of name-mangled registry storage or an already-stored
+descriptor remains outside the enforceable boundary: F-3 and F-4 remain
+reachable and recorded limitations because Python object encapsulation is not
+process isolation. The distinction is now stated at
+`registry.py:200-208,246-256`. D38 remains byte-immutable; this entry corrects
+its broader statement rather than rewriting history.
+
+**Scope and status.** No store was rebuilt, no production or calibration phase
+was rerun, and no artifact, threshold, tolerance or published result changed.
+This correction changes admission enforcement, its negative tests and the
+append-only record only. It is not self-ratification and does not authorize a
+new phase checkpoint. **Status:** `OPEN; CORRECTED PENDING FOCUSED INDEPENDENT
+RE-AUDIT`. Stage E remains blocked.

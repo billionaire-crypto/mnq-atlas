@@ -2401,3 +2401,45 @@ reimplement Stage E and does not begin a new phase.
 **Final status.** D18 is `CLOSED` by this recorded independent ruling. D38,
 D39 and D40 remain immutable historical records of the successive OPEN
 findings and corrections that led to this closure.
+
+---
+
+## D42. D19 calendar-artifact audit CLOSED and C-2 extension tripwire recorded
+
+**Independent verdict.** D19 is now `CLOSED`. The committed CME equity-index
+calendar artifact under
+`mnq_lab/spine/calendar_inputs/cme_equity_index_v1/` received an independent
+audit with verdict `PASS WITH FINDINGS`. The audit recomputed the retained
+source-tree hash and the complete 47-file per-file index and found both to
+match. It corroborated to the minute against the exploration store all nine
+full closures and all 33 scheduled early closes: 25 at 12:00 CT, seven at
+12:15 CT, and the single 08:15 CT close on 2021-04-02.
+
+The same audit found exactly two regular sessions that did not end at 16:00
+CT, `20200228` and `20200630`, matching D19's disclosure, and found zero
+unaccounted-for weekday gaps. It reproduced the complete population
+reconciliation with no residual: 1,018 calendar weekdays to 1,009 observed
+sessions after nine full closures; 1,005 after the four recorded schedule
+exclusions; 972 regular full-RTH sessions after removing the 33 scheduled
+early closes; 902 after removing 70 holiday-adjacent regular sessions; and 900
+after removing the two unresolved truncated sessions. It independently
+recomputed `holiday_adjacent` as 82 dates, set-identical to the committed
+column.
+
+**Findings retained.** The `PASS WITH FINDINGS` verdict does not supersede
+C-1, C-2, C-3, C-5 or C-6. Those five findings remain permanently recorded in
+D38. None affects a computed result.
+
+**C-2 forward guard.** This calendar version is correct for its declared
+`2019-05-06..2023-03-29` range but would classify July 3 incorrectly if the
+range were extended without reviewing
+`USIndependenceDayBefore2022PreviousDay`: CME equity index closed at 12:15 CT
+on 2023-07-03, which this version does not model. A negative tripwire in
+`tests/test_phase7_calendar_input.py` now fixes the minimum and maximum session
+identifiers at `20190506` and `20230329` and requires review of that rule before
+any extension. The committed calendar artifact remains unchanged.
+
+**Scope and status.** No data store was rebuilt, no phase was rerun, and no
+scientific artifact, threshold or tolerance changed. D19 is `CLOSED` by the
+independent calendar-artifact audit; the five retained findings remain
+disclosures with zero effect on a computed result.

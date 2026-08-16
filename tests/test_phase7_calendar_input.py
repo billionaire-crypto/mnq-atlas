@@ -294,6 +294,18 @@ def test_calendar_artifact_hashes_and_json_are_canonical():
         assert payload == _canonical(json.loads(payload.decode("utf-8"))), path
 
 
+def test_calendar_coverage_range_requires_independence_day_rule_review():
+    session_ids = [row["trade_date"] for row in _rows()]
+    message = (
+        "extending the calendar range requires reviewing the "
+        "USIndependenceDayBefore2022PreviousDay rule first because CME "
+        "equity index closed 12:15 CT on 2023-07-03 and this calendar "
+        "version does not model it"
+    )
+    assert min(session_ids) == 20190506, message
+    assert max(session_ids) == 20230329, message
+
+
 def test_historical_ledger_binding_negative_controls(monkeypatch):
     entry = load_calendar_entry()
     historical = _historical_discrepancies_blob()

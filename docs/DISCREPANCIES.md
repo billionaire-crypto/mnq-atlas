@@ -2336,3 +2336,68 @@ production or calibration phase was rerun. This correction changes future
 admission enforcement, its negative tests and the append-only record only. It
 is not self-ratification and does not authorize Stage E. **Status:** `OPEN;
 CORRECTED PENDING FOCUSED INDEPENDENT RE-AUDIT`. Stage E remains blocked.
+
+---
+
+## D41. D18 conditioner-registry record CLOSED after focused independent re-check
+
+**Independent ruling.** The focused independent re-check reviewed
+`16efe2c..796f731`, comprising exactly these four commits in order:
+`30ee84b` (declaration content integrity), `1bbdb42` (vacuous locality
+refusal), `e518410` (comparison-guard test isolation), and `796f731` (D40 and
+its evidence-pin amendment). It returned:
+
+> PASS — D18 focused conditioner-registry re-check complete. The
+> declaration-content and zero-trial corrections are sound, the D40 evidence
+> chain is valid, and no published result is affected. Stage E may proceed
+> only after the project owner records this independent ruling.
+
+**D18 closure.** D18 is now `CLOSED`. The Stage D admission-gate findings D-1
+(prose-based failure recognition) and D-2 (zero-evidence insertion), and the
+follow-on findings F-5 (comparison policy), F-6 (mapping content), and F-7
+(vacuous locality coverage), are corrected and independently re-verified. The
+closure is recorded on the strength of the independent ruling and its direct
+reproductions, not merely because implementation-authored tests passed.
+
+**Retrospective scientific validity.** The reviewer re-executed the complete
+admission suites for all 35 real Phase 7 measurement functions under the
+corrected gate. `build_phase7_registry()` produced 35 specifications; all 35
+were admitted and remained confirmation-eligible. The defective gate therefore
+admitted no real Phase 7 function that the corrected gate rejects. No
+scientific artifact, threshold, tolerance or published result is
+retroactively invalidated or changed. No data store was rebuilt, no published
+number was recomputed, and no phase was rerun for this closure.
+
+**Residual limitations, not defects.** The independent ruling states three
+boundaries that remain part of the record:
+
+1. Only the four authorized test files were run during the independent
+   re-check. Its focused run could not detect a regression outside those
+   files. The full suite was clean at the prior head with `1759 passed, 2
+   skipped, 1 xfailed`.
+2. `_assert_case_execution_snapshot` currently iterates
+   `snapshot._fields[:-1]` and relies on `field_contents` remaining the last
+   `NamedTuple` field. That is correct for the present declaration shape; a
+   field appended after `field_contents` would be silently omitted from the
+   identity pass.
+3. Declaration-content snapshotting falls back to identity for callables, so
+   mutable internal state carried by a callable is identity-checked only.
+   Callable closure state is not a declaration; this is the intended boundary
+   of the guarantee, not a gap in the self-check.
+
+**Governance reconciliation.** `docs/PHASE6.md:263` says that Phase 7 and S01A
+were unauthorized and had not begun. That sentence was true when the Phase 6
+closeout was written and is now stale: Phases 7 through 10 subsequently ran
+under their recorded authorizations. The historical Phase 6 document remains
+unchanged; this entry records the later state rather than rewriting it.
+
+The integrated Stage E gate was committed at `8118a9c` and independently
+returned `CLOSED` during the Phase 6 sequence. At the same time, D18's
+append-only admission record continued to state that Stage E was blocked while
+the conditioner-registry findings awaited focused review. Both facts are
+retained here in their recorded order. This D41 closure does not rerun or
+reimplement Stage E and does not begin a new phase.
+
+**Final status.** D18 is `CLOSED` by this recorded independent ruling. D38,
+D39 and D40 remain immutable historical records of the successive OPEN
+findings and corrections that led to this closure.

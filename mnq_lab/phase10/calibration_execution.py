@@ -52,6 +52,12 @@ _THREAD_VARIABLES = (
     "NUMEXPR_NUM_THREADS",
     "PYTHONHASHSEED",
 )
+_PROCESS_THREAD_VARIABLES = (
+    "OMP_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+)
 
 
 @dataclass(frozen=True)
@@ -365,6 +371,17 @@ def _initial_attempts(
     return tuple(result)
 
 
+def _require_parallel_thread_limits(worker_count: int) -> None:
+    if worker_count == 1:
+        return
+    if any(os.environ.get(name) != "1" for name in _PROCESS_THREAD_VARIABLES):
+        raise SpineError(
+            "parallel calibration execution requires OMP_NUM_THREADS, "
+            "MKL_NUM_THREADS, OPENBLAS_NUM_THREADS, and NUMEXPR_NUM_THREADS "
+            "to each equal '1'; export them in the environment before launch"
+        )
+
+
 def _execute_calibration_indices(
     request: CalibrationEvidenceRequest,
     checkpoint: CalibrationCheckpointStore,
@@ -372,14 +389,15 @@ def _execute_calibration_indices(
     permutation_count: int,
     worker_count: int,
 ) -> None:
+    if isinstance(worker_count, bool) or not isinstance(worker_count, int) or worker_count <= 0:
+        raise SpineError("calibration execution worker count must be positive")
+    _require_parallel_thread_limits(worker_count)
     authorized_indices = _initial_attempts(
         checkpoint,
         indices,
         request.failure_evidence_resolver,
         request.attempt_label,
     )
-    if isinstance(worker_count, bool) or not isinstance(worker_count, int) or worker_count <= 0:
-        raise SpineError("calibration execution worker count must be positive")
     if worker_count == 1:
         for index in authorized_indices:
             attempt = checkpoint.start_attempt(index, request.attempt_label)

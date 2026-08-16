@@ -16,7 +16,12 @@ from mnq_lab.phase10.calibration_checkpoint import (
     FailureEvidence,
 )
 import mnq_lab.phase10.calibration_execution as execution_module
-from mnq_lab.phase10.calibration_execution import CorpusExecutionIdentity
+from mnq_lab.phase10.calibration_execution import (
+    CalibrationEvidenceRequest,
+    CalibrationRunCompletion,
+    CorpusExecutionIdentity,
+)
+from mnq_lab.phase10.calibration_controls import CALIBRATION_REPLICATIONS
 from mnq_lab.phase10.calibration_results import (
     canonical_scientific_payload_bytes,
     seal_scientific_payload,
@@ -28,6 +33,18 @@ from tests.test_phase10_calibration_controls import _fixture
 from tests.test_phase10_calibration_orchestration import _environment
 
 _production_compute_verified = execution_module._compute_verified
+_production_inventory_assertion = execution_module.assert_complete_replication_inventory
+_PROCESS_THREAD_VARIABLES = (
+    "OMP_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+)
+_THREAD_LIMIT_ERROR = (
+    "parallel calibration execution requires OMP_NUM_THREADS, MKL_NUM_THREADS, "
+    "OPENBLAS_NUM_THREADS, and NUMEXPR_NUM_THREADS to each equal '1'; export "
+    "them in the environment before launch"
+)
 
 
 def _synthetic_compute_verified(
@@ -73,6 +90,90 @@ def _request(corpus, environment, corpus_identity):
         failure_evidence_resolver=lambda _context: None,
         attempt_label="synthetic-science",
     )
+
+
+def _export_thread_limits(monkeypatch) -> None:
+    for name in _PROCESS_THREAD_VARIABLES:
+        monkeypatch.setenv(name, "1")
+
+
+class _NoWorkExecutor:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, _exception_type, _exception, _traceback):
+        return False
+
+
+def _parallel_thread_limit_outcome(monkeypatch, settings, worker_count=2):
+    for name in _PROCESS_THREAD_VARIABLES:
+        monkeypatch.delenv(name, raising=False)
+    for name, value in settings.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(execution_module, "_initial_attempts", lambda *_args: ())
+    monkeypatch.setattr(
+        execution_module,
+        "ProcessPoolExecutor",
+        lambda **_kwargs: _NoWorkExecutor(),
+    )
+    request = SimpleNamespace(
+        expected_environment=SimpleNamespace(process_start_method="spawn"),
+        failure_evidence_resolver=lambda _context: None,
+        attempt_label="thread-limit-witness",
+    )
+    try:
+        execution_module._execute_calibration_indices(
+            request,
+            object(),
+            (),
+            4999,
+            worker_count,
+        )
+    except SpineError as exc:
+        return str(exc)
+    return None
+
+
+@pytest.mark.parametrize(
+    ("settings", "expected_outcome"),
+    (
+        pytest.param({}, _THREAD_LIMIT_ERROR, id="all-unset"),
+        pytest.param(
+            {name: "1" for name in _PROCESS_THREAD_VARIABLES},
+            None,
+            id="all-one",
+        ),
+        pytest.param(
+            {name: "8" for name in _PROCESS_THREAD_VARIABLES},
+            _THREAD_LIMIT_ERROR,
+            id="all-eight",
+        ),
+        *(
+            pytest.param(
+                {
+                    name: ("8" if name == changed_name else "1")
+                    for name in _PROCESS_THREAD_VARIABLES
+                },
+                _THREAD_LIMIT_ERROR,
+                id=f"{changed_name}-eight",
+            )
+            for changed_name in _PROCESS_THREAD_VARIABLES
+        ),
+    ),
+)
+def test_parallel_execution_requires_all_thread_limits_exactly_one(
+    monkeypatch,
+    settings,
+    expected_outcome,
+):
+    assert (
+        _parallel_thread_limit_outcome(monkeypatch, settings)
+        == expected_outcome
+    )
+
+
+def test_serial_execution_permits_unset_thread_limits(monkeypatch):
+    assert _parallel_thread_limit_outcome(monkeypatch, {}, worker_count=1) is None
 
 
 def _bind_small_execution(monkeypatch, permutation_count):
@@ -135,6 +236,7 @@ def test_serial_parallel_interrupted_and_resumed_scientific_bytes_match(
     monkeypatch,
     tmp_path,
 ):
+    _export_thread_limits(monkeypatch)
     environment, corpus_identity = _bind_small_execution(monkeypatch, 2)
     corpus, _ = _fixture()
 
@@ -175,6 +277,148 @@ def test_serial_parallel_interrupted_and_resumed_scientific_bytes_match(
         )
 
     _assert_four_way_scientific_bytes(build, tmp_path)
+
+
+def test_execute_calibration_request_completes_all_300_indices(
+    monkeypatch,
+    tmp_path,
+):
+    corpus, _ = _fixture()
+    corpus = replace(
+        corpus,
+        reconciliation=replace(corpus.reconciliation, formal_sessions=900),
+    )
+    environment = replace(
+        _environment(),
+        worker_count=1,
+        calibration_root_label=execution_module.CALIBRATION_ROOT_LABEL,
+        calibration_root_digest=execution_module.CALIBRATION_ROOT_SHA256,
+    )
+    corpus_identity = CorpusExecutionIdentity(
+        environment.corpus_manifest_sha256,
+        environment.corpus_column_sha256,
+    )
+    checkpoint_root = tmp_path / "full-wrapper"
+    request = CalibrationEvidenceRequest(
+        corpus=corpus,
+        corpus_identity=corpus_identity,
+        expected_environment=environment,
+        checkpoint_root=checkpoint_root,
+        resume=False,
+        attempt_label="full-wrapper",
+        failure_evidence_resolver=lambda _context: None,
+    )
+    observed_indices = []
+    constructed_checkpoints = []
+
+    class FastCheckpointStore:
+        def __init__(self, root, expected_environment, *, resume):
+            self.root = root
+            self.expected_environment = expected_environment
+            self.resume = resume
+            self.results = {}
+            self.attempts = {}
+            self.recover_calls = 0
+            constructed_checkpoints.append(self)
+
+        def recover(self):
+            self.recover_calls += 1
+            completed = tuple(
+                (index, self.results[index].scientific_payload_hash)
+                for index in sorted(self.results)
+            )
+            never_started = tuple(
+                index
+                for index in range(CALIBRATION_REPLICATIONS)
+                if index not in self.results and index not in self.attempts
+            )
+            return SimpleNamespace(
+                completed=completed,
+                never_started=never_started,
+                attempted=(),
+            )
+
+        def start_attempt(self, index, attempt_label):
+            attempt = AttemptRecord(
+                index,
+                0,
+                (f"{attempt_label}:attempt-0",),
+                (),
+            )
+            self.attempts[index] = attempt
+            return attempt
+
+        def completed_result(self, index):
+            return self.results.get(index)
+
+        def commit_replication(self, result):
+            self.results[result.scientific_payload.replication_index] = result
+
+    def fast_verified(
+        _corpus,
+        _corpus_identity,
+        _expected_environment,
+        index,
+        attempt_lineage,
+        classified_failures,
+        permutation_count,
+    ):
+        observed_indices.append(index)
+        return SimpleNamespace(
+            scientific_payload=SimpleNamespace(
+                replication_index=index,
+                permutations=permutation_count,
+                attempt_lineage=attempt_lineage,
+                classified_failures=classified_failures,
+            ),
+            scientific_payload_hash=f"{index:064x}",
+        )
+
+    inventory_calls = []
+    inventory_errors = []
+
+    def tracked_inventory(indices):
+        values = tuple(indices)
+        inventory_calls.append(values)
+        try:
+            _production_inventory_assertion(values)
+        except SpineError as exc:
+            inventory_errors.append(str(exc))
+
+    monkeypatch.setattr(execution_module, "_compute_verified", fast_verified)
+    monkeypatch.setattr(
+        execution_module,
+        "validate_scientific_payload",
+        lambda payload: payload,
+    )
+    monkeypatch.setattr(
+        execution_module,
+        "CalibrationCheckpointStore",
+        FastCheckpointStore,
+    )
+    monkeypatch.setattr(
+        execution_module,
+        "assert_complete_replication_inventory",
+        tracked_inventory,
+    )
+
+    completion = execution_module.execute_calibration_request(request)
+    expected_indices = tuple(range(CALIBRATION_REPLICATIONS))
+    assert tuple(observed_indices) == expected_indices
+    assert inventory_calls == [expected_indices]
+    assert inventory_errors == []
+    assert isinstance(completion, CalibrationRunCompletion)
+    assert tuple(index for index, _hash in completion.payload_hashes) == expected_indices
+    assert len(completion.payload_hashes) == CALIBRATION_REPLICATIONS
+    assert completion.declared_denominator == CALIBRATION_REPLICATIONS
+    assert len(constructed_checkpoints) == 1
+    checkpoint = constructed_checkpoints[0]
+    assert checkpoint.root == checkpoint_root
+    assert checkpoint.expected_environment == environment
+    assert checkpoint.resume is False
+    assert checkpoint.recover_calls == 2
+    assert tuple(sorted(checkpoint.results)) == expected_indices
+    assert len(checkpoint.results) == CALIBRATION_REPLICATIONS
 
 
 def test_changed_resumed_science_fails_the_same_four_way_witness(tmp_path):

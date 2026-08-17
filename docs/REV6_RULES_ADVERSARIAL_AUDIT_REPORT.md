@@ -666,8 +666,11 @@ python -m pytest tests --ignore=tests/test_bootstrap_acceptance.py -q
 1772 passed, 2 skipped, 1 xfailed in 423.38s (0:07:03)
 ```
 
-The bootstrap acceptance file was neither collected nor run in either suite. Final
-sealed-store comparison follows after the mandated detached-checkout verification.
+The bootstrap acceptance file was neither collected nor run in either suite. The
+mandated final detached-checkout verification again found 3,303 files and 36,589,608
+bytes with path/content manifest SHA-256
+`8934d19c29315312384571fedcce8d4769fb76a1cffcc3998650d7e07a9886b7`, identical to
+the before value.
 
 ## 7. Residual classification
 
